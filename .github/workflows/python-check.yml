@@ -1,0 +1,7 @@
+name: Check Python Status
+on:
+  - pull_request
+
+jobs:
+  check:
+    uses: synodic-software/.github/.github/workflows/python-check.yml@stable
