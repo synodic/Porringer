@@ -1,7 +1,7 @@
 
 [project]
 description = ""
-license = "MIT"
+license = {text = "MIT"}
 name = "porringer"
 
 authors = [
@@ -14,7 +14,7 @@ dynamic = ["version"]
 requires-python = ">=3.11"
 
 dependencies = [
-  "pydantic>=2.0b3",
+  "pydantic>=2.1",
   "porringer-core>=0.0.0",
 ]
 
@@ -22,11 +22,8 @@ dependencies = [
 paths = ["LICENSE.md"]
 
 [project.urls]
-homepage = "https://github.com/Synodic-Software/Porringer-Core"
-repository = "https://github.com/Synodic-Software/Porringer-Core"
-
-[tool.pdm]
-version = {use_scm = true}
+homepage = "https://github.com/Synodic-Software/Porringer"
+repository = "https://github.com/Synodic-Software/Porringer"
 
 [tool.pdm.options]
 update = ["--update-all"]
@@ -35,7 +32,7 @@ update = ["--update-all"]
 lint = [
   "black>=23.1.0",
   "isort>=5.10.1",
-  "mypy>=1.3.0",
+  "mypy>=1.4.0",
   "pylint>=2.16.1",
 ]
 test = [
