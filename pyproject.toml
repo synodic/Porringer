@@ -49,6 +49,9 @@ sort-imports = {shell = "isort --check-only --diff --verbose ."}
 test = {shell = "pytest --cov=porringer --verbose tests"}
 type-check = {shell = "mypy ."}
 
+[project.scripts]
+porringer = "porringer.application.click:application"
+
 [tool.pytest.ini_options]
 log_cli = true
 testpaths = [
