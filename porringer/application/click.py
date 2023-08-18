@@ -1,14 +1,12 @@
 """Click CLI Application"""
 import click
 
-from porringer.client import Client
-
 
 class Configuration:
     """Click configuration object"""
 
     def __init__(self) -> None:
-        self.client = Client()
+        pass
 
 
 # Attach our config object to click's hook
@@ -25,4 +23,3 @@ def application(config: Configuration) -> None:
     Args:
         config: The CLI configuration object
     """
-    assert config.client
