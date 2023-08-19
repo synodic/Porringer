@@ -14,3 +14,11 @@ class TestCLI:
 
         assert result.exit_code == 0
         assert result.output
+
+    def test_verbosity(self) -> None:
+        """_summary_"""
+        runner = CliRunner()
+        result = runner.invoke(application, ["-v", "self"])
+
+        assert result.exit_code == 0
+        assert not result.output
