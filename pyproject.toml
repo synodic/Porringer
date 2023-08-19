@@ -1,8 +1,9 @@
 
 [project]
-name = "porringer"
 description = ""
-license = "MIT"
+name = "porringer"
+
+license = {text = "MIT"}
 
 authors = [
   {name = "Synodic Software", email = "contact@synodic.software"},
@@ -14,31 +15,34 @@ dynamic = ["version"]
 requires-python = ">=3.11"
 
 dependencies = [
-  "pydantic>=2.0b3",
-  "porringer-core>=0.0.0"
+  "pydantic>=2.2",
+  "porringer-core>=0.0.0",
 ]
 
 [project.license-files]
 paths = ["LICENSE.md"]
 
 [project.urls]
-homepage = "https://github.com/Synodic-Software/Porringer-Core"
-repository = "https://github.com/Synodic-Software/Porringer-Core"
+homepage = "https://github.com/Synodic-Software/Porringer"
+repository = "https://github.com/Synodic-Software/Porringer"
 
-[tool.pdm]
-version = {use_scm = true}
+[tool.pdm.options]
+update = ["--update-all"]
+
+[tool.pdm.version]
+source = "scm"
+
 [tool.pdm.dev-dependencies]
 lint = [
-  "black>=23.1.0",
-  "isort>=5.10.1",
-  "mypy>=1.3.0",
-  "pylint>=2.16.1",
+  "black>= 23.7.0 ",
+  "isort>=5.12.0",
+  "mypy>=1.5.1 ",
+  "pylint>=2.17.5",
 ]
 test = [
-  "pytest>=7.1.2",
-  "pytest-cov>=4.0.0",
-  "tomlkit>=0.11.4",
-  "pytest-mock>=3.10.0",
+  "pytest>=7.4.0",
+  "pytest-cov>=4.1.0",
+  "pytest-mock>=3.11.1",
 ]
 
 [tool.pdm.scripts]
@@ -48,6 +52,9 @@ lint = {composite = ["analyze", "format", "sort-imports", "type-check"]}
 sort-imports = {shell = "isort --check-only --diff --verbose ."}
 test = {shell = "pytest --cov=porringer --verbose tests"}
 type-check = {shell = "mypy ."}
+
+[project.scripts]
+porringer = "porringer.application.click:application"
 
 [tool.pytest.ini_options]
 log_cli = true
@@ -92,5 +99,5 @@ default-docstring-type = "google"
 skip_empty = true
 
 [build-system]
-build-backend = "pdm.pep517.api"
-requires = ["pdm-pep517"]
+build-backend = "pdm.backend"
+requires = ["pdm.backend"]
