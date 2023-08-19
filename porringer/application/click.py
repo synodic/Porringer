@@ -39,3 +39,4 @@ def self_group(config: Configuration) -> None:
     Args:
         config: _description_
     """
+    assert not config.debug
