@@ -12,6 +12,7 @@ class Configuration:
 
     debug: bool
     logger: logging.Logger
+    update_check: bool = True
 
 
 # Attach our config object to click's hook
@@ -36,12 +37,16 @@ def application(config: Configuration, verbose: int, debug: bool) -> None:
     config.logger = logging.getLogger("porringer")
 
     handler = logging.StreamHandler()
+
+    # TODO: Properly set verbosity
     handler.setLevel(verbose)
 
     # Add handler to the logger
     config.logger.addHandler(handler)
 
     # TODO: Run a self update check
+    if config.update_check:
+        pass
 
 
 @application.group(name="self", invoke_without_command=True)
@@ -52,7 +57,7 @@ def self_group() -> None:
 @self_group.command(name="update")
 @pass_config
 def self_update(config: Configuration) -> None:
-    """_summary_
+    """Updates
 
     Raises:
         NotImplementedError: Not implemented
@@ -64,3 +69,15 @@ def self_update(config: Configuration) -> None:
         call(["pipx", "upgrade", "porringer"], config.logger)
     else:
         raise NotImplementedError()
+
+
+@self_group.command(name="check")
+@pass_config
+def self_check(config: Configuration) -> None:
+    """Checks for an update
+
+    Raises:
+        NotImplementedError: Not implemented
+    Args:
+        config: _description_
+    """
