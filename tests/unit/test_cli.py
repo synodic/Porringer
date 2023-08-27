@@ -15,10 +15,10 @@ class TestCLI:
         assert result.exit_code == 0
         assert result.output
 
-    def test_verbosity(self) -> None:
+    def test_self_update(self) -> None:
         """_summary_"""
         runner = CliRunner()
-        result = runner.invoke(application, ["-v", "self"])
+        result = runner.invoke(application, ["self", "update"])
 
         assert result.exit_code == 0
         assert not result.output

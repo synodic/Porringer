@@ -1,13 +1,17 @@
 """Click CLI Application"""
+import logging
+
 import click
-from pydantic import BaseModel, Field
+from synodic_utilities.subprocess import call
+
+from porringer.application.version import is_pipx_installation
 
 
-class Configuration(BaseModel):
+class Configuration:
     """The configuration data available to the CLI application"""
 
-    debug: bool = Field(default=False, description="")
-    verbosity: int = Field(default=0, description="")
+    debug: bool
+    logger: logging.Logger
 
 
 # Attach our config object to click's hook
@@ -27,16 +31,36 @@ def application(config: Configuration, verbose: int, debug: bool) -> None:
         verbose: _description_
         debug: _description_
     """
-    config.verbosity = verbose
     config.debug = debug
+
+    config.logger = logging.getLogger("porringer")
+
+    handler = logging.StreamHandler()
+    handler.setLevel(verbose)
+
+    # Add handler to the logger
+    config.logger.addHandler(handler)
+
+    # TODO: Run a self update check
 
 
 @application.group(name="self", invoke_without_command=True)
-@pass_config
-def self_group(config: Configuration) -> None:
-    """Command group to inspect Porringer itself
+def self_group() -> None:
+    """Command group to inspect Porringer itself"""
 
+
+@self_group.command(name="update")
+@pass_config
+def self_update(config: Configuration) -> None:
+    """_summary_
+
+    Raises:
+        NotImplementedError: Not implemented
     Args:
         config: _description_
     """
-    assert not config.debug
+
+    if is_pipx_installation():
+        call(["pipx", "upgrade", "porringer"], config.logger)
+    else:
+        raise NotImplementedError()
