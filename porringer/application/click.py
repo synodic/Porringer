@@ -1,6 +1,7 @@
 """Click CLI Application"""
 import logging
-from typing import LiteralString, TypedDict
+from dataclasses import dataclass
+from typing import LiteralString
 
 import click
 from synodic_utilities.subprocess import call
@@ -8,18 +9,19 @@ from synodic_utilities.subprocess import call
 from porringer.application.version import is_pipx_installation
 
 
-class LogLevels(TypedDict):
+@dataclass
+class LogLevel:
     """Log level metadata"""
 
     name: LiteralString
     colour: str
 
 
-__levels: list[LogLevels] = [
-    LogLevels(name="ERROR", colour="red"),
-    LogLevels(name="WARNING", colour="yellow"),
-    LogLevels(name="INFO", colour="white"),
-    LogLevels(name="DEBUG", colour="orange"),
+_levels: list[LogLevel] = [
+    LogLevel(name="ERROR", colour="red"),
+    LogLevel(name="WARNING", colour="yellow"),
+    LogLevel(name="INFO", colour="white"),
+    LogLevel(name="DEBUG", colour="bright_white"),
 ]
 
 
@@ -35,8 +37,8 @@ class ClickHandler(logging.Handler):
         Args:
             record: _description_
         """
-
-        click.secho(record, fg=__levels[record.levelname])
+        level = next(level for level in _levels if level.name == record.levelname)
+        click.secho(record, fg=level.colour)
 
 
 class Configuration:
@@ -55,10 +57,10 @@ class Configuration:
         Args:
             verbosity: _description_
         """
-        clamped = verbosity >= len(__levels)
-        verbosity = min(verbosity, len(__levels) - 1)
+        clamped = verbosity >= len(_levels)
+        verbosity = min(verbosity, len(_levels) - 1)
 
-        name = __levels[verbosity].name
+        name = _levels[verbosity].name
         self.logger.setLevel(name)
 
         if clamped:

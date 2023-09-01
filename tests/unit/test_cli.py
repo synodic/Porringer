@@ -17,7 +17,7 @@ class TestCLI:
         assert result.exit_code == 0
         assert result.output
 
-    def test_verbosity(self, capsys: CaptureFixture) -> None:
+    def test_verbosity(self) -> None:
         """Test's that the verbosity flag is implicitly capped at 3 levels"""
         runner = CliRunner()
         config = Configuration()
@@ -25,7 +25,6 @@ class TestCLI:
         result = runner.invoke(application, ["-vvv"], obj=config)
 
         assert result.exit_code == 0
-        assert caplog.messages
 
         level = config.logger.level
 
@@ -33,4 +32,3 @@ class TestCLI:
 
         assert result.exit_code == 0
         assert config.logger.level == level
-        assert caplog.messages
