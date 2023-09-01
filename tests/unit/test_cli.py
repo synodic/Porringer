@@ -1,4 +1,5 @@
 """Test the click cli"""
+
 from click.testing import CliRunner
 
 from porringer.application.click import Configuration, application
@@ -16,20 +17,20 @@ class TestCLI:
         assert result.exit_code == 0
         assert result.output
 
-    def test_self_check(self) -> None:
-        """_summary_"""
+    def test_verbosity(self, capsys: CaptureFixture) -> None:
+        """Test's that the verbosity flag is implicitly capped at 3 levels"""
         runner = CliRunner()
         config = Configuration()
-        result = runner.invoke(application, ["self", "check"], obj=config)
+
+        result = runner.invoke(application, ["-vvv"], obj=config)
 
         assert result.exit_code == 0
-        assert not result.output
+        assert caplog.messages
 
-    def test_self_update(self) -> None:
-        """_summary_"""
-        runner = CliRunner()
-        config = Configuration()
-        result = runner.invoke(application, ["self", "update"], obj=config)
+        level = config.logger.level
+
+        result = runner.invoke(application, ["-vvvv"], obj=config)
 
         assert result.exit_code == 0
-        assert not result.output
+        assert config.logger.level == level
+        assert caplog.messages
