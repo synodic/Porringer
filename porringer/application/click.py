@@ -101,10 +101,11 @@ def self_group() -> None:
 def self_update(config: Configuration) -> None:
     """Updates
 
-    Raises:
-        NotImplementedError: Not implemented
     Args:
         config: _description_
+
+    Raises:
+        NotImplementedError: _description_
     """
 
     if is_pipx_installation():
@@ -118,8 +119,14 @@ def self_update(config: Configuration) -> None:
 def self_check(config: Configuration) -> None:
     """Checks for an update
 
-    Raises:
-        NotImplementedError: Not implemented
     Args:
         config: _description_
+
+    Raises:
+        NotImplementedError: _description_
     """
+
+    if is_pipx_installation():
+        call(["pipx", "upgrade", "porringer"], config.logger)
+    else:
+        raise NotImplementedError()
