@@ -1,0 +1,14 @@
+name: Build Documentation
+on:
+  push: 
+    branches: 
+      - '**'
+
+jobs:
+  publish_release:
+    if: github.repository_owner == 'Synodic-Software'
+    uses: synodic-software/.github/.github/workflows/documentation-trigger.yml@stable
+    with:
+        repository: Synodic-Software/Porringer-Website
+    secrets:
+        PAT: ${{ secrets.PORRINGER_DOC_PAT }}

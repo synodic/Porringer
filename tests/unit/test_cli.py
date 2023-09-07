@@ -1,7 +1,8 @@
 """Test the click cli"""
+
 from click.testing import CliRunner
 
-from porringer.application.click import application
+from porringer.application.click import Configuration, application
 
 
 class TestCLI:
@@ -10,15 +11,24 @@ class TestCLI:
     def test_version(self) -> None:
         """_summary_"""
         runner = CliRunner()
-        result = runner.invoke(application, ["--version"])
+        config = Configuration()
+        result = runner.invoke(application, ["--version"], obj=config)
 
         assert result.exit_code == 0
         assert result.output
 
     def test_verbosity(self) -> None:
-        """_summary_"""
+        """Test's that the verbosity flag is implicitly capped at 3 levels"""
         runner = CliRunner()
-        result = runner.invoke(application, ["-v", "self"])
+        config = Configuration()
+
+        result = runner.invoke(application, ["-vvv"], obj=config)
 
         assert result.exit_code == 0
-        assert not result.output
+
+        level = config.logger.level
+
+        result = runner.invoke(application, ["-vvvv"], obj=config)
+
+        assert result.exit_code == 0
+        assert config.logger.level == level
