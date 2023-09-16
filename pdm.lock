@@ -6,7 +6,7 @@ groups = ["default", "lint", "test"]
 cross_platform = true
 static_urls = false
 lock_version = "4.3"
-content_hash = "sha256:281c5bfe5aa5f9c8983a753cd61f958b0453e25f7f66fb513314e4cc74e1600a"
+content_hash = "sha256:c6aa05b0af34faa3102540c9358465d3c39f6a265dc501faf613ffde0114cf1a"
 
 [[package]]
 name = "annotated-types"
@@ -459,6 +459,19 @@ summary = "Backported and Experimental Type Hints for Python 3.7+"
 files = [
     {file = "typing_extensions-4.7.1-py3-none-any.whl", hash = "sha256:440d5dd3af93b060174bf433bccd69b0babc3b15b1a8dca43789fd7f61514b36"},
     {file = "typing_extensions-4.7.1.tar.gz", hash = "sha256:b75ddc264f0ba5615db7ba217daeb99701ad295353c45f9e95963337ceeeffb2"},
+]
+
+[[package]]
+name = "userpath"
+version = "1.9.1"
+requires_python = ">=3.7"
+summary = "Cross-platform tool for adding locations to the user PATH"
+dependencies = [
+    "click",
+]
+files = [
+    {file = "userpath-1.9.1-py3-none-any.whl", hash = "sha256:e085053e5161f82558793c41d60375289efceb4b77d96033ea9c84fc0893f772"},
+    {file = "userpath-1.9.1.tar.gz", hash = "sha256:ce8176728d98c914b6401781bf3b23fccd968d1647539c8788c7010375e02796"},
 ]
 
 [[package]]
