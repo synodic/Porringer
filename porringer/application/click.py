@@ -4,9 +4,6 @@ from dataclasses import dataclass
 from typing import LiteralString
 
 import click
-from synodic_utilities.subprocess import call
-
-from porringer.application.version import is_pipx_installation
 
 
 @dataclass
@@ -108,11 +105,6 @@ def self_update(config: Configuration) -> None:
         NotImplementedError: _description_
     """
 
-    if is_pipx_installation():
-        call(["pipx", "upgrade", "porringer"], config.logger)
-    else:
-        raise NotImplementedError()
-
 
 @self_group.command(name="check")
 @pass_config
@@ -126,7 +118,20 @@ def self_check(config: Configuration) -> None:
         NotImplementedError: _description_
     """
 
-    if is_pipx_installation():
-        call(["pipx", "upgrade", "porringer"], config.logger)
-    else:
-        raise NotImplementedError()
+
+@application.group(name="plugin", invoke_without_command=True)
+def plugin_group() -> None:
+    """Command group to inspect Porringer plugins"""
+
+
+@plugin_group.command(name="list")
+@pass_config
+def plugin_list(config: Configuration) -> None:
+    """Checks for an update
+
+    Args:
+        config: _description_
+
+    Raises:
+        NotImplementedError: _description_
+    """
