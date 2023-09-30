@@ -1,7 +1,5 @@
 """Resolves"""
 
-from logging import Logger
-
 from porringer.schema import Configuration, GlobalConfiguration, LocalConfiguration
 
 

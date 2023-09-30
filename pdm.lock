@@ -6,7 +6,7 @@ groups = ["default", "lint", "test"]
 cross_platform = true
 static_urls = false
 lock_version = "4.3"
-content_hash = "sha256:c6aa05b0af34faa3102540c9358465d3c39f6a265dc501faf613ffde0114cf1a"
+content_hash = "sha256:6c85bea9c86a4a1f78873a09afb6c94cc5c7b8f9d3f3c39da8fd442e42b0a2c0"
 
 [[package]]
 name = "annotated-types"
@@ -283,6 +283,19 @@ dependencies = [
 files = [
     {file = "porringer_core-0.1.1.dev7-py3-none-any.whl", hash = "sha256:89147ec55144b5c40836b0598b965f46ff664f1ae511d9f2dbbdfe3a82dce155"},
     {file = "porringer_core-0.1.1.dev7.tar.gz", hash = "sha256:a97bec76c33f5cf2c6336581a1aa683d537cf17f567c12af5a165675a4003460"},
+]
+
+[[package]]
+name = "porringer-pipx"
+version = "0.1.1.dev3"
+requires_python = ">=3.11"
+summary = ""
+dependencies = [
+    "porringer-core>=0.0.0",
+]
+files = [
+    {file = "porringer_pipx-0.1.1.dev3-py3-none-any.whl", hash = "sha256:c2c2388dc0c60f6653544de36bea27f5d5c0b865c8af9a8b0e5cbc2fd7614f72"},
+    {file = "porringer_pipx-0.1.1.dev3.tar.gz", hash = "sha256:504bf1c7a71a5b74260c797adf7bd2620fecc76bd97b864133092fdb32c68d0a"},
 ]
 
 [[package]]
