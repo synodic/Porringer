@@ -94,12 +94,8 @@ def self_group() -> None:
 
 
 @self_group.command(name="update")
-@pass_config
-def self_update(config: Configuration) -> None:
+def self_update() -> None:
     """Updates
-
-    Args:
-        config: _description_
 
     Raises:
         NotImplementedError: _description_
@@ -107,12 +103,8 @@ def self_update(config: Configuration) -> None:
 
 
 @self_group.command(name="check")
-@pass_config
-def self_check(config: Configuration) -> None:
+def self_check() -> None:
     """Checks for an update
-
-    Args:
-        config: _description_
 
     Raises:
         NotImplementedError: _description_
@@ -125,12 +117,8 @@ def plugin_group() -> None:
 
 
 @plugin_group.command(name="list")
-@pass_config
-def plugin_list(config: Configuration) -> None:
+def plugin_list() -> None:
     """Checks for an update
-
-    Args:
-        config: _description_
 
     Raises:
         NotImplementedError: _description_
