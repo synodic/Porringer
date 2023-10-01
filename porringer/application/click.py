@@ -4,9 +4,6 @@ from dataclasses import dataclass
 from typing import LiteralString
 
 import click
-from synodic_utilities.subprocess import call
-
-from porringer.application.version import is_pipx_installation
 
 
 @dataclass
@@ -68,6 +65,14 @@ class Configuration:
 
         self.logger.info("Logging set to %s", name)
 
+    def set_debug(self, debug: bool) -> None:
+        """Set the configuration debug state
+
+        Args:
+            debug: The value to set the debug state
+        """
+        self.debug = debug
+
 
 # Attach our config object to click's hook
 pass_config = click.make_pass_decorator(Configuration, ensure=True)
@@ -97,36 +102,32 @@ def self_group() -> None:
 
 
 @self_group.command(name="update")
-@pass_config
-def self_update(config: Configuration) -> None:
+def self_update() -> None:
     """Updates
-
-    Args:
-        config: _description_
 
     Raises:
         NotImplementedError: _description_
     """
-
-    if is_pipx_installation():
-        call(["pipx", "upgrade", "porringer"], config.logger)
-    else:
-        raise NotImplementedError()
 
 
 @self_group.command(name="check")
-@pass_config
-def self_check(config: Configuration) -> None:
+def self_check() -> None:
     """Checks for an update
-
-    Args:
-        config: _description_
 
     Raises:
         NotImplementedError: _description_
     """
 
-    if is_pipx_installation():
-        call(["pipx", "upgrade", "porringer"], config.logger)
-    else:
-        raise NotImplementedError()
+
+@application.group(name="plugin", invoke_without_command=True)
+def plugin_group() -> None:
+    """Command group to inspect Porringer plugins"""
+
+
+@plugin_group.command(name="list")
+def plugin_list() -> None:
+    """Checks for an update
+
+    Raises:
+        NotImplementedError: _description_
+    """

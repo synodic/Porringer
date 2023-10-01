@@ -1,8 +1,15 @@
-"""Test the click cli command 'self' """
-import pytest
-from click.testing import CliRunner
+"""Test the command 'self' """
+from logging import Logger
 
-from porringer.application.click import Configuration, application
+import pytest
+
+from porringer.api import API
+from porringer.schema import (
+    CheckPorringerParameters,
+    LocalConfiguration,
+    Parameters,
+    UpdatePorringerParameters,
+)
 
 
 class TestCommandSelf:
@@ -10,22 +17,22 @@ class TestCommandSelf:
 
     def test_self_update_check(self) -> None:
         """_summary_"""
-        runner = CliRunner()
-        config = Configuration()
+
+        config = LocalConfiguration()
+        parameters = Parameters(logger=Logger("test"))
+        api = API(config, parameters)
 
         with pytest.raises(NotImplementedError):
-            result = runner.invoke(application, ["self", "check"], obj=config, catch_exceptions=False)
-
-            assert result.exit_code == 0
-            assert not result.output
+            params = CheckPorringerParameters()
+            api.check_porringer(params)
 
     def test_self_update(self) -> None:
         """_summary_"""
-        runner = CliRunner()
-        config = Configuration()
+
+        config = LocalConfiguration()
+        parameters = Parameters(logger=Logger("test"))
+        api = API(config, parameters)
 
         with pytest.raises(NotImplementedError):
-            result = runner.invoke(application, ["self", "update"], obj=config, catch_exceptions=False)
-
-            assert result.exit_code == 0
-            assert not result.output
+            params = UpdatePorringerParameters()
+            api.update_porringer(params)
