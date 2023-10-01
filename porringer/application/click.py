@@ -65,6 +65,14 @@ class Configuration:
 
         self.logger.info("Logging set to %s", name)
 
+    def set_debug(self, debug: bool) -> None:
+        """Set the configuration debug state
+
+        Args:
+            debug: The value to set the debug state
+        """
+        self.debug = debug
+
 
 # Attach our config object to click's hook
 pass_config = click.make_pass_decorator(Configuration, ensure=True)

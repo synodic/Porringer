@@ -46,3 +46,20 @@ class Builder:
             raise PluginError(f"No {group_name} plugin was found")
 
         return plugin_types
+
+    def build_environments(self, environment_types: list[type[Environment]]) -> list[Environment]:
+        """Constructs environments from input types
+
+        Args:
+            environment_types: The types to construct
+
+        Returns:
+            The instantiated environments
+        """
+
+        environments: list[Environment] = []
+
+        for environment_type in environment_types:
+            environments.append(environment_type())
+
+        return environments
