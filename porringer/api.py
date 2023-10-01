@@ -1,15 +1,17 @@
 """API for Porringer"""
 
-from porringer.backend.plugin import list_plugins
+from porringer.backend.plugin import list_plugins, update_plugins
 from porringer.backend.self import check_porringer, update_porringer
 from porringer.resolver import resolve_configuration
 from porringer.schema import (
     CheckPorringerParameters,
     Configuration,
     GlobalConfiguration,
+    ListPluginResults,
     ListPluginsParameters,
     LocalConfiguration,
     Parameters,
+    UpdatePluginsParameters,
     UpdatePorringerParameters,
 )
 
@@ -37,7 +39,16 @@ class API:
         """
         check_porringer(self.parameters.logger)
 
-    def list_plugins(self, _: ListPluginsParameters) -> None:
-        """_summary"""
+    def list_plugins(self, _: ListPluginsParameters) -> list[ListPluginResults]:
+        """_summary_
 
-        list_plugins(self.parameters.logger)
+        Returns:
+            _description_
+        """
+
+        return list_plugins(self.parameters.logger)
+
+    def update_plugins(self, _: UpdatePluginsParameters) -> None:
+        """_summary_"""
+
+        update_plugins(self.parameters.logger)

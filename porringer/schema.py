@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from logging import Logger
 from pathlib import Path
 
+from packaging.version import Version
 from platformdirs import user_cache_dir, user_config_dir, user_data_dir
 from pydantic import BaseModel, DirectoryPath, Field
 
@@ -17,6 +18,22 @@ class CheckPorringerParameters(BaseModel):
 
 class ListPluginsParameters(BaseModel):
     """TODO"""
+
+
+class UpdatePluginsParameters(BaseModel):
+    """TODO"""
+
+
+@dataclass
+class ListPluginResults:
+    """_summary_
+
+    Args:
+        BaseModel: _description_
+    """
+
+    name: str
+    version: Version
 
 
 @dataclass

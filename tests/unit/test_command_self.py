@@ -1,4 +1,4 @@
-"""Test the click cli command 'self' """
+"""Test the command 'self' """
 from logging import Logger
 
 import pytest
