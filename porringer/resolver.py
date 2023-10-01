@@ -15,10 +15,10 @@ def resolve_configuration(
     Returns:
         _description_
     """
-    local_configuration.cache_directory.mkdir(parents=True)
+    local_configuration.cache_directory.mkdir(parents=True, exist_ok=True)
 
-    global_configuration.config_directory.mkdir(parents=True)
-    global_configuration.data_directory.mkdir(parents=True)
+    global_configuration.config_directory.mkdir(parents=True, exist_ok=True)
+    global_configuration.data_directory.mkdir(parents=True, exist_ok=True)
 
     return Configuration(
         cache_directory=local_configuration.cache_directory,
