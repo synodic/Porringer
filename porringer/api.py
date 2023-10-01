@@ -1,12 +1,11 @@
 """API for Porringer"""
 
 from porringer.backend.plugin import list_plugins, update_plugins
+from porringer.backend.resolver import resolve_configuration
+from porringer.backend.schema import Configuration, GlobalConfiguration
 from porringer.backend.self import check_porringer, update_porringer
-from porringer.resolver import resolve_configuration
 from porringer.schema import (
     CheckPorringerParameters,
-    Configuration,
-    GlobalConfiguration,
     ListPluginResults,
     ListPluginsParameters,
     LocalConfiguration,
@@ -49,6 +48,6 @@ class API:
         return list_plugins(self.parameters.logger)
 
     def update_plugins(self, _: UpdatePluginsParameters) -> None:
-        """_summary_"""
+        """Updates all plugins that are not managed by the application"""
 
         update_plugins(self.parameters.logger)

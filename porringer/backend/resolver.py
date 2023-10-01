@@ -1,6 +1,7 @@
 """Resolves"""
 
-from porringer.schema import Configuration, GlobalConfiguration, LocalConfiguration
+from porringer.backend.schema import Configuration, GlobalConfiguration
+from porringer.schema import LocalConfiguration
 
 
 def resolve_configuration(
