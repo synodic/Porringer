@@ -1,9 +1,9 @@
 """API for Porringer"""
 
-from porringer.backend.plugin import list_plugins, update_plugins
+from porringer.backend.command.plugin import list_plugins, update_plugins
+from porringer.backend.command.self import check_porringer, update_porringer
 from porringer.backend.resolver import resolve_configuration
 from porringer.backend.schema import Configuration, GlobalConfiguration
-from porringer.backend.self import check_porringer, update_porringer
 from porringer.schema import (
     CheckPorringerParameters,
     ListPluginResults,
