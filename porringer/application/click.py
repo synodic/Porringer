@@ -1,9 +1,13 @@
 """Click CLI Application"""
+
 import logging
 from dataclasses import dataclass
 from typing import LiteralString
 
 import click
+
+from porringer.api import API
+from porringer.schema import LocalConfiguration, Parameters
 
 
 @dataclass
@@ -47,6 +51,11 @@ class Configuration:
         self.logger = logging.getLogger("porringer")
         handler = ClickHandler()
         self.logger.addHandler(handler)
+
+        configuration = LocalConfiguration()
+        parameters = Parameters(self.logger)
+
+        self.api = API(configuration, parameters)
 
     def set_logger_level(self, verbosity: int) -> None:
         """_summary_
