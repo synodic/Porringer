@@ -15,11 +15,11 @@ dynamic = ["version"]
 requires-python = ">=3.12"
 
 dependencies = [
-  "pydantic>=2.2",
+  "pydantic>=2.5.3",
   "porringer-core>=0.0.0",
-  "platformdirs>=3.10.0",
+  "platformdirs>=4.1.0",
   "userpath>=1.9.1",
-  "packaging>=23.1",
+  "packaging>=23.2",
 ]
 
 [project.license-files]
@@ -37,15 +37,15 @@ source = "scm"
 
 [tool.pdm.dev-dependencies]
 lint = [
-  "black>= 23.7.0 ",
-  "isort>=5.12.0",
-  "mypy>=1.5.1 ",
-  "pylint>=3.0.0",
+  "black>= 23.12.1",
+  "isort>=5.13.2",
+  "mypy>=1.8.0",
+  "pylint>=3.0.3",
 ]
 test = [
-  "pytest>=7.4.0",
+  "pytest>=7.4.4",
   "pytest-cov>=4.1.0",
-  "pytest-mock>=3.11.1",
+  "pytest-mock>=3.12.0",
 ]
 
 [tool.pdm.scripts]
