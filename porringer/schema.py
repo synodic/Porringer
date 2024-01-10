@@ -1,4 +1,5 @@
 """Schema"""
+
 from dataclasses import dataclass
 from logging import Logger
 from pathlib import Path
@@ -18,6 +19,8 @@ class CheckPorringerParameters(BaseModel):
 
 class ListPluginsParameters(BaseModel):
     """TODO"""
+
+    pattern: str = Field(default="*", description="The pattern to match against")
 
 
 class UpdatePluginsParameters(BaseModel):

@@ -7,7 +7,7 @@ from typing import LiteralString
 import click
 
 from porringer.api import API
-from porringer.schema import LocalConfiguration, Parameters
+from porringer.schema import ListPluginsParameters, LocalConfiguration, Parameters
 
 
 @dataclass
@@ -142,7 +142,8 @@ def plugin_list(config: Configuration) -> None:
         config: The click configuration object
     """
 
-    results = config.api.list_plugins(doot)
+    parameters = ListPluginsParameters()
+    results = config.api.list_plugins(parameters)
 
     for result in results:
         click.echo(result)

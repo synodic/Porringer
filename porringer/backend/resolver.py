@@ -1,7 +1,10 @@
 """Resolves"""
 
+from packaging.version import Version
+from porringer_core.plugin_schema.environment import Environment
+
 from porringer.backend.schema import Configuration, GlobalConfiguration
-from porringer.schema import LocalConfiguration
+from porringer.schema import ListPluginResults, LocalConfiguration
 
 
 def resolve_configuration(
@@ -26,3 +29,26 @@ def resolve_configuration(
         config_directory=global_configuration.config_directory,
         data_directory=global_configuration.data_directory,
     )
+
+
+def resolve_list_plugins_parameters(environment: list[Environment]) -> list[ListPluginResults]:
+    """Resolves the list plugins parameters.
+
+    Args:
+        environment: The environment.
+
+    Returns:
+        A list of plugin metadata.
+    """
+
+    plugin_metadata: list[ListPluginResults] = []
+
+    for plugin in environment:
+
+        packages = plugin.packages()
+
+        for package in packages:
+            resolved_metadata = ListPluginResults(package.name, Version(package.version))
+            plugin_metadata.append(resolved_metadata)
+
+    return plugin_metadata

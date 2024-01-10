@@ -40,7 +40,8 @@ class API:
 
     def list_plugins(self, parameters: ListPluginsParameters) -> list[ListPluginResults]:
         """Gather and return a list of plugins
-
+        Args:
+            parameters: The list command parameters.
         Returns:
             The list of plugins
         """

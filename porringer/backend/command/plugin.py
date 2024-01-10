@@ -2,6 +2,8 @@
 
 from logging import Logger
 
+from porringer.backend.builder import Builder
+from porringer.backend.resolver import resolve_list_plugins_parameters
 from porringer.schema import ListPluginResults, ListPluginsParameters
 
 
@@ -17,7 +19,14 @@ def list_plugins(parameters: ListPluginsParameters, logger: Logger) -> list[List
     """
 
     logger.info("Listing plugins")
-    return []
+
+    builder = Builder(logger)
+
+    environment_types = builder.find_environments()
+
+    environments = builder.build_environments(environment_types)
+
+    return resolve_list_plugins_parameters(environments)
 
 
 def update_plugins(logger: Logger) -> None:
