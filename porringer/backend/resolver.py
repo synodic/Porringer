@@ -7,14 +7,14 @@ from porringer.schema import LocalConfiguration
 def resolve_configuration(
     local_configuration: LocalConfiguration, global_configuration: GlobalConfiguration
 ) -> Configuration:
-    """_summary_
+    """Resolves the configuration.
 
     Args:
-        local_configuration: _description_
-        global_configuration: _description_
+        local_configuration: The local configuration.
+        global_configuration: The global configuration.
 
     Returns:
-        _description_
+        The resolved configuration.
     """
     local_configuration.cache_directory.mkdir(parents=True, exist_ok=True)
 

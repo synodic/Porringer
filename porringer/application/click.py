@@ -58,10 +58,10 @@ class Configuration:
         self.api = API(configuration, parameters)
 
     def set_logger_level(self, verbosity: int) -> None:
-        """_summary_
+        """Set the logger level based on the verbosity
 
         Args:
-            verbosity: _description_
+            verbosity: The verbosity level
         """
         clamped = verbosity >= len(_levels)
         verbosity = min(verbosity, len(_levels) - 1)
@@ -96,9 +96,9 @@ def application(config: Configuration, verbose: int, debug: bool) -> None:
     """entry_point group for the CLI commands
 
     Args:
-        config: _description_
-        verbose: _description_
-        debug: _description_
+        config: The click configuration object
+        verbose: The input verbosity level
+        debug: The debug flag
     """
     config.debug = debug
 
@@ -134,9 +134,15 @@ def plugin_group() -> None:
 
 
 @plugin_group.command(name="list")
-def plugin_list() -> None:
-    """Checks for an update
+@pass_config
+def plugin_list(config: Configuration) -> None:
+    """Lists available plugins
 
-    Raises:
-        NotImplementedError: _description_
+    Args:
+        config: The click configuration object
     """
+
+    results = config.api.list_plugins(doot)
+
+    for result in results:
+        click.echo(result)

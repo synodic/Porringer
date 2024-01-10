@@ -38,14 +38,14 @@ class API:
         """
         check_porringer(self.parameters.logger)
 
-    def list_plugins(self, _: ListPluginsParameters) -> list[ListPluginResults]:
-        """_summary_
+    def list_plugins(self, parameters: ListPluginsParameters) -> list[ListPluginResults]:
+        """Gather and return a list of plugins
 
         Returns:
-            _description_
+            The list of plugins
         """
 
-        return list_plugins(self.parameters.logger)
+        return list_plugins(parameters, self.parameters.logger)
 
     def update_plugins(self, _: UpdatePluginsParameters) -> None:
         """Updates all plugins that are not managed by the application"""

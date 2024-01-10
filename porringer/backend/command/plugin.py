@@ -1,19 +1,19 @@
 """Yes"""
 
-
 from logging import Logger
 
-from porringer.schema import ListPluginResults
+from porringer.schema import ListPluginResults, ListPluginsParameters
 
 
-def list_plugins(logger: Logger) -> list[ListPluginResults]:
+def list_plugins(parameters: ListPluginsParameters, logger: Logger) -> list[ListPluginResults]:
     """_summary_
 
     Args:
-        logger: _description_
+        parameters: The list command parameters.
+        logger: The logger.
 
     Returns:
-        _description_
+        A list of registered plugins.
     """
 
     logger.info("Listing plugins")
