@@ -2,6 +2,7 @@
 
 from packaging.version import Version
 from porringer_core.plugin_schema.environment import Environment
+from synodic_utilities.utility import canonicalize_type
 
 from porringer.backend.schema import Configuration, GlobalConfiguration
 from porringer.schema import ListPluginResults, LocalConfiguration
@@ -45,10 +46,9 @@ def resolve_list_plugins_parameters(environment: list[Environment]) -> list[List
 
     for plugin in environment:
 
-        packages = plugin.packages()
+        canonicalized = canonicalize_type(type(plugin))
 
-        for package in packages:
-            resolved_metadata = ListPluginResults(package.name, Version(package.version))
-            plugin_metadata.append(resolved_metadata)
+        resolved_metadata = ListPluginResults(canonicalized.name, Version(plugin.__version__))
+        plugin_metadata.append(resolved_metadata)
 
     return plugin_metadata

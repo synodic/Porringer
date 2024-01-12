@@ -31,15 +31,25 @@ class Builder:
         # Filter entries by type
         for entry_point in list(metadata.entry_points(group=f"porringer.{group_name}")):
             loaded_type = entry_point.load()
+
+            canonicalized = canonicalize_type(loaded_type)
+
+            if entry_point.dist is None:
+                self.logger.error(f"Plugin '{canonicalized.name}' is not installed. Skipping")
+                continue
+
+            version = entry_point.dist.version
+            print(version)
+
+            # TODO: Add metadata to plugin information, percolate to pytest_synodic API
+
             if not issubclass(loaded_type, Environment):
                 self.logger.warning(
-                    f"Found incompatible plugin. The '{canonicalize_type(loaded_type).name}' plugin must be an instance"
+                    f"Found incompatible plugin. The '{canonicalized.name}' plugin must be an instance"
                     f" of '{group_name}'"
                 )
             else:
-                self.logger.warning(
-                    f"{group_name} plugin found: {canonicalize_type(loaded_type).name} from {getmodule(loaded_type)}"
-                )
+                self.logger.warning(f"{group_name} plugin found: {canonicalized.name} from {getmodule(loaded_type)}")
                 plugin_types.append(loaded_type)
 
         if not plugin_types:
