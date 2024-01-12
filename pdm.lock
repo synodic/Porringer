@@ -5,7 +5,7 @@
 groups = ["default", "lint", "test"]
 strategy = ["cross_platform"]
 lock_version = "4.4.1"
-content_hash = "sha256:f52443683c4a1a7af202d07eb0dee6d637b2151dbce35e89387291cc218e119d"
+content_hash = "sha256:d80cdfda9f8b20e101e8b8fae8150d4eb99b0a8896d63221f2a98a2795024805"
 
 [[package]]
 name = "annotated-types"
@@ -369,6 +369,37 @@ dependencies = [
 files = [
     {file = "pytest-mock-3.12.0.tar.gz", hash = "sha256:31a40f038c22cad32287bb43932054451ff5583ff094bca6f675df2f8bc1a6e9"},
     {file = "pytest_mock-3.12.0-py3-none-any.whl", hash = "sha256:0972719a7263072da3a21c7f4773069bcc7486027d7e8e1f81d98a47e701bc4f"},
+]
+
+[[package]]
+name = "pytest-porringer"
+version = "0.1.1.dev7"
+requires_python = ">=3.12"
+summary = ""
+dependencies = [
+    "porringer-core>=0.0.0",
+    "pydantic>=2.5.3",
+    "pytest-mock>=3.12.0",
+    "pytest-synodic>=0.0.0",
+    "pytest>=7.4.4",
+]
+files = [
+    {file = "pytest_porringer-0.1.1.dev7-py3-none-any.whl", hash = "sha256:4fbdc57e0b12874248f5a763cb0d2f8554841f5109d134d245f6344bc52ac942"},
+    {file = "pytest_porringer-0.1.1.dev7.tar.gz", hash = "sha256:682e3e41813c3d1db8052aa821eec8fd085ca476c5c8e6f907f7b65c219592e6"},
+]
+
+[[package]]
+name = "pytest-synodic"
+version = "0.1.1.dev4"
+requires_python = ">=3.12"
+summary = "Synodic Pytest utilities"
+dependencies = [
+    "pytest>=7.4.4",
+    "synodic-utilities>=0.1.1.dev5",
+]
+files = [
+    {file = "pytest_synodic-0.1.1.dev4-py3-none-any.whl", hash = "sha256:481671487a4c7cecb9e1d5b0d85b791363d3969dac5467ad477095b747accb8d"},
+    {file = "pytest_synodic-0.1.1.dev4.tar.gz", hash = "sha256:4d425b939ded48f7dbf3902537c2e563ecf71521c1df47295697825ca9ca3cee"},
 ]
 
 [[package]]
