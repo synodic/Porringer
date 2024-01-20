@@ -1,6 +1,7 @@
 """Schema"""
 
 from dataclasses import dataclass
+from importlib.metadata import Distribution
 from logging import Logger
 from pathlib import Path
 
@@ -44,6 +45,14 @@ class Parameters:
     """Resolved configuration"""
 
     logger: Logger
+
+
+@dataclass
+class PluginInformation[Plugin]:
+    """Gathered information about available plugins"""
+
+    type: type[Plugin]
+    distribution: Distribution
 
 
 class LocalConfiguration(BaseModel):

@@ -226,16 +226,16 @@ files = [
 
 [[package]]
 name = "porringer-core"
-version = "0.1.1.dev8"
+version = "0.1.1.dev10"
 requires_python = ">=3.12"
 summary = ""
 dependencies = [
-    "pydantic>=2.2",
+    "pydantic>=2.5.3",
     "synodic-utilities>=0.1.1.dev4",
 ]
 files = [
-    {file = "porringer_core-0.1.1.dev8-py3-none-any.whl", hash = "sha256:38f94d1969cb01c20b8daa19f540e45ce0493696457d9378323e12069e8ac362"},
-    {file = "porringer_core-0.1.1.dev8.tar.gz", hash = "sha256:4e345c579c0d18ad66b49fa254d6ecf9bb2669257a2233f333343d6dc3a55fc9"},
+    {file = "porringer_core-0.1.1.dev10-py3-none-any.whl", hash = "sha256:fefaaef6b5a67ec784f6466a3a43791f46b058a0ddcaa61653148aab4506f3a9"},
+    {file = "porringer_core-0.1.1.dev10.tar.gz", hash = "sha256:d7177c017727b5b6e3facf553c0f114c49b9442e781236d397397b31c4cbbe5e"},
 ]
 
 [[package]]
@@ -373,7 +373,7 @@ files = [
 
 [[package]]
 name = "pytest-porringer"
-version = "0.1.1.dev7"
+version = "0.1.1.dev8"
 requires_python = ">=3.12"
 summary = ""
 dependencies = [
@@ -384,8 +384,8 @@ dependencies = [
     "pytest>=7.4.4",
 ]
 files = [
-    {file = "pytest_porringer-0.1.1.dev7-py3-none-any.whl", hash = "sha256:4fbdc57e0b12874248f5a763cb0d2f8554841f5109d134d245f6344bc52ac942"},
-    {file = "pytest_porringer-0.1.1.dev7.tar.gz", hash = "sha256:682e3e41813c3d1db8052aa821eec8fd085ca476c5c8e6f907f7b65c219592e6"},
+    {file = "pytest_porringer-0.1.1.dev8-py3-none-any.whl", hash = "sha256:0dfe3527dddf0d7d8e90ad97d252c1a56d85c185e7f8b27ca5815eedff8cfdf5"},
+    {file = "pytest_porringer-0.1.1.dev8.tar.gz", hash = "sha256:556760d6a07c8119d8db5a7ddf8046e71da8429aee9fe6465c4a88ea2fe9ce72"},
 ]
 
 [[package]]
