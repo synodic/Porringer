@@ -49,6 +49,18 @@ test = [
   "pytest-porringer>=0.0.0",
 ]
 
+# [project.entry-points."porringer.environment"]
+# mock = "pytest_porringer.mock.environment:MockEnvironment"
+
+[project.entry-points."porringer.environment"]
+mock = "porringer_pip.plugin:PipEnvironment"
+
+[project.entry-points."porringer.environment"]
+mock = "porringer_pipx.plugin:PipxEnvironment"
+
+[project.entry-points."porringer.environment"]
+mock = "porringer_winget.plugin:WingetEnvironment"
+
 [tool.pdm.scripts]
 analyze = {shell = "pylint --verbose porringer tests"}
 format = {shell = "black --check --verbose ."}
