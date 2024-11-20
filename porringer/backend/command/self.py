@@ -4,7 +4,7 @@ import os
 import sys
 from logging import Logger
 
-from synodic_utilities.subprocess import call
+from porringer.utility.subprocess import call
 
 
 def is_pipx_installation() -> bool:
@@ -25,7 +25,6 @@ def update_porringer(logger: Logger) -> None:
     Raises:
         NotImplementedError: _description_
     """
-
     if is_pipx_installation():
         call(['pipx', 'upgrade', 'porringer'], logger)
     else:
@@ -41,7 +40,6 @@ def check_porringer(logger: Logger) -> None:
     Raises:
         NotImplementedError: _description_
     """
-
     if is_pipx_installation():
         call(['pipx', 'upgrade', 'porringer'], logger)
     else:

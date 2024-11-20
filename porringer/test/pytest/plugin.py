@@ -3,9 +3,9 @@
 from typing import cast
 
 import pytest
-from porringer_core.schema import Distribution, PluginParameters
 
-from pytest_porringer.variants import porringer_distribution_list
+from porringer.core.schema import Distribution, PluginParameters
+from porringer.test.pytest.variants import porringer_distribution_list
 
 
 @pytest.fixture(name='plugin_distributions', scope='session', params=porringer_distribution_list)
@@ -18,7 +18,6 @@ def fixture_plugin_distributions(request: pytest.FixtureRequest) -> Distribution
     Returns:
         _description_
     """
-
     return cast(Distribution, request.param)
 
 
@@ -35,5 +34,4 @@ def fixture_plugin_parameters(plugin_distributions: Distribution) -> PluginParam
     Returns:
         _description_
     """
-
     return PluginParameters(distribution=plugin_distributions)

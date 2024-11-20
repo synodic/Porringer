@@ -2,10 +2,9 @@
 
 from collections.abc import Sequence
 
-from porringer_core.plugin_schema.environment import Environment
-from porringer_core.schema import Distribution
-
-from pytest_porringer.mock.environment import MockEnvironment
+from porringer.core.plugin_schema.environment import Environment
+from porringer.core.schema import Distribution
+from porringer.test.mock.environment import MockEnvironment
 
 
 def _mock_environment_list() -> Sequence[type[Environment]]:

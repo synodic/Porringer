@@ -5,7 +5,7 @@ from typing import TypeVar, override
 
 from pydantic import BaseModel, Field
 
-from porringer_core.schema import (
+from porringer.core.schema import (
     Information,
     Package,
     PackageName,

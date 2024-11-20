@@ -1,16 +1,17 @@
 """Plugin implementation"""
 
-from porringer_core.plugin_schema.environment import (
+from typing import override
+
+from porringer.core.plugin_schema.environment import (
     Environment,
     InstallParameters,
     UninstallParameters,
     UpgradeParameters,
 )
-from porringer_core.schema import Package, PackageName
-from typing_extensions import override
+from porringer.core.schema import Package, PackageName
 
 
-class PipEnvironment(Environment):
+class PipxEnvironment(Environment):
     """_summary_"""
 
     @override

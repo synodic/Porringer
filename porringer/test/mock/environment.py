@@ -2,13 +2,13 @@
 
 from typing import override
 
-from porringer_core.plugin_schema.environment import (
+from porringer.core.plugin_schema.environment import (
     Environment,
     InstallParameters,
     UninstallParameters,
     UpgradeParameters,
 )
-from porringer_core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageName
 
 
 class MockEnvironment(Environment):

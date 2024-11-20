@@ -2,7 +2,7 @@
 
 from click.testing import CliRunner
 
-from porringer.application.click import Configuration, application
+from porringer.console.entry import Configuration, application
 
 
 class TestCLI:

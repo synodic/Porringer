@@ -1,11 +1,11 @@
 """Resolves"""
 
 from packaging.version import Version
-from porringer_core.plugin_schema.environment import Environment
-from synodic_utilities.utility import canonicalize_type
 
 from porringer.backend.schema import Configuration, GlobalConfiguration
+from porringer.core.plugin_schema.environment import Environment
 from porringer.schema import ListPluginResults, LocalConfiguration
+from porringer.utility.utility import canonicalize_type
 
 
 def resolve_configuration(
@@ -41,7 +41,6 @@ def resolve_list_plugins_parameters(environment: list[Environment]) -> list[List
     Returns:
         A list of plugin metadata.
     """
-
     plugin_metadata: list[ListPluginResults] = []
 
     for plugin in environment:

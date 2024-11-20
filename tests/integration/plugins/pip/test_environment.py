@@ -1,16 +1,17 @@
 """Tests plugin schemas"""
 
 import pytest
-from pytest_porringer.tests import EnvironmentIntegrationTests
 
-from porringer_pip.plugin import PipEnvironment
+from porringer.plugin.pip.plugin import PipEnvironment
+from porringer.test.pytest.tests import EnvironmentIntegrationTests
 
 
 class TestEnvironment(EnvironmentIntegrationTests[PipEnvironment]):
     """The tests for the vcpkg provider"""
 
+    @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')
-    def fixture_plugin_type(self) -> type[PipEnvironment]:
+    def fixture_plugin_type() -> type[PipEnvironment]:
         """A required testing hook that allows type generation
 
         Returns:

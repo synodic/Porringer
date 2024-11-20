@@ -1,4 +1,4 @@
-"""Yes"""
+"""The plugin command module."""
 
 from logging import Logger
 
@@ -8,7 +8,7 @@ from porringer.schema import ListPluginResults, ListPluginsParameters
 
 
 def list_plugins(parameters: ListPluginsParameters, logger: Logger) -> list[ListPluginResults]:
-    """_summary_
+    """Lists the plugins.
 
     Args:
         parameters: The list command parameters.
@@ -17,7 +17,6 @@ def list_plugins(parameters: ListPluginsParameters, logger: Logger) -> list[List
     Returns:
         A list of registered plugins.
     """
-
     logger.info('Listing plugins')
 
     builder = Builder(logger)
@@ -30,10 +29,9 @@ def list_plugins(parameters: ListPluginsParameters, logger: Logger) -> list[List
 
 
 def update_plugins(logger: Logger) -> None:
-    """_summary_
+    """Updates the plugins.
 
     Args:
-        logger: _description_
+        logger: The logger.
     """
-
     logger.info('Updating plugins')

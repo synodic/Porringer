@@ -4,17 +4,17 @@ from importlib import metadata
 from inspect import getmodule
 from logging import Logger
 
-from porringer_core.plugin_schema.environment import Environment
-from synodic_utilities.exception import PluginError
-from synodic_utilities.utility import canonicalize_type
-
+from porringer.core.plugin_schema.environment import Environment
 from porringer.schema import PluginInformation
+from porringer.utility.exception import PluginError
+from porringer.utility.utility import canonicalize_type
 
 
 class Builder:
     """Helper class for building Porringer projects"""
 
     def __init__(self, logger: Logger) -> None:
+        """Initializes the builder"""
         self.logger = logger
 
     def find_environments(self) -> list[PluginInformation[Environment]]:
@@ -26,7 +26,6 @@ class Builder:
         Returns:
             A list of loaded plugins
         """
-
         group_name = 'environment'
         plugin_types: list[PluginInformation[Environment]] = []
 
@@ -56,7 +55,8 @@ class Builder:
 
         return plugin_types
 
-    def build_environments(self, environment_types: list[PluginInformation[Environment]]) -> list[Environment]:
+    @staticmethod
+    def build_environments(environment_types: list[PluginInformation[Environment]]) -> list[Environment]:
         """Constructs environments from input types
 
         Args:
@@ -65,7 +65,6 @@ class Builder:
         Returns:
             The instantiated environments
         """
-
         environments: list[Environment] = []
 
         for environment_type in environment_types:
