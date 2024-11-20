@@ -24,7 +24,7 @@ class EnvironmentIntegrationTests(
         Args:
             plugin_type: The type to register
         """
-        assert canonicalize_type(plugin_type).group == "environment"
+        assert canonicalize_type(plugin_type).group == 'environment'
 
 
 class EnvironmentUnitTests(

@@ -16,13 +16,13 @@ from pytest_porringer.variants import environment_variants
 class BaseTests[PluginT](SynodicBaseTests[PluginT], metaclass=ABCMeta):
     """Shared testing information for all plugin test classes."""
 
-    @pytest.fixture(name="plugin_type", scope="session")
+    @pytest.fixture(name='plugin_type', scope='session')
     def fixture_plugin_type(self) -> type[PluginT]:
         """A required testing hook that allows type generation"""
 
-        raise NotImplementedError("Override this fixture")
+        raise NotImplementedError('Override this fixture')
 
-    @pytest.fixture(name="plugin_group_name", scope="session")
+    @pytest.fixture(name='plugin_group_name', scope='session')
     def fixture_plugin_group_name(self) -> LiteralString:
         """_summary_
 
@@ -30,7 +30,7 @@ class BaseTests[PluginT](SynodicBaseTests[PluginT], metaclass=ABCMeta):
             _description_
         """
 
-        return "porringer"
+        return 'porringer'
 
 
 class BaseIntegrationTests[PluginT](SynodicBaseIntegrationTests[PluginT], metaclass=ABCMeta):
@@ -46,8 +46,8 @@ class PluginTests[PluginT](BaseTests[PluginT], metaclass=ABCMeta):
 
     @staticmethod
     @pytest.fixture(
-        name="plugin",
-        scope="session",
+        name='plugin',
+        scope='session',
     )
     def fixture_plugin(plugin_type: type[PluginT], plugin_parameters: PluginParameters) -> PluginT:
         """Overridden plugin generator for creating a populated data plugin type
@@ -78,8 +78,8 @@ class EnvironmentTests[EnvironmentT](PluginTests[EnvironmentT], metaclass=ABCMet
     """Shared functionality between the different testing categories"""
 
     @pytest.fixture(
-        name="environment_type",
-        scope="session",
+        name='environment_type',
+        scope='session',
         params=environment_variants,
     )
     def fixture_environment_type(self, request: pytest.FixtureRequest) -> type[Environment]:

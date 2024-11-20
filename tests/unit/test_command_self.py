@@ -1,4 +1,5 @@
-"""Test the command 'self' """
+"""Test the command 'self'"""
+
 from logging import Logger
 
 import pytest
@@ -19,7 +20,7 @@ class TestCommandSelf:
         """_summary_"""
 
         config = LocalConfiguration()
-        parameters = Parameters(logger=Logger("test"))
+        parameters = Parameters(logger=Logger('test'))
         api = API(config, parameters)
 
         with pytest.raises(NotImplementedError):
@@ -30,7 +31,7 @@ class TestCommandSelf:
         """_summary_"""
 
         config = LocalConfiguration()
-        parameters = Parameters(logger=Logger("test"))
+        parameters = Parameters(logger=Logger('test'))
         api = API(config, parameters)
 
         with pytest.raises(NotImplementedError):

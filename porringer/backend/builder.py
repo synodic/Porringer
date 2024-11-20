@@ -27,11 +27,11 @@ class Builder:
             A list of loaded plugins
         """
 
-        group_name = "environment"
+        group_name = 'environment'
         plugin_types: list[PluginInformation[Environment]] = []
 
         # Filter entries by type
-        for entry_point in list(metadata.entry_points(group=f"porringer.{group_name}")):
+        for entry_point in list(metadata.entry_points(group=f'porringer.{group_name}')):
             loaded_type = entry_point.load()
 
             canonicalized = canonicalize_type(loaded_type)
@@ -48,11 +48,11 @@ class Builder:
                     f" of '{group_name}'"
                 )
             else:
-                self.logger.warning(f"{group_name} plugin found: {canonicalized.name} from {getmodule(loaded_type)}")
+                self.logger.warning(f'{group_name} plugin found: {canonicalized.name} from {getmodule(loaded_type)}')
                 plugin_types.append(PluginInformation(loaded_type, entry_point.dist))
 
         if not plugin_types:
-            raise PluginError(f"No {group_name} plugin was found")
+            raise PluginError(f'No {group_name} plugin was found')
 
         return plugin_types
 

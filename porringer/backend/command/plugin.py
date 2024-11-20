@@ -18,7 +18,7 @@ def list_plugins(parameters: ListPluginsParameters, logger: Logger) -> list[List
         A list of registered plugins.
     """
 
-    logger.info("Listing plugins")
+    logger.info('Listing plugins')
 
     builder = Builder(logger)
 
@@ -36,4 +36,4 @@ def update_plugins(logger: Logger) -> None:
         logger: _description_
     """
 
-    logger.info("Updating plugins")
+    logger.info('Updating plugins')

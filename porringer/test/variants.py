@@ -1,5 +1,4 @@
-"""Provides test data for plugin tests
-"""
+"""Provides test data for plugin tests"""
 
 from collections.abc import Sequence
 
@@ -32,7 +31,7 @@ def _porringer_distribution_list() -> Sequence[Distribution]:
     variants = []
 
     # Default
-    variants.append(Distribution(version="0.0.0"))
+    variants.append(Distribution(version='0.0.0'))
 
     return variants
 

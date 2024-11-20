@@ -45,7 +45,6 @@ def resolve_list_plugins_parameters(environment: list[Environment]) -> list[List
     plugin_metadata: list[ListPluginResults] = []
 
     for plugin in environment:
-
         canonicalized = canonicalize_type(type(plugin))
 
         resolved_metadata = ListPluginResults(canonicalized.name, Version(plugin.__version__))

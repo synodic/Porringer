@@ -9,10 +9,10 @@ from pydantic import BaseModel
 class PorringerModel(BaseModel):
     """The base model to use for all CPPython models"""
 
-    model_config = {"populate_by_name": False}
+    model_config = {'populate_by_name': False}
 
 
-PackageName = NewType("PackageName", str)
+PackageName = NewType('PackageName', str)
 
 
 class Package(PorringerModel):
@@ -80,4 +80,4 @@ class Plugin(Protocol):
         return self._distribution
 
 
-PluginT = TypeVar("PluginT", bound=Plugin)
+PluginT = TypeVar('PluginT', bound=Plugin)

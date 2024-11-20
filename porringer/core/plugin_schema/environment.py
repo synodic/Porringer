@@ -17,9 +17,9 @@ from porringer_core.schema import (
 class InstallParameters(BaseModel):
     """The install parameters for an environment plugin"""
 
-    name: PackageName = Field(description="The package to install")
+    name: PackageName = Field(description='The package to install')
     dry: bool = Field(
-        default=False, description="If True, rehearses an installation without modifying what is actually installed"
+        default=False, description='If True, rehearses an installation without modifying what is actually installed'
     )
 
 
@@ -27,19 +27,19 @@ class UninstallParameters(BaseModel):
     """The uninstall parameters for an environment plugin"""
 
     names: list[PackageName] = Field(
-        description="The list of packages to uninstall. If empty, all packages are uninstalled"
+        description='The list of packages to uninstall. If empty, all packages are uninstalled'
     )
     dry: bool = Field(
-        default=False, description="If True, rehearses an uninstall without modifying what is actually installed"
+        default=False, description='If True, rehearses an uninstall without modifying what is actually installed'
     )
 
 
 class UpgradeParameters(BaseModel):
     """The upgrade parameters for an environment plugin"""
 
-    names: list[PackageName] = Field(description="The list of packages to upgrade. If empty, all packages are upgraded")
+    names: list[PackageName] = Field(description='The list of packages to upgrade. If empty, all packages are upgraded')
     dry: bool = Field(
-        default=False, description="If True, rehearses an upgrade without modifying what is actually installed"
+        default=False, description='If True, rehearses an upgrade without modifying what is actually installed'
     )
 
 
@@ -124,4 +124,4 @@ class Environment(Plugin):
         raise NotImplementedError
 
 
-EnvironmentT = TypeVar("EnvironmentT", bound=Environment)
+EnvironmentT = TypeVar('EnvironmentT', bound=Environment)

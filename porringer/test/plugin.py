@@ -8,7 +8,7 @@ from porringer_core.schema import Distribution, PluginParameters
 from pytest_porringer.variants import porringer_distribution_list
 
 
-@pytest.fixture(name="plugin_distributions", scope="session", params=porringer_distribution_list)
+@pytest.fixture(name='plugin_distributions', scope='session', params=porringer_distribution_list)
 def fixture_plugin_distributions(request: pytest.FixtureRequest) -> Distribution:
     """_summary_
 
@@ -23,8 +23,8 @@ def fixture_plugin_distributions(request: pytest.FixtureRequest) -> Distribution
 
 
 @pytest.fixture(
-    name="plugin_parameters",
-    scope="session",
+    name='plugin_parameters',
+    scope='session',
 )
 def fixture_plugin_parameters(plugin_distributions: Distribution) -> PluginParameters:
     """_summary_

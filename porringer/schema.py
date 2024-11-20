@@ -21,7 +21,7 @@ class CheckPorringerParameters(BaseModel):
 class ListPluginsParameters(BaseModel):
     """TODO"""
 
-    pattern: str = Field(default="*", description="The pattern to match against")
+    pattern: str = Field(default='*', description='The pattern to match against')
 
 
 class UpdatePluginsParameters(BaseModel):
@@ -59,5 +59,5 @@ class LocalConfiguration(BaseModel):
     """Configuration provided by the application running Porringer"""
 
     cache_directory: Path = Field(
-        default=Path(user_cache_dir("porringer", "synodic")), description="The application cache path "
+        default=Path(user_cache_dir('porringer', 'synodic')), description='The application cache path '
     )

@@ -19,10 +19,10 @@ class LogLevel:
 
 
 _levels: list[LogLevel] = [
-    LogLevel(name="ERROR", colour="red"),
-    LogLevel(name="WARNING", colour="yellow"),
-    LogLevel(name="INFO", colour="white"),
-    LogLevel(name="DEBUG", colour="bright_white"),
+    LogLevel(name='ERROR', colour='red'),
+    LogLevel(name='WARNING', colour='yellow'),
+    LogLevel(name='INFO', colour='white'),
+    LogLevel(name='DEBUG', colour='bright_white'),
 ]
 
 
@@ -48,7 +48,7 @@ class Configuration:
     def __init__(self) -> None:
         self.debug = False
 
-        self.logger = logging.getLogger("porringer")
+        self.logger = logging.getLogger('porringer')
         handler = ClickHandler()
         self.logger.addHandler(handler)
 
@@ -70,9 +70,9 @@ class Configuration:
         self.logger.setLevel(name)
 
         if clamped:
-            self.logger.debug("The debug level was clamped to %s", name)
+            self.logger.debug('The debug level was clamped to %s', name)
 
-        self.logger.info("Logging set to %s", name)
+        self.logger.info('Logging set to %s', name)
 
     def set_debug(self, debug: bool) -> None:
         """Set the configuration debug state
@@ -88,8 +88,8 @@ pass_config = click.make_pass_decorator(Configuration, ensure=True)
 
 
 @click.group(invoke_without_command=True)
-@click.option("-v", "--verbose", count=True, help="Print additional output")
-@click.option("--debug", is_flag=True, help="Enables additional debug information")
+@click.option('-v', '--verbose', count=True, help='Print additional output')
+@click.option('--debug', is_flag=True, help='Enables additional debug information')
 @click.version_option()
 @pass_config
 def application(config: Configuration, verbose: int, debug: bool) -> None:
@@ -105,12 +105,12 @@ def application(config: Configuration, verbose: int, debug: bool) -> None:
     config.set_logger_level(verbose)
 
 
-@application.group(name="self", invoke_without_command=True)
+@application.group(name='self', invoke_without_command=True)
 def self_group() -> None:
     """Command group to inspect Porringer itself"""
 
 
-@self_group.command(name="update")
+@self_group.command(name='update')
 def self_update() -> None:
     """Updates
 
@@ -119,7 +119,7 @@ def self_update() -> None:
     """
 
 
-@self_group.command(name="check")
+@self_group.command(name='check')
 def self_check() -> None:
     """Checks for an update
 
@@ -128,12 +128,12 @@ def self_check() -> None:
     """
 
 
-@application.group(name="plugin", invoke_without_command=True)
+@application.group(name='plugin', invoke_without_command=True)
 def plugin_group() -> None:
     """Command group to inspect Porringer plugins"""
 
 
-@plugin_group.command(name="list")
+@plugin_group.command(name='list')
 @pass_config
 def plugin_list(config: Configuration) -> None:
     """Lists available plugins

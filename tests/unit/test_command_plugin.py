@@ -1,4 +1,5 @@
-"""Test the command 'plugin' """
+"""Test the command 'plugin'"""
+
 from logging import Logger
 
 from porringer.api import API
@@ -12,7 +13,7 @@ class TestCommandPlugin:
         """_summary_"""
 
         config = LocalConfiguration()
-        parameters = Parameters(logger=Logger("test"))
+        parameters = Parameters(logger=Logger('test'))
         api = API(config, parameters)
 
         params = ListPluginsParameters()
@@ -24,7 +25,7 @@ class TestCommandPlugin:
         """_summary_"""
 
         config = LocalConfiguration()
-        parameters = Parameters(logger=Logger("test"))
+        parameters = Parameters(logger=Logger('test'))
         api = API(config, parameters)
 
         params = ListPluginsParameters()

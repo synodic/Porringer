@@ -12,7 +12,7 @@ class TestCLI:
         """_summary_"""
         runner = CliRunner()
         config = Configuration()
-        result = runner.invoke(application, ["--version"], obj=config)
+        result = runner.invoke(application, ['--version'], obj=config)
 
         assert result.exit_code == 0
         assert result.output
@@ -22,13 +22,13 @@ class TestCLI:
         runner = CliRunner()
         config = Configuration()
 
-        result = runner.invoke(application, ["-vvv"], obj=config)
+        result = runner.invoke(application, ['-vvv'], obj=config)
 
         assert result.exit_code == 0
 
         level = config.logger.level
 
-        result = runner.invoke(application, ["-vvvv"], obj=config)
+        result = runner.invoke(application, ['-vvvv'], obj=config)
 
         assert result.exit_code == 0
         assert config.logger.level == level

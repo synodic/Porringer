@@ -13,7 +13,7 @@ def is_pipx_installation() -> bool:
     Returns:
         _description_
     """
-    return sys.prefix.split(os.sep)[-3:-1] == ["pipx", "venvs"]
+    return sys.prefix.split(os.sep)[-3:-1] == ['pipx', 'venvs']
 
 
 def update_porringer(logger: Logger) -> None:
@@ -27,7 +27,7 @@ def update_porringer(logger: Logger) -> None:
     """
 
     if is_pipx_installation():
-        call(["pipx", "upgrade", "porringer"], logger)
+        call(['pipx', 'upgrade', 'porringer'], logger)
     else:
         raise NotImplementedError()
 
@@ -43,6 +43,6 @@ def check_porringer(logger: Logger) -> None:
     """
 
     if is_pipx_installation():
-        call(["pipx", "upgrade", "porringer"], logger)
+        call(['pipx', 'upgrade', 'porringer'], logger)
     else:
         raise NotImplementedError()
