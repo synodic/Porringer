@@ -12,18 +12,15 @@ readme = "README.md"
 
 dynamic = ["version"]
 
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 
 dependencies = [
-  "pydantic>=2.5.3",
-  "porringer-core>=0.0.0",
+  "typer>=0.13.1",
+  "pydantic>=2.10.0",
   "platformdirs>=4.1.0",
   "userpath>=1.9.1",
   "packaging>=23.2",
 ]
-
-[project.license-files]
-paths = ["LICENSE.md"]
 
 [project.urls]
 homepage = "https://github.com/Synodic-Software/Porringer"
@@ -35,42 +32,26 @@ update = ["--update-all"]
 [tool.pdm.version]
 source = "scm"
 
-[tool.pdm.dev-dependencies]
+[dependency-groups]
 lint = [
   "black>= 23.12.1",
   "isort>=5.13.2",
-  "mypy>=1.8.0",
-  "pylint>=3.0.3",
+  "mypy>=1.10.0",
+  "ruff>=0.7.4",
 ]
 test = [
   "pytest>=7.4.4",
   "pytest-cov>=4.1.0",
   "pytest-mock>=3.12.0",
-  "pytest-porringer>=0.0.0",
 ]
 
-# [project.entry-points."porringer.environment"]
-# mock = "pytest_porringer.mock.environment:MockEnvironment"
-
 [project.entry-points."porringer.environment"]
-mock = "porringer_pip.plugin:PipEnvironment"
-
-[project.entry-points."porringer.environment"]
-mock = "porringer_pipx.plugin:PipxEnvironment"
-
-[project.entry-points."porringer.environment"]
-mock = "porringer_winget.plugin:WingetEnvironment"
-
-[tool.pdm.scripts]
-analyze = {shell = "pylint --verbose porringer tests"}
-format = {shell = "black --check --verbose ."}
-lint = {composite = ["analyze", "format", "sort-imports", "type-check"]}
-sort-imports = {shell = "isort --check-only --diff --verbose ."}
-test = {shell = "pytest --cov=porringer --verbose tests"}
-type-check = {shell = "mypy ."}
+pip = "porringer.plugin.pip:PipEnvironment"
+pipx = "porringer.plugin.pipx:PipxEnvironment"
+winget = "porringer.plugin.winget:WingetEnvironment"
 
 [project.scripts]
-porringer = "porringer.application.click:application"
+porringer = "porringer.console.entry:app"
 
 [tool.pytest.ini_options]
 log_cli = true
@@ -78,41 +59,57 @@ testpaths = [
   "tests",
 ]
 
-[tool.black]
-line-length = 120
-preview = true
-
 [tool.isort]
 profile = "black"
-skip_gitignore = true
 
 [tool.mypy]
 exclude = "__pypackages__"
 plugins = ["pydantic.mypy"]
 strict = true
 
-[tool.pylint.MAIN]
-load-plugins = [
-  "pylint.extensions.code_style",
-  "pylint.extensions.typing",
-  "pylint.extensions.docstyle",
-  "pylint.extensions.docparams",
-  "pylint.extensions.private_import",
-  "pylint.extensions.bad_builtin",
+[tool.ruff]
+line-length = 120
+preview = true
+
+[tool.ruff.lint]
+ignore = [
+  "D206",
+  "D300",
+  "D415",
+  "E111",
+  "E114",
+  "E117",
+]
+select = [
+  "D", # pydocstyle
+  "F", # Pyflakes
+  "I", # isort
+  "PL", # pylint
+  "UP", # pyupgrade
+  "E", # pycodestyle
+  "B", # flake8-bugbear
+  "SIM", # flake8-simplify
+  "PT", # flake8-pytest-style
 ]
 
-[tool.pylint.format]
-max-line-length = "120"
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
-[tool.pylint.parameter_documentation]
-accept-no-param-doc = false
-accept-no-raise-doc = false
-accept-no-return-doc = false
-accept-no-yields-doc = false
-default-docstring-type = "google"
+[tool.ruff.format]
+docstring-code-format = true
+indent-style = "space"
+quote-style = "single"
 
 [tool.coverage.report]
 skip_empty = true
+
+[tool.pdm.scripts]
+analyze = {shell = "ruff check cppython tests"}
+format = {shell = "ruff format"}
+lint = {composite = ["analyze", "format", "sort-imports", "type-check"]}
+sort-imports = {shell = "isort --check-only --diff ."}
+test = {shell = "pytest --cov=cppython --verbose tests"}
+type-check = {shell = "mypy ."}
 
 [build-system]
 build-backend = "pdm.backend"
