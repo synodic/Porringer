@@ -8,7 +8,8 @@ from porringer.console.entry import Configuration, application
 class TestCLI:
     """_summary_"""
 
-    def test_version(self) -> None:
+    @staticmethod
+    def test_version() -> None:
         """_summary_"""
         runner = CliRunner()
         config = Configuration()
@@ -17,7 +18,8 @@ class TestCLI:
         assert result.exit_code == 0
         assert result.output
 
-    def test_verbosity(self) -> None:
+    @staticmethod
+    def test_verbosity() -> None:
         """Test's that the verbosity flag is implicitly capped at 3 levels"""
         runner = CliRunner()
         config = Configuration()

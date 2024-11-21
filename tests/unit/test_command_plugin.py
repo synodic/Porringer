@@ -7,11 +7,11 @@ from porringer.schema import ListPluginsParameters, LocalConfiguration, Paramete
 
 
 class TestCommandPlugin:
-    """_summary_"""
+    """Test the command 'plugin'"""
 
-    def test_plugin_list(self) -> None:
-        """_summary_"""
-
+    @staticmethod
+    def test_plugin_list() -> None:
+        """Test the plugin list"""
         config = LocalConfiguration()
         parameters = Parameters(logger=Logger('test'))
         api = API(config, parameters)
@@ -21,9 +21,9 @@ class TestCommandPlugin:
 
         assert not results
 
-    def test_plugin_update(self) -> None:
-        """_summary_"""
-
+    @staticmethod
+    def test_plugin_update() -> None:
+        """Test the plugin update"""
         config = LocalConfiguration()
         parameters = Parameters(logger=Logger('test'))
         api = API(config, parameters)

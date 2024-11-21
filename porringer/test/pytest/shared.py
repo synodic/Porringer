@@ -4,7 +4,6 @@ from abc import ABCMeta, abstractmethod
 from typing import LiteralString, cast
 
 import pytest
-
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.schema import Plugin, PluginParameters
 from porringer.test.pytest.variants import environment_variants

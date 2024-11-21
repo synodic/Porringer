@@ -14,26 +14,28 @@ from porringer.schema import (
 
 
 class TestCommandSelf:
-    """_summary_"""
+    """Test the command 'self'"""
 
-    def test_self_update_check(self) -> None:
-        """_summary_"""
-
+    @staticmethod
+    def test_self_update_check() -> None:
+        """Test the self update check"""
         config = LocalConfiguration()
         parameters = Parameters(logger=Logger('test'))
         api = API(config, parameters)
 
+        params = CheckPorringerParameters()
+
         with pytest.raises(NotImplementedError):
-            params = CheckPorringerParameters()
             api.check_porringer(params)
 
-    def test_self_update(self) -> None:
-        """_summary_"""
-
+    @staticmethod
+    def test_self_update() -> None:
+        """Test the self update"""
         config = LocalConfiguration()
         parameters = Parameters(logger=Logger('test'))
         api = API(config, parameters)
 
+        params = UpdatePorringerParameters()
+
         with pytest.raises(NotImplementedError):
-            params = UpdatePorringerParameters()
             api.update_porringer(params)

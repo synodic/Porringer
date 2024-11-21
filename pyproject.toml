@@ -104,11 +104,11 @@ quote-style = "single"
 skip_empty = true
 
 [tool.pdm.scripts]
-analyze = {shell = "ruff check cppython tests"}
+analyze = {shell = "ruff check porringer tests"}
 format = {shell = "ruff format"}
 lint = {composite = ["analyze", "format", "sort-imports", "type-check"]}
 sort-imports = {shell = "isort --check-only --diff ."}
-test = {shell = "pytest --cov=cppython --verbose tests"}
+test = {shell = "pytest --cov=porringer --verbose tests"}
 type-check = {shell = "mypy ."}
 
 [build-system]

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 
 class PorringerModel(BaseModel):
-    """The base model to use for all CPPython models"""
+    """The base model to use for all Porringer models"""
 
     model_config = {'populate_by_name': False}
 
@@ -48,6 +48,7 @@ class Plugin(Protocol):
     _distribution: Distribution
 
     def __init__(self, parameters: PluginParameters) -> None:
+        """Initializes the plugin"""
         self._distribution = parameters.distribution
 
     @staticmethod

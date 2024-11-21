@@ -1,4 +1,4 @@
-"""Click CLI Application"""
+"""Typer CLI Application"""
 
 import logging
 from dataclasses import dataclass
@@ -26,18 +26,16 @@ _levels: list[LogLevel] = [
 ]
 
 
-class ClickHandler(logging.Handler):
-    """_summary_"""
+class TyperHandler(logging.Handler):
+    """A logging handler that outputs to type"""
 
     def __init__(self) -> None:
+        """Initializes the handler"""
         logging.Handler.__init__(self)
 
-    def emit(self, record: logging.LogRecord) -> None:
-        """_summary_
-
-        Args:
-            record: _description_
-        """
+    @staticmethod
+    def emit(record: logging.LogRecord) -> None:
+        """Emits the log record to typer"""
         level = next(level for level in _levels if level.name == record.levelname)
         click.secho(record, fg=level.colour)
 
@@ -46,10 +44,11 @@ class Configuration:
     """The configuration data available to the CLI application"""
 
     def __init__(self) -> None:
+        """Initializes the configuration"""
         self.debug = False
 
         self.logger = logging.getLogger('porringer')
-        handler = ClickHandler()
+        handler = TyperHandler()
         self.logger.addHandler(handler)
 
         configuration = LocalConfiguration()
@@ -141,7 +140,6 @@ def plugin_list(config: Configuration) -> None:
     Args:
         config: The click configuration object
     """
-
     parameters = ListPluginsParameters()
     results = config.api.list_plugins(parameters)
 

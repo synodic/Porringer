@@ -3,7 +3,6 @@
 from typing import cast
 
 import pytest
-
 from porringer.core.schema import Distribution, PluginParameters
 from porringer.test.pytest.variants import porringer_distribution_list
 
