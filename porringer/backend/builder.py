@@ -4,7 +4,10 @@ from importlib import metadata
 from inspect import getmodule
 from logging import Logger
 
+from packaging.version import Version
+
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.schema import Distribution, PluginParameters
 from porringer.schema import PluginInformation
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import canonicalize_type
@@ -68,6 +71,10 @@ class Builder:
         environments: list[Environment] = []
 
         for environment_type in environment_types:
-            environments.append(environment_type.type())
+            pluginVersion = Version(environment_type.distribution.version)
+            pluginDistribution = Distribution(version=pluginVersion)
+            parameters = PluginParameters(distribution=pluginDistribution)
+
+            environments.append(environment_type.type(parameters))
 
         return environments

@@ -3,13 +3,14 @@
 from abc import abstractmethod
 from typing import NewType, Protocol, TypeVar
 
+from packaging.version import Version
 from pydantic import BaseModel
 
 
 class PorringerModel(BaseModel):
     """The base model to use for all Porringer models"""
 
-    model_config = {'populate_by_name': False}
+    model_config = {'populate_by_name': False, 'arbitrary_types_allowed': True}
 
 
 PackageName = NewType('PackageName', str)
@@ -29,7 +30,7 @@ class SupportedFeatures(PorringerModel):
 class Distribution(PorringerModel):
     """Data that describes the distribution of the plugin"""
 
-    version: str
+    version: Version
 
 
 class PluginParameters(PorringerModel):

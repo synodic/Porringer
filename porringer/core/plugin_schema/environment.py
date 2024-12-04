@@ -122,6 +122,3 @@ class Environment(Plugin):
             A list of packages that were upgraded. Each item could be None if there was a failure
         """
         raise NotImplementedError
-
-
-EnvironmentT = TypeVar('EnvironmentT', bound=Environment)

@@ -2,6 +2,8 @@
 
 from collections.abc import Sequence
 
+from packaging.version import Version
+
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.schema import Distribution
 from porringer.test.mock.environment import MockEnvironment
@@ -30,7 +32,8 @@ def _porringer_distribution_list() -> Sequence[Distribution]:
     variants = []
 
     # Default
-    variants.append(Distribution(version='0.0.0'))
+    version = Version('0.0.0')
+    variants.append(Distribution(version=version))
 
     return variants
 

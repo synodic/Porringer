@@ -1,7 +1,5 @@
 """Resolves"""
 
-from packaging.version import Version
-
 from porringer.backend.schema import Configuration, GlobalConfiguration
 from porringer.core.plugin_schema.environment import Environment
 from porringer.schema import ListPluginResults, LocalConfiguration
@@ -46,7 +44,7 @@ def resolve_list_plugins_parameters(environment: list[Environment]) -> list[List
     for plugin in environment:
         canonicalized = canonicalize_type(type(plugin))
 
-        resolved_metadata = ListPluginResults(canonicalized.name, Version(plugin.__version__))
+        resolved_metadata = ListPluginResults(canonicalized.name, plugin.distribution.version)
         plugin_metadata.append(resolved_metadata)
 
     return plugin_metadata

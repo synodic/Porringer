@@ -19,7 +19,7 @@ class TestCommandPlugin:
         params = ListPluginsParameters()
         results = api.list_plugins(params)
 
-        assert not results
+        assert results
 
     @staticmethod
     def test_plugin_update() -> None:
@@ -31,4 +31,4 @@ class TestCommandPlugin:
         params = ListPluginsParameters()
         results = api.list_plugins(params)
 
-        assert not results
+        assert results
