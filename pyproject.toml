@@ -45,9 +45,9 @@ test = [
 ]
 
 [project.entry-points."porringer.environment"]
-pip = "porringer.plugin.pip:PipEnvironment"
-pipx = "porringer.plugin.pipx:PipxEnvironment"
-winget = "porringer.plugin.winget:WingetEnvironment"
+pip = "porringer.plugin.pip.plugin:PipEnvironment"
+pipx = "porringer.plugin.pipx.plugin:PipxEnvironment"
+winget = "porringer.plugin.winget.plugin:WingetEnvironment"
 
 [project.scripts]
 porringer = "porringer.console.entry:app"
