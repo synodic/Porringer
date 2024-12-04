@@ -34,7 +34,6 @@ source = "scm"
 
 [dependency-groups]
 lint = [
-  "isort>=5.13.2",
   "mypy>=1.10.0",
   "ruff>=0.7.1",
 ]
@@ -57,9 +56,6 @@ log_cli = true
 testpaths = [
   "tests",
 ]
-
-[tool.isort]
-profile = "black"
 
 [tool.mypy]
 exclude = "__pypackages__"
@@ -105,8 +101,7 @@ skip_empty = true
 [tool.pdm.scripts]
 analyze = {shell = "ruff check porringer tests"}
 format = {shell = "ruff format"}
-lint = {composite = ["analyze", "format", "sort-imports", "type-check"]}
-sort-imports = {shell = "isort --check-only --diff ."}
+lint = {composite = ["analyze", "format", "type-check"]}
 test = {shell = "pytest --cov=porringer --verbose tests"}
 type-check = {shell = "mypy ."}
 

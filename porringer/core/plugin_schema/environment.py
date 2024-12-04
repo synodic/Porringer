@@ -1,7 +1,7 @@
 """Plugin utilities for package environments"""
 
 from abc import abstractmethod
-from typing import TypeVar, override
+from typing import override
 
 from pydantic import BaseModel, Field
 
