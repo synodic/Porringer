@@ -1,5 +1,7 @@
 """Schema"""
+
 from dataclasses import dataclass
+from importlib.metadata import Distribution
 from logging import Logger
 from pathlib import Path
 
@@ -18,6 +20,8 @@ class CheckPorringerParameters(BaseModel):
 
 class ListPluginsParameters(BaseModel):
     """TODO"""
+
+    pattern: str = Field(default='*', description='The pattern to match against')
 
 
 class UpdatePluginsParameters(BaseModel):
@@ -43,9 +47,17 @@ class Parameters:
     logger: Logger
 
 
+@dataclass
+class PluginInformation[Plugin]:
+    """Gathered information about available plugins"""
+
+    type: type[Plugin]
+    distribution: Distribution
+
+
 class LocalConfiguration(BaseModel):
     """Configuration provided by the application running Porringer"""
 
     cache_directory: Path = Field(
-        default=Path(user_cache_dir("porringer", "synodic")), description="The application cache path "
+        default=Path(user_cache_dir('porringer', 'synodic')), description='The application cache path '
     )
