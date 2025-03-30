@@ -3,11 +3,9 @@
 description = ""
 name = "porringer"
 
-license = {text = "MIT"}
+license = { text = "MIT" }
 
-authors = [
-  {name = "Synodic Software", email = "contact@synodic.software"},
-]
+authors = [{ name = "Synodic Software", email = "contact@synodic.software" }]
 readme = "README.md"
 
 dynamic = ["version"]
@@ -15,33 +13,20 @@ dynamic = ["version"]
 requires-python = ">=3.13"
 
 dependencies = [
-  "typer>=0.15.0",
-  "pydantic>=2.10.3",
-  "platformdirs>=4.1.0",
-  "userpath>=1.9.1",
-  "packaging>=23.2",
+  "typer>=0.15.2",
+  "pydantic>=2.11.3",
+  "platformdirs>=4.3.7",
+  "userpath>=1.9.2",
+  "packaging>=24.2",
 ]
 
 [project.urls]
 homepage = "https://github.com/Synodic-Software/Porringer"
 repository = "https://github.com/Synodic-Software/Porringer"
 
-[tool.pdm.options]
-update = ["--update-all"]
-
-[tool.pdm.version]
-source = "scm"
-
 [dependency-groups]
-lint = [
-  "mypy>=1.10.0",
-  "ruff>=0.7.1",
-]
-test = [
-  "pytest>=7.4.4",
-  "pytest-cov>=4.1.0",
-  "pytest-mock>=3.12.0",
-]
+lint = ["mypy>=1.15.0", "ruff>=0.11.5"]
+test = ["pytest>=8.3.5", "pytest-cov>=6.1.1", "pytest-mock>=3.14.0"]
 
 [project.entry-points."porringer.environment"]
 pip = "porringer.plugin.pip.plugin:PipEnvironment"
@@ -49,13 +34,11 @@ pipx = "porringer.plugin.pipx.plugin:PipxEnvironment"
 winget = "porringer.plugin.winget.plugin:WingetEnvironment"
 
 [project.scripts]
-porringer = "porringer.console.entry:app"
+porringer = "porringer.console.entry:application"
 
 [tool.pytest.ini_options]
 log_cli = true
-testpaths = [
-  "tests",
-]
+testpaths = ["tests"]
 
 [tool.mypy]
 exclude = "__pypackages__"
@@ -67,24 +50,17 @@ line-length = 120
 preview = true
 
 [tool.ruff.lint]
-ignore = [
-  "D206",
-  "D300",
-  "D415",
-  "E111",
-  "E114",
-  "E117",
-]
+ignore = ["D206", "D300", "D415", "E111", "E114", "E117"]
 select = [
-  "D", # pydocstyle
-  "F", # Pyflakes
-  "I", # isort
-  "PL", # pylint
-  "UP", # pyupgrade
-  "E", # pycodestyle
-  "B", # flake8-bugbear
+  "D",   # pydocstyle
+  "F",   # Pyflakes
+  "I",   # isort
+  "PL",  # pylint
+  "UP",  # pyupgrade
+  "E",   # pycodestyle
+  "B",   # flake8-bugbear
   "SIM", # flake8-simplify
-  "PT", # flake8-pytest-style
+  "PT",  # flake8-pytest-style
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -98,12 +74,21 @@ quote-style = "single"
 [tool.coverage.report]
 skip_empty = true
 
+[tool.pdm]
+plugins = ["-e file:///${PROJECT_ROOT}"]
+
+[tool.pdm.options]
+update = ["--update-all", "--unconstrained"]
+
+[tool.pdm.version]
+source = "scm"
+
 [tool.pdm.scripts]
-analyze = {shell = "ruff check porringer tests"}
-format = {shell = "ruff format"}
-lint = {composite = ["analyze", "format", "type-check"]}
-test = {shell = "pytest --cov=porringer --verbose tests"}
-type-check = {shell = "mypy ."}
+analyze = { shell = "ruff check porringer tests" }
+format = { shell = "ruff format" }
+lint = { composite = ["analyze", "format", "type-check"] }
+test = { shell = "pytest --cov=porringer --verbose tests" }
+type-check = { shell = "mypy ." }
 
 [build-system]
 build-backend = "pdm.backend"
