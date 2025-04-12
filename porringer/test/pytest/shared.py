@@ -21,10 +21,10 @@ class BaseTests[T: Plugin](metaclass=ABCMeta):
     @staticmethod
     @pytest.fixture(name='plugin_group_name', scope='session')
     def fixture_plugin_group_name() -> LiteralString:
-        """_summary_
+        """Returns the plugin group name.
 
         Returns:
-            _description_
+            str: The name of the plugin group.
         """
         return 'porringer'
 
@@ -54,8 +54,6 @@ class PluginTests[T: Plugin](BaseTests[T], metaclass=ABCMeta):
         Returns:
             A newly constructed provider
         """
-        # TODO: Something
-
         plugin = plugin_type(plugin_parameters)
 
         return plugin

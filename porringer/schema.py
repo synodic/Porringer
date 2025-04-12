@@ -11,29 +11,30 @@ from pydantic import BaseModel, Field
 
 
 class UpdatePorringerParameters(BaseModel):
-    """TODO"""
+    """Parameters for updating the Porringer application."""
 
 
 class CheckPorringerParameters(BaseModel):
-    """TODO"""
+    """Parameters for checking the Porringer application status."""
 
 
 class ListPluginsParameters(BaseModel):
-    """TODO"""
+    """Parameters for listing available plugins."""
 
     pattern: str = Field(default='*', description='The pattern to match against')
 
 
 class UpdatePluginsParameters(BaseModel):
-    """TODO"""
+    """Parameters for updating plugins."""
 
 
 @dataclass
 class ListPluginResults:
-    """_summary_
+    """Results of listing plugins.
 
     Args:
-        BaseModel: _description_
+        name: The name of the plugin.
+        version: The version of the plugin.
     """
 
     name: str

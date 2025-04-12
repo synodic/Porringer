@@ -86,13 +86,13 @@ class Configuration:
 pass_config = click.make_pass_decorator(Configuration, ensure=True)
 
 
-@click.group(invoke_without_command=True)
+@click.group()
 @click.option('-v', '--verbose', count=True, help='Print additional output')
 @click.option('--debug', is_flag=True, help='Enables additional debug information')
 @click.version_option()
 @pass_config
 def application(config: Configuration, verbose: int, debug: bool) -> None:
-    """entry_point group for the CLI commands
+    """A tool for automatic and facilitating generic program updates
 
     Args:
         config: The click configuration object
@@ -111,19 +111,19 @@ def self_group() -> None:
 
 @self_group.command(name='update')
 def self_update() -> None:
-    """Updates
+    """Updates the Porringer application.
 
     Raises:
-        NotImplementedError: _description_
+        NotImplementedError: This functionality is not yet implemented.
     """
 
 
 @self_group.command(name='check')
 def self_check() -> None:
-    """Checks for an update
+    """Checks for updates to the Porringer application.
 
     Raises:
-        NotImplementedError: _description_
+        NotImplementedError: This functionality is not yet implemented.
     """
 
 
