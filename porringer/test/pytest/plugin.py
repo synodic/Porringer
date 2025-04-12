@@ -9,13 +9,13 @@ from porringer.test.pytest.variants import porringer_distribution_list
 
 @pytest.fixture(name='plugin_distributions', scope='session', params=porringer_distribution_list)
 def fixture_plugin_distributions(request: pytest.FixtureRequest) -> Distribution:
-    """_summary_
+    """Fixture for plugin distributions.
 
     Args:
-        request: _description_
+        request: The pytest request object for parameterization.
 
     Returns:
-        _description_
+        Distribution: The distribution object for the plugin.
     """
     return cast(Distribution, request.param)
 
@@ -25,12 +25,12 @@ def fixture_plugin_distributions(request: pytest.FixtureRequest) -> Distribution
     scope='session',
 )
 def fixture_plugin_parameters(plugin_distributions: Distribution) -> PluginParameters:
-    """_summary_
+    """Fixture for plugin parameters.
 
     Args:
-        plugin_distributions: _description_
+        plugin_distributions: The distribution object for the plugin.
 
     Returns:
-        _description_
+        PluginParameters: The parameters object for the plugin.
     """
     return PluginParameters(distribution=plugin_distributions)
