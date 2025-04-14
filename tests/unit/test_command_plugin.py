@@ -3,7 +3,7 @@
 from logging import Logger
 
 from porringer.api import API
-from porringer.schema import ListPluginsParameters, LocalConfiguration, Parameters
+from porringer.schema import APIParameters, ListPluginsParameters, LocalConfiguration
 
 
 class TestCommandPlugin:
@@ -13,7 +13,7 @@ class TestCommandPlugin:
     def test_plugin_list() -> None:
         """Test the plugin list"""
         config = LocalConfiguration()
-        parameters = Parameters(logger=Logger('test'))
+        parameters = APIParameters(logger=Logger('test'))
         api = API(config, parameters)
 
         params = ListPluginsParameters()
@@ -25,7 +25,7 @@ class TestCommandPlugin:
     def test_plugin_update() -> None:
         """Test the plugin update"""
         config = LocalConfiguration()
-        parameters = Parameters(logger=Logger('test'))
+        parameters = APIParameters(logger=Logger('test'))
         api = API(config, parameters)
 
         params = ListPluginsParameters()

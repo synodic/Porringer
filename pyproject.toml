@@ -13,7 +13,7 @@ dynamic = ["version"]
 requires-python = ">=3.13"
 
 dependencies = [
-  "typer>=0.15.2",
+  "typer[all]>=0.15.2",
   "pydantic>=2.11.3",
   "platformdirs>=4.3.7",
   "userpath>=1.9.2",
@@ -34,7 +34,7 @@ pipx = "porringer.plugin.pipx.plugin:PipxEnvironment"
 winget = "porringer.plugin.winget.plugin:WingetEnvironment"
 
 [project.scripts]
-porringer = "porringer.console.entry:application"
+porringer = "porringer.console.entry:app"
 
 [tool.pytest.ini_options]
 log_cli = true

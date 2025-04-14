@@ -5,11 +5,11 @@ from porringer.backend.command.self import check_porringer, update_porringer
 from porringer.backend.resolver import resolve_configuration
 from porringer.backend.schema import Configuration, GlobalConfiguration
 from porringer.schema import (
+    APIParameters,
     CheckPorringerParameters,
     ListPluginResults,
     ListPluginsParameters,
     LocalConfiguration,
-    Parameters,
     UpdatePluginsParameters,
     UpdatePorringerParameters,
 )
@@ -18,7 +18,7 @@ from porringer.schema import (
 class API:
     """_summary_"""
 
-    def __init__(self, local_configuration: LocalConfiguration, parameters: Parameters) -> None:
+    def __init__(self, local_configuration: LocalConfiguration, parameters: APIParameters) -> None:
         """Initializes the API"""
         self.configuration: Configuration = resolve_configuration(local_configuration, GlobalConfiguration())
         self.parameters = parameters

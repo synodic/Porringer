@@ -42,7 +42,7 @@ class ListPluginResults:
 
 
 @dataclass
-class Parameters:
+class APIParameters:
     """Resolved configuration"""
 
     logger: Logger
