@@ -12,7 +12,11 @@ from porringer.core.schema import Package, PackageName
 
 
 class PipEnvironment(Environment):
-    """_summary_"""
+    """Represents a Python environment managed by pip.
+
+    Provides methods to install, search, uninstall, upgrade, and list Python packages using pip
+    as the backend package manager.
+    """
 
     @override
     def install(self, params: InstallParameters) -> Package | None:

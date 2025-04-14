@@ -12,7 +12,11 @@ from porringer.core.schema import Package, PackageName
 
 
 class PipxEnvironment(Environment):
-    """_summary_"""
+    """Represents a Python environment managed by pipx.
+
+    Provides methods to install, search, uninstall, upgrade, and list Python packages using
+    pipx as the backend package manager.
+    """
 
     @override
     def install(self, params: InstallParameters) -> Package | None:

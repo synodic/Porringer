@@ -12,7 +12,11 @@ from porringer.core.schema import Package, PackageName
 
 
 class WingetEnvironment(Environment):
-    """_summary_"""
+    """Represents a Windows environment managed by winget.
+
+    Provides methods to install, search, uninstall, upgrade, and list packages using winget
+    as the backend package manager.
+    """
 
     @override
     def install(self, params: InstallParameters) -> Package | None:
