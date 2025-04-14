@@ -86,7 +86,7 @@ class Configuration:
 pass_config = click.make_pass_decorator(Configuration, ensure=True)
 
 
-@click.group()
+@click.group(invoke_without_command=True, no_args_is_help=True)
 @click.option('-v', '--verbose', count=True, help='Print additional output')
 @click.option('--debug', is_flag=True, help='Enables additional debug information')
 @click.version_option()
