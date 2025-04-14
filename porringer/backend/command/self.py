@@ -1,46 +1,48 @@
-"""Version utilities"""
+"""Utilities for managing and checking the Porringer installation version."""
 
 import os
+import subprocess
 import sys
 from logging import Logger
 
-from porringer.utility.subprocess import call
 
+class SelfCommands:
+    """Commands related to the Porringer installation."""
 
-def is_pipx_installation() -> bool:
-    """_summary_
+    def __init__(self, logger: Logger) -> None:
+        """Initialize the SelfCommands class.
 
-    Returns:
-        _description_
-    """
-    return sys.prefix.split(os.sep)[-3:-1] == ['pipx', 'venvs']
+        Args:
+            logger: Logger instance for logging actions.
+        """
+        self.logger = logger
 
+    def is_pipx_installation(self) -> bool:
+        """Check if Porringer is installed via pipx.
 
-def update_porringer(logger: Logger) -> None:
-    """_summary_
+        Returns:
+            bool: True if the current Python environment is a pipx-managed venv, False otherwise.
+        """
+        return sys.prefix.split(os.sep)[-3:-1] == ['pipx', 'venvs']
 
-    Args:
-        logger: _description_
+    def update(self) -> None:
+        """Upgrade the Porringer package using pipx if installed via pipx.
 
-    Raises:
-        NotImplementedError: _description_
-    """
-    if is_pipx_installation():
-        call(['pipx', 'upgrade', 'porringer'], logger)
-    else:
-        raise NotImplementedError()
+        Raises:
+            NotImplementedError: If Porringer is not installed via pipx.
+        """
+        if self.is_pipx_installation():
+            subprocess.run(['pipx', 'upgrade', 'porringer'], check=True)
+        else:
+            raise NotImplementedError()
 
+    def check(self) -> None:
+        """Check for updates to the Porringer package using pipx if installed via pipx.
 
-def check_porringer(logger: Logger) -> None:
-    """_summary_
-
-    Args:
-        logger: _description_
-
-    Raises:
-        NotImplementedError: _description_
-    """
-    if is_pipx_installation():
-        call(['pipx', 'upgrade', 'porringer'], logger)
-    else:
-        raise NotImplementedError()
+        Raises:
+            NotImplementedError: If Porringer is not installed via pipx.
+        """
+        if self.is_pipx_installation():
+            subprocess.run(['pipx', 'upgrade', 'porringer'], check=True)
+        else:
+            raise NotImplementedError()

@@ -17,7 +17,7 @@ class TestCommandPlugin:
         api = API(config, parameters)
 
         params = ListPluginsParameters()
-        results = api.list_plugins(params)
+        results = api.plugin.list(params)
 
         assert results
 
@@ -29,6 +29,6 @@ class TestCommandPlugin:
         api = API(config, parameters)
 
         params = ListPluginsParameters()
-        results = api.list_plugins(params)
+        results = api.plugin.list(params)
 
         assert results

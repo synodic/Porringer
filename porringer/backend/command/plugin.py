@@ -7,31 +7,56 @@ from porringer.backend.resolver import resolve_list_plugins_parameters
 from porringer.schema import ListPluginResults, ListPluginsParameters
 
 
-def list_plugins(parameters: ListPluginsParameters, logger: Logger) -> list[ListPluginResults]:
-    """Lists the plugins.
+class PluginCommands:
+    """Plugin commands"""
 
-    Args:
-        parameters: The list command parameters.
-        logger: The logger.
+    def __init__(self, logger: Logger) -> None:
+        """Initialize the SelfCommands class.
 
-    Returns:
-        A list of registered plugins.
-    """
-    logger.info('Listing plugins')
+        Args:
+            logger (Logger): Logger instance for logging actions.
+        """
+        self.logger = logger
 
-    builder = Builder(logger)
+    def list(self, parameters: ListPluginsParameters) -> list[ListPluginResults]:
+        """Lists the plugins.
 
-    environment_types = builder.find_environments()
+        Args:
+            parameters: The list command parameters.
 
-    environments = builder.build_environments(environment_types)
+        Returns:
+            A list of registered plugins.
+        """
+        self.logger.info('Listing plugins')
 
-    return resolve_list_plugins_parameters(environments)
+        builder = Builder(self.logger)
 
+        environment_types = builder.find_environments()
 
-def update_plugins(logger: Logger) -> None:
-    """Updates the plugins.
+        environments = builder.build_environments(environment_types)
 
-    Args:
-        logger: The logger.
-    """
-    logger.info('Updating plugins')
+        return resolve_list_plugins_parameters(environments)
+
+    def install(self, logger: Logger) -> None:
+        """Install a plugin"""
+        logger.info('Installing plugin')
+
+        builder = Builder(logger)
+
+        environment_types = builder.find_environments()
+
+    def uninstall(self, logger: Logger) -> None:
+        """Remove an installed plugin"""
+        logger.info('Uninstalling plugin')
+
+        builder = Builder(logger)
+
+        environment_types = builder.find_environments()
+
+    def update(self, logger: Logger) -> None:
+        """Updates the plugins.
+
+        Args:
+            logger: The logger.
+        """
+        logger.info('Updating plugins')

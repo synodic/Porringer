@@ -39,6 +39,7 @@ class ListPluginResults:
 
     name: str
     version: Version
+    installed: bool
 
 
 @dataclass

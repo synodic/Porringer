@@ -26,7 +26,7 @@ class TestCommandSelf:
         params = CheckPorringerParameters()
 
         with pytest.raises(NotImplementedError):
-            api.check_porringer(params)
+            api.porringer.check()
 
     @staticmethod
     def test_self_update() -> None:
@@ -38,4 +38,4 @@ class TestCommandSelf:
         params = UpdatePorringerParameters()
 
         with pytest.raises(NotImplementedError):
-            api.update_porringer(params)
+            api.porringer.update()
