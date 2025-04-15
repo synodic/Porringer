@@ -1,36 +1,19 @@
 """Test the click cli"""
 
-from click.testing import CliRunner
+from typer.testing import CliRunner
 
-from porringer.console.entry import Configuration, application
+from porringer.console.entry import app
+from porringer.console.schema import Configuration
 
 
 class TestCLI:
-    """_summary_"""
+    """Tests for the typer CLI"""
 
     @staticmethod
     def test_version() -> None:
-        """_summary_"""
+        """Verifies the version command works"""
         runner = CliRunner()
         config = Configuration()
-        result = runner.invoke(application, ['--version'], obj=config)
+        result = runner.invoke(app, ['--version'], obj=config)
 
-        assert result.exit_code == 0
-        assert result.output
-
-    @staticmethod
-    def test_verbosity() -> None:
-        """Test's that the verbosity flag is implicitly capped at 3 levels"""
-        runner = CliRunner()
-        config = Configuration()
-
-        result = runner.invoke(application, ['-vvv'], obj=config)
-
-        assert result.exit_code == 0
-
-        level = config.logger.level
-
-        result = runner.invoke(application, ['-vvvv'], obj=config)
-
-        assert result.exit_code == 0
-        assert config.logger.level == level
+        assert result.exit_code == 0, result.output

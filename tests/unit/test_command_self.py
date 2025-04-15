@@ -6,9 +6,9 @@ import pytest
 
 from porringer.api import API
 from porringer.schema import (
+    APIParameters,
     CheckPorringerParameters,
     LocalConfiguration,
-    Parameters,
     UpdatePorringerParameters,
 )
 
@@ -20,22 +20,22 @@ class TestCommandSelf:
     def test_self_update_check() -> None:
         """Test the self update check"""
         config = LocalConfiguration()
-        parameters = Parameters(logger=Logger('test'))
+        parameters = APIParameters(logger=Logger('test'))
         api = API(config, parameters)
 
         params = CheckPorringerParameters()
 
         with pytest.raises(NotImplementedError):
-            api.check_porringer(params)
+            api.porringer.check()
 
     @staticmethod
     def test_self_update() -> None:
         """Test the self update"""
         config = LocalConfiguration()
-        parameters = Parameters(logger=Logger('test'))
+        parameters = APIParameters(logger=Logger('test'))
         api = API(config, parameters)
 
         params = UpdatePorringerParameters()
 
         with pytest.raises(NotImplementedError):
-            api.update_porringer(params)
+            api.porringer.update()

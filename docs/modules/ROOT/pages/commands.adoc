@@ -1,0 +1,20 @@
+= Porringer CLI Commands
+
+== Global Options
+
+* `--version`: Shows the CLI version and exits.
+* `--verbose`, `-v`: Increases verbosity (can be used multiple times).
+* `--debug`: Enables debug mode.
+
+== plugin
+
+Manage plugins for Porringer.
+
+* `plugin list`: Lists available plugins.
+
+== self
+
+Manage the Porringer CLI application itself.
+
+* `self update`: Updates the Porringer application. (Not yet implemented)
+* `self check`: Checks for updates to the Porringer application. (Not yet implemented)

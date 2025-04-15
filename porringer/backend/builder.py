@@ -59,6 +59,22 @@ class Builder:
         return plugin_types
 
     @staticmethod
+    def build_environment(environment_type: PluginInformation[Environment]) -> Environment:
+        """Constructs a single environment from input type
+
+        Args:
+            environment_type: The type to construct
+
+        Returns:
+            The instantiated environment
+        """
+        pluginVersion = Version(environment_type.distribution.version)
+        pluginDistribution = Distribution(version=pluginVersion)
+        parameters = PluginParameters(distribution=pluginDistribution)
+
+        return environment_type.type(parameters)
+
+    @staticmethod
     def build_environments(environment_types: list[PluginInformation[Environment]]) -> list[Environment]:
         """Constructs environments from input types
 
@@ -71,10 +87,6 @@ class Builder:
         environments: list[Environment] = []
 
         for environment_type in environment_types:
-            pluginVersion = Version(environment_type.distribution.version)
-            pluginDistribution = Distribution(version=pluginVersion)
-            parameters = PluginParameters(distribution=pluginDistribution)
-
-            environments.append(environment_type.type(parameters))
+            environments.append(Builder.build_environment(environment_type))
 
         return environments

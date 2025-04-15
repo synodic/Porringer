@@ -39,10 +39,11 @@ class ListPluginResults:
 
     name: str
     version: Version
+    installed: bool
 
 
 @dataclass
-class Parameters:
+class APIParameters:
     """Resolved configuration"""
 
     logger: Logger
