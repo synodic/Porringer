@@ -37,23 +37,26 @@ class PluginCommands:
 
         return resolve_list_plugins_parameters(environments)
 
-    def install(self, logger: Logger) -> None:
+    @staticmethod
+    def install(logger: Logger) -> None:
         """Install a plugin"""
         logger.info('Installing plugin')
 
         builder = Builder(logger)
 
-        environment_types = builder.find_environments()
+        builder.find_environments()
 
-    def uninstall(self, logger: Logger) -> None:
+    @staticmethod
+    def uninstall(logger: Logger) -> None:
         """Remove an installed plugin"""
         logger.info('Uninstalling plugin')
 
         builder = Builder(logger)
 
-        environment_types = builder.find_environments()
+        builder.find_environments()
 
-    def update(self, logger: Logger) -> None:
+    @staticmethod
+    def update(logger: Logger) -> None:
         """Updates the plugins.
 
         Args:

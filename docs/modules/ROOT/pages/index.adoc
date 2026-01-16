@@ -1,2 +1,0 @@
-= Porringer Documentation
-:navtitle: Porringer Documentation

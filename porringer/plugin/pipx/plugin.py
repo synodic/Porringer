@@ -125,7 +125,7 @@ class PipxEnvironment(Environment):
                     version = main_package.get('package_version', 'unknown')
                     if name:
                         packages.append(Package(name=PackageName(name), version=version))
-                except (json.JSONDecodeError, KeyError):
+                except json.JSONDecodeError, KeyError:
                     continue
 
         return packages

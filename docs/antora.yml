@@ -1,4 +1,4 @@
 name: porringer
-title: Porringer Documentation
+version: ~
 nav:
   - modules/ROOT/nav.adoc
