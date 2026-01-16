@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+from importlib.metadata import distributions
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -100,4 +101,8 @@ class PipEnvironment(Environment):
         Returns:
             A list of packages
         """
-        return []
+        return [
+            Package(name=PackageName(dist.metadata['Name']), version=dist.version)
+            for dist in distributions()
+            if dist.metadata['Name'] is not None
+        ]

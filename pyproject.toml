@@ -32,6 +32,8 @@ test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
 pip = "porringer.plugin.pip.plugin:PipEnvironment"
 pipx = "porringer.plugin.pipx.plugin:PipxEnvironment"
 winget = "porringer.plugin.winget.plugin:WingetEnvironment"
+uv = "porringer.plugin.uv.plugin:UvEnvironment"
+npm = "porringer.plugin.npm.plugin:NpmEnvironment"
 
 [project.scripts]
 porringer = "porringer.console.entry:app"
