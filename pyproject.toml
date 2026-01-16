@@ -83,9 +83,6 @@ project-excludes = ["examples"]
 [tool.pdm]
 plugins = ["-e file:///${PROJECT_ROOT}"]
 
-[tool.pdm.options]
-update = ["--update-all"]
-
 [tool.pdm.version]
 source = "scm"
 
