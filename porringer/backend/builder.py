@@ -9,7 +9,6 @@ from packaging.version import Version
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.schema import Distribution, PluginParameters
 from porringer.schema import PluginInformation
-from porringer.utility.exception import PluginError
 from porringer.utility.utility import canonicalize_type
 
 
@@ -22,9 +21,6 @@ class Builder:
 
     def find_environments(self) -> list[PluginInformation[Environment]]:
         """Searches for registered environment plugins
-
-        Raises:
-            PluginError: Raised if there is no plugin found
 
         Returns:
             A list of loaded plugins
@@ -52,9 +48,6 @@ class Builder:
             else:
                 self.logger.warning(f'{group_name} plugin found: {canonicalized.name} from {getmodule(loaded_type)}')
                 plugin_types.append(PluginInformation(loaded_type, entry_point.dist))
-
-        if not plugin_types:
-            raise PluginError(f'No {group_name} plugin was found')
 
         return plugin_types
 

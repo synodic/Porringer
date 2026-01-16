@@ -29,8 +29,11 @@ def plugin_list(
     list_parameters = ListPluginsParameters()
     results = api.plugin.list(list_parameters)
 
-    for result in results:
-        configuration.console.print(result)
+    if not results:
+        configuration.console.print('[yellow]No plugins found[/yellow]')
+    else:
+        for result in results:
+            configuration.console.print(result)
 
 
 @app.command('install')
