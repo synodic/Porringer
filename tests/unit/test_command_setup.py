@@ -19,6 +19,10 @@ from porringer.schema import (
 )
 from porringer.utility.exception import ManifestError
 
+# Test constants
+EXPECTED_ACTIONS_JSON_MANIFEST = 2  # 1 install + 1 command
+EXPECTED_ACTIONS_WITH_PREREQUISITES = 4  # 1 check + 2 installs + 1 command
+
 
 class TestSetupManifest:
     """Tests for manifest loading"""
@@ -43,7 +47,8 @@ class TestSetupManifest:
             results = api.setup.preview(params)
 
             assert results.manifest_path == manifest_path
-            assert len(results.actions) == 2  # 1 install + 1 command
+            # 1 install + 1 command = 2 actions
+            assert len(results.actions) == EXPECTED_ACTIONS_JSON_MANIFEST
 
     @staticmethod
     def test_load_pyproject_manifest() -> None:
@@ -105,7 +110,7 @@ class TestSetupPreview:
             results = api.setup.preview(params)
 
             # 1 check + 2 installs + 1 command = 4 actions
-            assert len(results.actions) == 4
+            assert len(results.actions) == EXPECTED_ACTIONS_WITH_PREREQUISITES
 
             action_types = [a.action_type for a in results.actions]
             assert action_types[0] == SetupActionType.CHECK_PLUGIN
