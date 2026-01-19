@@ -265,6 +265,9 @@ class SetupCommands:
                 return self._execute_install_package(action, environments)
             case SetupActionType.RUN_COMMAND:
                 return self._execute_run_command(action, working_dir, timeout)
+            case _:
+                msg = f'Unknown action type: {action.action_type}'
+                return SetupActionResult(action=action, success=False, message=msg)
 
     def _execute_check_plugin(self, action: SetupAction, available_plugins: set[str]) -> SetupActionResult:
         """Executes a plugin availability check.

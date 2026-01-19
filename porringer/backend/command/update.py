@@ -15,6 +15,7 @@ from porringer.schema import (
     UpdateSource,
 )
 from porringer.utility.download import download_file
+from porringer.utility.exception import UpdateError
 
 
 class UpdateCommands:
@@ -44,6 +45,9 @@ class UpdateCommands:
                 return PyPIAdapter(self.logger)
             case UpdateSource.CUSTOM_URL:
                 return CustomURLAdapter(self.logger)
+            case _:
+                msg = f'Unknown update source: {source}'
+                raise UpdateError(msg)
 
     def check(self, parameters: CheckUpdateParameters) -> UpdateInfo:
         """Check for available updates.
