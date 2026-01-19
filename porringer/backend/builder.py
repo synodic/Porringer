@@ -30,7 +30,11 @@ class Builder:
 
         # Filter entries by type
         for entry_point in list(metadata.entry_points(group=f'porringer.{group_name}')):
-            loaded_type = entry_point.load()
+            try:
+                loaded_type = entry_point.load()
+            except ModuleNotFoundError as e:
+                self.logger.warning(f"Plugin '{entry_point.name}' could not be loaded: {e}. Skipping")
+                continue
 
             canonicalized = canonicalize_type(loaded_type)
 
