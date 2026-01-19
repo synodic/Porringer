@@ -5,7 +5,7 @@
     <img width=25% alt="Porringer Logo" src="docs/images/porringer-light.svg">
   </picture>
   <br>
-  <em>A companion to the C++ standard library.</em>
+  <em>A meta-package manager for all the porridges.</em>
 </p>
 
 # Porringer
@@ -14,6 +14,7 @@ A CLI and API that can discover and orchestrate multiple underlying package mana
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
+[![PyPI version](https://img.shields.io/pypi/v/porringer.svg)](https://pypi.org/project/porringer/)
 
 ## Features
 

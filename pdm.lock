@@ -5,7 +5,7 @@
 groups = ["default", "docs", "lint", "test"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:db1c9a139c21ccefcdc4c9540a3cb4e88385e46f2de66ecf15255b58bdf0c3de"
+content_hash = "sha256:6aca7319ba954d2d842366d3332d60f763c8f7974363eb31eb777913b5c31a60"
 
 [[metadata.targets]]
 requires_python = ">=3.14"
@@ -155,39 +155,6 @@ files = [
 ]
 
 [[package]]
-name = "librt"
-version = "0.7.8"
-requires_python = ">=3.9"
-summary = "Mypyc runtime library"
-groups = ["lint"]
-marker = "platform_python_implementation != \"PyPy\""
-files = [
-    {file = "librt-0.7.8-cp314-cp314-macosx_10_13_x86_64.whl", hash = "sha256:be927c3c94c74b05128089a955fba86501c3b544d1d300282cc1b4bd370cb418"},
-    {file = "librt-0.7.8-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:7b0803e9008c62a7ef79058233db7ff6f37a9933b8f2573c05b07ddafa226611"},
-    {file = "librt-0.7.8-cp314-cp314-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl", hash = "sha256:79feb4d00b2a4e0e05c9c56df707934f41fcb5fe53fd9efb7549068d0495b758"},
-    {file = "librt-0.7.8-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b9122094e3f24aa759c38f46bd8863433820654927370250f460ae75488b66ea"},
-    {file = "librt-0.7.8-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7e03bea66af33c95ce3addf87a9bf1fcad8d33e757bc479957ddbc0e4f7207ac"},
-    {file = "librt-0.7.8-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:f1ade7f31675db00b514b98f9ab9a7698c7282dad4be7492589109471852d398"},
-    {file = "librt-0.7.8-cp314-cp314-musllinux_1_2_i686.whl", hash = "sha256:a14229ac62adcf1b90a15992f1ab9c69ae8b99ffb23cb64a90878a6e8a2f5b81"},
-    {file = "librt-0.7.8-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:5bcaaf624fd24e6a0cb14beac37677f90793a96864c67c064a91458611446e83"},
-    {file = "librt-0.7.8-cp314-cp314-win32.whl", hash = "sha256:7aa7d5457b6c542ecaed79cec4ad98534373c9757383973e638ccced0f11f46d"},
-    {file = "librt-0.7.8-cp314-cp314-win_amd64.whl", hash = "sha256:3d1322800771bee4a91f3b4bd4e49abc7d35e65166821086e5afd1e6c0d9be44"},
-    {file = "librt-0.7.8-cp314-cp314-win_arm64.whl", hash = "sha256:5363427bc6a8c3b1719f8f3845ea53553d301382928a86e8fab7984426949bce"},
-    {file = "librt-0.7.8-cp314-cp314t-macosx_10_13_x86_64.whl", hash = "sha256:ca916919793a77e4a98d4a1701e345d337ce53be4a16620f063191f7322ac80f"},
-    {file = "librt-0.7.8-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:54feb7b4f2f6706bb82325e836a01be805770443e2400f706e824e91f6441dde"},
-    {file = "librt-0.7.8-cp314-cp314t-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl", hash = "sha256:39a4c76fee41007070f872b648cc2f711f9abf9a13d0c7162478043377b52c8e"},
-    {file = "librt-0.7.8-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ac9c8a458245c7de80bc1b9765b177055efff5803f08e548dd4bb9ab9a8d789b"},
-    {file = "librt-0.7.8-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:95b67aa7eff150f075fda09d11f6bfb26edffd300f6ab1666759547581e8f666"},
-    {file = "librt-0.7.8-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:535929b6eff670c593c34ff435d5440c3096f20fa72d63444608a5aef64dd581"},
-    {file = "librt-0.7.8-cp314-cp314t-musllinux_1_2_i686.whl", hash = "sha256:63937bd0f4d1cb56653dc7ae900d6c52c41f0015e25aaf9902481ee79943b33a"},
-    {file = "librt-0.7.8-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:cf243da9e42d914036fd362ac3fa77d80a41cadcd11ad789b1b5eec4daaf67ca"},
-    {file = "librt-0.7.8-cp314-cp314t-win32.whl", hash = "sha256:171ca3a0a06c643bd0a2f62a8944e1902c94aa8e5da4db1ea9a8daf872685365"},
-    {file = "librt-0.7.8-cp314-cp314t-win_amd64.whl", hash = "sha256:445b7304145e24c60288a2f172b5ce2ca35c0f81605f5299f3fa567e189d2e32"},
-    {file = "librt-0.7.8-cp314-cp314t-win_arm64.whl", hash = "sha256:8766ece9de08527deabcd7cb1b4f1a967a385d26e33e536d6d8913db6ef74f06"},
-    {file = "librt-0.7.8.tar.gz", hash = "sha256:1a4ede613941d9c3470b0368be851df6bb78ab218635512d0370b27a277a0862"},
-]
-
-[[package]]
 name = "markdown"
 version = "3.10"
 requires_python = ">=3.10"
@@ -224,41 +191,6 @@ files = [
 ]
 
 [[package]]
-name = "mypy"
-version = "1.19.1"
-requires_python = ">=3.9"
-summary = "Optional static typing for Python"
-groups = ["lint"]
-dependencies = [
-    "librt>=0.6.2; platform_python_implementation != \"PyPy\"",
-    "mypy-extensions>=1.0.0",
-    "pathspec>=0.9.0",
-    "tomli>=1.1.0; python_version < \"3.11\"",
-    "typing-extensions>=4.6.0",
-]
-files = [
-    {file = "mypy-1.19.1-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:06e6170bd5836770e8104c8fdd58e5e725cfeb309f0a6c681a811f557e97eac1"},
-    {file = "mypy-1.19.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:804bd67b8054a85447c8954215a906d6eff9cabeabe493fb6334b24f4bfff718"},
-    {file = "mypy-1.19.1-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:21761006a7f497cb0d4de3d8ef4ca70532256688b0523eee02baf9eec895e27b"},
-    {file = "mypy-1.19.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:28902ee51f12e0f19e1e16fbe2f8f06b6637f482c459dd393efddd0ec7f82045"},
-    {file = "mypy-1.19.1-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:481daf36a4c443332e2ae9c137dfee878fcea781a2e3f895d54bd3002a900957"},
-    {file = "mypy-1.19.1-cp314-cp314-win_amd64.whl", hash = "sha256:8bb5c6f6d043655e055be9b542aa5f3bdd30e4f3589163e85f93f3640060509f"},
-    {file = "mypy-1.19.1-py3-none-any.whl", hash = "sha256:f1235f5ea01b7db5468d53ece6aaddf1ad0b88d9e7462b86ef96fe04995d7247"},
-    {file = "mypy-1.19.1.tar.gz", hash = "sha256:19d88bb05303fe63f71dd2c6270daca27cb9401c4ca8255fe50d1d920e0eb9ba"},
-]
-
-[[package]]
-name = "mypy-extensions"
-version = "1.1.0"
-requires_python = ">=3.8"
-summary = "Type system extensions for programs checked with the mypy type checker."
-groups = ["lint"]
-files = [
-    {file = "mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505"},
-    {file = "mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558"},
-]
-
-[[package]]
 name = "packaging"
 version = "25.0"
 requires_python = ">=3.8"
@@ -267,17 +199,6 @@ groups = ["default", "test"]
 files = [
     {file = "packaging-25.0-py3-none-any.whl", hash = "sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484"},
     {file = "packaging-25.0.tar.gz", hash = "sha256:d443872c98d677bf60f6a1f2f8c1cb748e8fe762d2bf9d3148b5599295b0fc4f"},
-]
-
-[[package]]
-name = "pathspec"
-version = "1.0.3"
-requires_python = ">=3.9"
-summary = "Utility library for gitignore style pattern matching of file paths."
-groups = ["lint"]
-files = [
-    {file = "pathspec-1.0.3-py3-none-any.whl", hash = "sha256:e80767021c1cc524aa3fb14bedda9c34406591343cc42797b386ce7b9354fb6c"},
-    {file = "pathspec-1.0.3.tar.gz", hash = "sha256:bac5cf97ae2c2876e2d25ebb15078eb04d76e4b98921ee31c6f85ade8b59444d"},
 ]
 
 [[package]]
@@ -384,6 +305,24 @@ dependencies = [
 files = [
     {file = "pymdown_extensions-10.20-py3-none-any.whl", hash = "sha256:ea9e62add865da80a271d00bfa1c0fa085b20d133fb3fc97afdc88e682f60b2f"},
     {file = "pymdown_extensions-10.20.tar.gz", hash = "sha256:5c73566ab0cf38c6ba084cb7c5ea64a119ae0500cce754ccb682761dfea13a52"},
+]
+
+[[package]]
+name = "pyrefly"
+version = "0.48.2"
+requires_python = ">=3.8"
+summary = "A fast type checker and language server for Python with powerful IDE features"
+groups = ["lint"]
+files = [
+    {file = "pyrefly-0.48.2-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:2bb0589dab7175f382f715e2edf3a782ed2b1984887d2c0fb108851e853d8152"},
+    {file = "pyrefly-0.48.2-py3-none-macosx_11_0_arm64.whl", hash = "sha256:789d826fa4dfa8c73b85a105eff7194833d1834bbe758cf20f9008d72a67320a"},
+    {file = "pyrefly-0.48.2-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:617fba81028ed164b2bf341278915cb54b4a54196026b3df5aac0d8bb0cc837e"},
+    {file = "pyrefly-0.48.2-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:f6d1071d85798a2c462b4b002bcb1b3e6c6386e2379719e5f45a0988c267b007"},
+    {file = "pyrefly-0.48.2-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:07181ff73c6e4cda847420cdefbae097512b73589bff53340f0abd57500dab21"},
+    {file = "pyrefly-0.48.2-py3-none-win32.whl", hash = "sha256:396f3f2ea3330f85ddaf96208c0b683e1db14fd80eeb21502b787c9c25490652"},
+    {file = "pyrefly-0.48.2-py3-none-win_amd64.whl", hash = "sha256:24c13ef71e852935ac5a19677e381a505831be9cd418e902f894e5dc406714e5"},
+    {file = "pyrefly-0.48.2-py3-none-win_arm64.whl", hash = "sha256:3d98ada1359713f2d333eb07bf76148d947e5abbd3e4ea7e1d28257af034805a"},
+    {file = "pyrefly-0.48.2.tar.gz", hash = "sha256:08f20a16c02ea09d93b7599f3192acd2ddcd18cbd438d5245a838a22303d5b23"},
 ]
 
 [[package]]
@@ -555,7 +494,7 @@ name = "typing-extensions"
 version = "4.15.0"
 requires_python = ">=3.9"
 summary = "Backported and Experimental Type Hints for Python 3.9+"
-groups = ["default", "lint"]
+groups = ["default"]
 files = [
     {file = "typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"},
     {file = "typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466"},

@@ -60,34 +60,13 @@ def _create_api(configuration: Configuration) -> API:
 @app.command('check')
 def update_check(
     context: typer.Context,
-    source: Annotated[
-        str,
-        typer.Option('--source', '-s', help='Update source: github, pypi, or custom'),
-    ] = 'github',
-    current_version: Annotated[
-        str,
-        typer.Option('--current', '-c', help='Current version to compare against'),
-    ] = '0.0.0',
-    repo: Annotated[
-        str | None,
-        typer.Option('--repo', '-r', help='GitHub repo in "owner/repo" format'),
-    ] = None,
-    package: Annotated[
-        str | None,
-        typer.Option('--package', '-p', help='PyPI package name'),
-    ] = None,
-    url: Annotated[
-        str | None,
-        typer.Option('--url', '-u', help='Custom URL for update manifest'),
-    ] = None,
-    github_token: Annotated[
-        str | None,
-        typer.Option('--github-token', envvar='GITHUB_TOKEN', help='GitHub token for rate limiting'),
-    ] = None,
-    include_prereleases: Annotated[
-        bool,
-        typer.Option('--prereleases', help='Include pre-release versions'),
-    ] = False,
+    source: Annotated[str, typer.Option('--source', '-s')] = 'github',
+    current_version: Annotated[str, typer.Option('--current', '-c')] = '0.0.0',
+    repo: Annotated[str | None, typer.Option('--repo', '-r')] = None,
+    package: Annotated[str | None, typer.Option('--package', '-p')] = None,
+    url: Annotated[str | None, typer.Option('--url', '-u')] = None,
+    github_token: Annotated[str | None, typer.Option('--github-token', envvar='GITHUB_TOKEN')] = None,
+    include_prereleases: Annotated[bool, typer.Option('--prereleases')] = False,
 ) -> None:
     """Check for available updates from a source.
 
@@ -163,18 +142,9 @@ def update_download(
     context: typer.Context,
     url: Annotated[str, typer.Argument(help='URL to download')],
     destination: Annotated[Path, typer.Argument(help='Destination file path')],
-    expected_hash: Annotated[
-        str | None,
-        typer.Option('--hash', '-H', help='Expected hash in "sha256:hexdigest" format'),
-    ] = None,
-    expected_size: Annotated[
-        int | None,
-        typer.Option('--size', '-S', help='Expected file size in bytes'),
-    ] = None,
-    timeout: Annotated[
-        int,
-        typer.Option('--timeout', '-t', help='Download timeout in seconds'),
-    ] = 300,
+    expected_hash: Annotated[str | None, typer.Option('--hash', '-H')] = None,
+    expected_size: Annotated[int | None, typer.Option('--size', '-S')] = None,
+    timeout: Annotated[int, typer.Option('--timeout', '-t')] = 300,
 ) -> None:
     """Download a file with optional hash verification.
 

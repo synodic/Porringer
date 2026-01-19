@@ -21,11 +21,11 @@ dependencies = [
 ]
 
 [project.urls]
-homepage = "https://github.com/Synodic-Software/Porringer"
-repository = "https://github.com/Synodic-Software/Porringer"
+homepage = "https://github.com/synodic/porringer"
+repository = "https://github.com/synodic/porringer"
 
 [dependency-groups]
-lint = ["mypy>=1.19.1", "ruff>=0.14.13"]
+lint = ["ruff>=0.14.13", "pyrefly>=0.48.2"]
 test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
 docs = ["zensical>=0.0.16"]
 
@@ -69,6 +69,9 @@ select = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.per-file-ignores]
+"porringer/console/command/update.py" = ["PLR0913", "PLR0917"]
+
 [tool.ruff.format]
 docstring-code-format = true
 indent-style = "space"
@@ -91,7 +94,7 @@ analyze = "ruff check porringer tests"
 format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
 test = "pytest --cov=porringer --verbose tests"
-type-check = "mypy ."
+type-check = "pyright ."
 serve = "zensical serve"
 
 [build-system]
