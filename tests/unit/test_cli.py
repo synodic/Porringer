@@ -14,4 +14,4 @@ class TestCLI:
         runner = CliRunner()
         result = runner.invoke(app, ['--version'], obj=test_config)
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 0
