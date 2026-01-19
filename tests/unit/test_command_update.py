@@ -10,7 +10,6 @@ from typer.testing import CliRunner
 
 from porringer.api import API
 from porringer.console.entry import app
-from porringer.console.schema import Configuration
 from porringer.schema import (
     APIParameters,
     CheckUpdateParameters,
@@ -149,24 +148,22 @@ class TestUpdateCLI:
     """Tests for update CLI commands"""
 
     @staticmethod
-    def test_update_help() -> None:
+    def test_update_help(test_config) -> None:
         """Test the update help command"""
         runner = CliRunner()
-        config = Configuration()
 
-        result = runner.invoke(app, ['update', '--help'], obj=config)
+        result = runner.invoke(app, ['update', '--help'], obj=test_config)
 
         assert result.exit_code == 0
         assert 'check' in result.output
         assert 'download' in result.output
 
     @staticmethod
-    def test_update_check_help() -> None:
+    def test_update_check_help(test_config) -> None:
         """Test the update check help command"""
         runner = CliRunner()
-        config = Configuration()
 
-        result = runner.invoke(app, ['update', 'check', '--help'], obj=config)
+        result = runner.invoke(app, ['update', 'check', '--help'], obj=test_config)
 
         assert result.exit_code == 0
         assert '--source' in result.output
@@ -175,12 +172,11 @@ class TestUpdateCLI:
         assert '--package' in result.output
 
     @staticmethod
-    def test_update_download_help() -> None:
+    def test_update_download_help(test_config) -> None:
         """Test the update download help command"""
         runner = CliRunner()
-        config = Configuration()
 
-        result = runner.invoke(app, ['update', 'download', '--help'], obj=config)
+        result = runner.invoke(app, ['update', 'download', '--help'], obj=test_config)
 
         assert result.exit_code == 0
         assert 'URL' in result.output
@@ -188,45 +184,42 @@ class TestUpdateCLI:
         assert '--size' in result.output
 
     @staticmethod
-    def test_update_check_invalid_source() -> None:
+    def test_update_check_invalid_source(test_config) -> None:
         """Test that invalid source is rejected"""
         runner = CliRunner()
-        config = Configuration()
 
         result = runner.invoke(
             app,
             ['update', 'check', '--source', 'invalid', '--current', '1.0.0'],
-            obj=config,
+            obj=test_config,
         )
 
         assert result.exit_code == 1
         assert 'Unknown source' in result.output
 
     @staticmethod
-    def test_update_check_github_missing_repo() -> None:
+    def test_update_check_github_missing_repo(test_config) -> None:
         """Test that GitHub source without repo shows error"""
         runner = CliRunner()
-        config = Configuration()
 
         result = runner.invoke(
             app,
             ['update', 'check', '--source', 'github', '--current', '1.0.0'],
-            obj=config,
+            obj=test_config,
         )
 
         assert result.exit_code == 1
         assert 'repo' in result.output.lower()
 
     @staticmethod
-    def test_update_check_pypi_missing_package() -> None:
+    def test_update_check_pypi_missing_package(test_config) -> None:
         """Test that PyPI source without package shows error"""
         runner = CliRunner()
-        config = Configuration()
 
         result = runner.invoke(
             app,
             ['update', 'check', '--source', 'pypi', '--current', '1.0.0'],
-            obj=config,
+            obj=test_config,
         )
 
         assert result.exit_code == 1

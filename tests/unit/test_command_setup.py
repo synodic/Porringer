@@ -10,7 +10,6 @@ from typer.testing import CliRunner
 
 from porringer.api import API
 from porringer.console.entry import app
-from porringer.console.schema import Configuration
 from porringer.schema import (
     APIParameters,
     LocalConfiguration,
@@ -123,29 +122,27 @@ class TestSetupCLI:
     """Tests for setup CLI commands"""
 
     @staticmethod
-    def test_setup_preview_command() -> None:
+    def test_setup_preview_command(test_config) -> None:
         """Test the setup preview CLI command"""
         runner = CliRunner()
-        config = Configuration()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            result = runner.invoke(app, ['setup', tmpdir], obj=config)
+            result = runner.invoke(app, ['setup', tmpdir], obj=test_config)
 
             assert result.exit_code == 0, result.output
             assert 'Setup Actions' in result.output
 
     @staticmethod
-    def test_setup_missing_manifest_error() -> None:
+    def test_setup_missing_manifest_error(test_config) -> None:
         """Test that missing manifest shows error in CLI"""
         runner = CliRunner()
-        config = Configuration()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = runner.invoke(app, ['setup', tmpdir], obj=config)
+            result = runner.invoke(app, ['setup', tmpdir], obj=test_config)
 
             assert result.exit_code == 1
             assert 'Error' in result.output
