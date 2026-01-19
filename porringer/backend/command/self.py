@@ -17,7 +17,8 @@ class SelfCommands:
         """
         self.logger = logger
 
-    def is_pipx_installation(self) -> bool:
+    @staticmethod
+    def is_pipx_installation() -> bool:
         """Check if Porringer is installed via pipx.
 
         Returns:

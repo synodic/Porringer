@@ -8,6 +8,8 @@ from rich.console import Console
 
 from porringer.console.command.plugin import app as plugin_app
 from porringer.console.command.self import app as self_app
+from porringer.console.command.setup import app as setup_app
+from porringer.console.command.update import app as update_app
 from porringer.console.schema import LOG_LEVELS, MAX_VERBOSITY_LEVEL, Configuration
 
 # TODO: Hook up version to the version in pyproject.toml
@@ -16,6 +18,8 @@ __version__ = '0.1.0'
 app = typer.Typer()
 app.add_typer(plugin_app, name='plugin')
 app.add_typer(self_app, name='self')
+app.add_typer(setup_app, name='setup')
+app.add_typer(update_app, name='update')
 
 
 class TyperHandler(logging.Handler):

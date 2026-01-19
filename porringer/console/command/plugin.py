@@ -29,8 +29,11 @@ def plugin_list(
     list_parameters = ListPluginsParameters()
     results = api.plugin.list(list_parameters)
 
-    for result in results:
-        configuration.console.print(result)
+    if not results:
+        configuration.console.print('[yellow]No plugins found[/yellow]')
+    else:
+        for result in results:
+            configuration.console.print(result)
 
 
 @app.command('install')
@@ -38,7 +41,7 @@ def plugin_install(
     context: typer.Context, plugins: Annotated[list[str], typer.Argument(help='Plugins to install')]
 ) -> None:
     """Install plugins"""
-    for plugin in plugins:
+    for _plugin in plugins:
         pass
 
 
@@ -47,7 +50,7 @@ def plugin_update(
     context: typer.Context, plugins: Annotated[list[str], typer.Argument(help='Plugins to update')]
 ) -> None:
     """Update plugins"""
-    for plugin in plugins:
+    for _plugin in plugins:
         pass
 
 
@@ -56,7 +59,7 @@ def plugin_uninstall(
     context: typer.Context, plugins: Annotated[list[str], typer.Argument(help='Plugins to remove')]
 ) -> None:
     """Remove installed plugins"""
-    for plugin in plugins:
+    for _plugin in plugins:
         pass
 
 

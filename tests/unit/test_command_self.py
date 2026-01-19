@@ -23,7 +23,7 @@ class TestCommandSelf:
         parameters = APIParameters(logger=Logger('test'))
         api = API(config, parameters)
 
-        params = CheckPorringerParameters()
+        CheckPorringerParameters()
 
         with pytest.raises(NotImplementedError):
             api.porringer.check()
@@ -35,7 +35,7 @@ class TestCommandSelf:
         parameters = APIParameters(logger=Logger('test'))
         api = API(config, parameters)
 
-        params = UpdatePorringerParameters()
+        UpdatePorringerParameters()
 
         with pytest.raises(NotImplementedError):
             api.porringer.update()

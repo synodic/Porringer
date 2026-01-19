@@ -1,8 +1,12 @@
 """Plugin implementation"""
 
+import json
 import logging
 import subprocess
+from pathlib import Path
 from typing import override
+
+from platformdirs import user_data_dir
 
 from porringer.core.plugin_schema.environment import (
     Environment,
@@ -105,4 +109,23 @@ class PipxEnvironment(Environment):
         Returns:
             A list of packages
         """
-        return []
+        packages: list[Package] = []
+        pipx_home = Path(user_data_dir('pipx', 'pypa')) / 'venvs'
+
+        if not pipx_home.exists():
+            return packages
+
+        for venv_dir in pipx_home.iterdir():
+            metadata_file = venv_dir / 'pipx_metadata.json'
+            if metadata_file.exists():
+                try:
+                    metadata = json.loads(metadata_file.read_text())
+                    main_package = metadata.get('main_package', {})
+                    name = main_package.get('package')
+                    version = main_package.get('package_version', 'unknown')
+                    if name:
+                        packages.append(Package(name=PackageName(name), version=version))
+                except json.JSONDecodeError, KeyError:
+                    continue
+
+        return packages

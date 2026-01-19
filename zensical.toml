@@ -1,0 +1,5 @@
+[project]
+site_name = "Porringer"
+site_url = "https://synodic.github.io/porringer"
+docs_dir = "docs"
+site_dir = "dist"

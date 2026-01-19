@@ -10,28 +10,31 @@ readme = "README.md"
 
 dynamic = ["version"]
 
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 
 dependencies = [
-  "typer[all]>=0.15.2",
-  "pydantic>=2.11.3",
-  "platformdirs>=4.3.7",
+  "typer[all]>=0.21.1",
+  "pydantic>=2.12.5",
+  "platformdirs>=4.5.1",
   "userpath>=1.9.2",
-  "packaging>=24.2",
+  "packaging>=25.0",
 ]
 
 [project.urls]
-homepage = "https://github.com/Synodic-Software/Porringer"
-repository = "https://github.com/Synodic-Software/Porringer"
+homepage = "https://github.com/synodic/porringer"
+repository = "https://github.com/synodic/porringer"
 
 [dependency-groups]
-lint = ["mypy>=1.15.0", "ruff>=0.11.5"]
-test = ["pytest>=8.3.5", "pytest-cov>=6.1.1", "pytest-mock>=3.14.0"]
+lint = ["ruff>=0.14.13", "pyrefly>=0.48.2"]
+test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
+docs = ["zensical>=0.0.16"]
 
 [project.entry-points."porringer.environment"]
 pip = "porringer.plugin.pip.plugin:PipEnvironment"
 pipx = "porringer.plugin.pipx.plugin:PipxEnvironment"
 winget = "porringer.plugin.winget.plugin:WingetEnvironment"
+uv = "porringer.plugin.uv.plugin:UvEnvironment"
+npm = "porringer.plugin.npm.plugin:NpmEnvironment"
 
 [project.scripts]
 porringer = "porringer.console.entry:app"
@@ -66,6 +69,9 @@ select = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.per-file-ignores]
+"porringer/console/command/update.py" = ["PLR0913", "PLR0917"]
+
 [tool.ruff.format]
 docstring-code-format = true
 indent-style = "space"
@@ -74,21 +80,22 @@ quote-style = "single"
 [tool.coverage.report]
 skip_empty = true
 
+[tool.pyrefly]
+project-excludes = ["examples"]
+
 [tool.pdm]
 plugins = ["-e file:///${PROJECT_ROOT}"]
-
-[tool.pdm.options]
-update = ["--update-all", "--unconstrained"]
 
 [tool.pdm.version]
 source = "scm"
 
 [tool.pdm.scripts]
-analyze = { shell = "ruff check porringer tests" }
-format = { shell = "ruff format" }
+analyze = "ruff check porringer tests"
+format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
-test = { shell = "pytest --cov=porringer --verbose tests" }
-type-check = { shell = "mypy ." }
+test = "pytest --cov=porringer --verbose tests"
+type-check = "pyrefly check"
+serve = "zensical serve"
 
 [build-system]
 build-backend = "pdm.backend"
