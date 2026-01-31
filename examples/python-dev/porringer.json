@@ -1,0 +1,22 @@
+{
+    "version": "1",
+    "prerequisites": [
+        {
+            "plugin": "pip"
+        },
+        {
+            "plugin": "pipx"
+        }
+    ],
+    "packages": {
+        "pip": [
+            "ruff",
+            "pyrefly",
+            "pytest",
+            "pytest-cov"
+        ],
+        "pipx": [
+            "pdm"
+        ]
+    }
+}

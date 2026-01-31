@@ -1,4 +1,4 @@
-"""Test the setup/manifest functionality in update command"""
+"""Test the setup/manifest functionality in install command"""
 
 import json
 import tempfile
@@ -270,7 +270,7 @@ class TestSetupCLI:
 
     @staticmethod
     def test_install_dry_run_api() -> None:
-        """Test the install --dry-run functionality via API"""
+        """Test the install dry-run functionality via API"""
         config = LocalConfiguration()
         parameters = APIParameters(logger=Logger('test'))
         api = API(config, parameters)
@@ -292,11 +292,14 @@ class TestSetupCLI:
             assert results.manifest_results[0].results[0].success
 
     @staticmethod
-    def test_install_missing_manifest_error(test_config) -> None:
+    def test_install_missing_manifest_error() -> None:
         """Test that missing manifest shows error in CLI"""
         runner = CliRunner()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = runner.invoke(app, ['install', '--dry-run', '--path', tmpdir], obj=test_config)
+            result = runner.invoke(
+                app,
+                ['install', '--dry-run', '--path', tmpdir],
+            )
 
             assert result.exit_code == EXIT_CODE_FAILURE

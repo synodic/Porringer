@@ -7,8 +7,9 @@ from logging import Logger
 from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.schema import Distribution, PluginParameters
+from porringer.core.schema import Distribution, PluginDependency, PluginParameters
 from porringer.schema import PluginInformation
+from porringer.utility.exception import PluginDependencyError
 from porringer.utility.utility import canonicalize_type
 
 
@@ -19,11 +20,18 @@ class Builder:
         """Initializes the builder"""
         self.logger = logger
 
-    def find_environments(self) -> list[PluginInformation[Environment]]:
+    def find_environments(self, check_dependencies: bool = True) -> list[PluginInformation[Environment]]:
         """Searches for registered environment plugins
+
+        Args:
+            check_dependencies: If True, validates plugin dependencies and filters
+                               out plugins with unmet required dependencies
 
         Returns:
             A list of loaded plugins
+
+        Raises:
+            PluginDependencyError: If a required dependency is missing and check_dependencies is True
         """
         group_name = 'environment'
         plugin_types: list[PluginInformation[Environment]] = []
@@ -53,7 +61,75 @@ class Builder:
                 self.logger.warning(f'{group_name} plugin found: {canonicalized.name} from {getmodule(loaded_type)}')
                 plugin_types.append(PluginInformation(loaded_type, entry_point.dist))
 
+        if check_dependencies:
+            plugin_types = self._resolve_dependencies(plugin_types)
+
         return plugin_types
+
+    def _resolve_dependencies(
+        self, plugins: list[PluginInformation[Environment]]
+    ) -> list[PluginInformation[Environment]]:
+        """Resolves plugin dependencies, filtering out plugins with unmet dependencies.
+
+        Args:
+            plugins: List of discovered plugins
+
+        Returns:
+            Filtered list of plugins with satisfied dependencies
+
+        Raises:
+            PluginDependencyError: If a required dependency is missing
+        """
+        # Build a set of available plugin names
+        available_plugins: set[str] = set()
+        for plugin_info in plugins:
+            canonicalized = canonicalize_type(plugin_info.type)
+            available_plugins.add(canonicalized.name)
+
+        resolved_plugins: list[PluginInformation[Environment]] = []
+
+        for plugin_info in plugins:
+            plugin_name = canonicalize_type(plugin_info.type).name
+            dependencies = plugin_info.type.dependencies()
+            can_load = True
+
+            for dep in dependencies:
+                # Skip dependencies that don't apply to the current platform
+                if not dep.is_applicable():
+                    self.logger.debug(
+                        f"Plugin '{plugin_name}' dependency on '{dep.plugin}' "
+                        f'skipped (not applicable to current platform)'
+                    )
+                    continue
+
+                if dep.plugin not in available_plugins:
+                    if dep.required:
+                        self.logger.error(f"Plugin '{plugin_name}' requires '{dep.plugin}' but it is not available")
+                        raise PluginDependencyError(plugin_name, dep.plugin)
+                    else:
+                        self.logger.warning(
+                            f"Plugin '{plugin_name}' has optional dependency on '{dep.plugin}' which is not available"
+                        )
+                else:
+                    self.logger.debug(f"Plugin '{plugin_name}' dependency on '{dep.plugin}' satisfied")
+
+            if can_load:
+                resolved_plugins.append(plugin_info)
+
+        return resolved_plugins
+
+    @staticmethod
+    def get_plugin_dependencies(plugin_type: type[Environment]) -> list[PluginDependency]:
+        """Gets the applicable dependencies for a plugin on the current platform.
+
+        Args:
+            plugin_type: The plugin type to get dependencies for
+
+        Returns:
+            List of applicable dependencies
+        """
+        all_deps = plugin_type.dependencies()
+        return [dep for dep in all_deps if dep.is_applicable()]
 
     @staticmethod
     def build_environment(environment_type: PluginInformation[Environment]) -> Environment:

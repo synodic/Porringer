@@ -1,8 +1,7 @@
 """Schema"""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum, auto
 from importlib.metadata import Distribution
 from logging import Logger
@@ -11,6 +10,25 @@ from pathlib import Path
 from packaging.version import Version
 from platformdirs import user_cache_dir
 from pydantic import BaseModel, Field
+
+# --- Directory Cache Schemas ---
+
+
+class ManifestDirectory(BaseModel):
+    """A directory containing manifest files."""
+
+    path: Path = Field(description='Absolute path to directory')
+    name: str | None = Field(default=None, description='Optional display name/alias')
+
+
+class DirectoryCache(BaseModel):
+    """Persisted cache of manifest directories."""
+
+    version: str = Field(default='1', description='Cache schema version')
+    directories: list[ManifestDirectory] = Field(default_factory=list, description='Registered directories')
+
+
+# --- Command Parameter Schemas ---
 
 
 class UpdatePorringerParameters(BaseModel):
@@ -48,6 +66,7 @@ class SetupAction:
         package: The package name (for INSTALL_PACKAGE).
         command: The command to run (for RUN_COMMAND).
         description: Human-readable description of the action.
+        cli_command: The actual CLI command (for display purposes).
     """
 
     action_type: SetupActionType
@@ -55,6 +74,7 @@ class SetupAction:
     plugin: str | None = None
     package: str | None = None
     command: list[str] | None = None
+    cli_command: list[str] | None = None
 
 
 @dataclass
@@ -65,11 +85,13 @@ class SetupActionResult:
         action: The action that was executed.
         success: Whether the action succeeded.
         message: Optional message (error details on failure).
+        skipped: Whether the action was skipped (e.g., plugin check found plugin).
     """
 
     action: SetupAction
     success: bool
     message: str | None = None
+    skipped: bool = False
 
 
 class Prerequisite(BaseModel):
@@ -94,8 +116,12 @@ class SetupManifest(BaseModel):
 class SetupParameters(BaseModel):
     """Parameters for the setup command."""
 
-    path: Path = Field(default=Path('.'), description='Path to manifest file or directory containing one')
+    paths: Path | Sequence[Path] | None = Field(
+        default=None, description='Path(s) to manifest file(s) or directories. None uses all cached directories.'
+    )
     timeout: int = Field(default=300, description='Timeout in seconds for post-install commands')
+    fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
+    dry_run: bool = Field(default=False, description='Preview actions without executing them')
 
 
 @dataclass
@@ -110,6 +136,41 @@ class SetupResults:
     actions: list[SetupAction] = field(default_factory=list)
     results: list[SetupActionResult] = field(default_factory=list)
     manifest_path: Path | None = None
+
+
+@dataclass
+class BatchSetupResults:
+    """Results of batch setup operations across multiple manifests.
+
+    Args:
+        manifest_results: Results for each manifest processed.
+        failed_paths: Paths that failed to process (e.g., manifest not found).
+    """
+
+    manifest_results: list[SetupResults] = field(default_factory=list)
+    failed_paths: list[tuple[Path, str]] = field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        """Returns True if all manifests were processed successfully."""
+        if self.failed_paths:
+            return False
+        return all(all(r.success for r in m.results) for m in self.manifest_results)
+
+    @property
+    def total_actions(self) -> int:
+        """Total number of actions across all manifests."""
+        return sum(len(m.actions) for m in self.manifest_results)
+
+    @property
+    def total_succeeded(self) -> int:
+        """Total number of successful action results."""
+        return sum(sum(1 for r in m.results if r.success) for m in self.manifest_results)
+
+    @property
+    def total_failed(self) -> int:
+        """Total number of failed action results."""
+        return sum(sum(1 for r in m.results if not r.success) for m in self.manifest_results)
 
 
 class UpdatePluginsParameters(BaseModel):
@@ -153,48 +214,58 @@ class LocalConfiguration(BaseModel):
     )
 
 
-# --- Update Schemas ---
-
-
-class UpdateSource(Enum):
-    """Source for checking updates"""
-
-    GITHUB_RELEASES = auto()
-    PYPI = auto()
-    CUSTOM_URL = auto()
-
-
-class CheckUpdateParameters(BaseModel):
-    """Parameters for checking updates."""
-
-    source: UpdateSource = Field(description='The update source to check')
-    current_version: str = Field(description='The current version to compare against')
-    repo: str | None = Field(default=None, description='GitHub repo in "owner/repo" format')
-    package: str | None = Field(default=None, description='PyPI package name')
-    url: str | None = Field(default=None, description='Custom URL for update manifest')
-    github_token: str | None = Field(default=None, description='Optional GitHub token for rate limiting')
-    include_prereleases: bool = Field(default=False, description='Include pre-release versions')
+# --- Check Schemas (Plugin-delegated) ---
 
 
 @dataclass
-class UpdateInfo:
-    """Information about available updates.
+class PackageUpdateInfo:
+    """Update information for a single package.
 
     Args:
-        available: Whether an update is available.
-        current_version: The current version.
-        latest_version: The latest available version.
-        download_url: URL to download the update.
-        release_notes_url: URL to release notes.
-        published_at: When the release was published.
+        name: Package name.
+        current_version: Currently installed version.
+        latest_version: Latest available version.
+        update_available: Whether an update is available.
     """
 
-    available: bool
-    current_version: Version
-    latest_version: Version | None = None
-    download_url: str | None = None
-    release_notes_url: str | None = None
-    published_at: datetime | None = None
+    name: str
+    current_version: Version | None
+    latest_version: Version | None
+    update_available: bool
+
+
+@dataclass
+class CheckResult:
+    """Result of checking updates for a plugin.
+
+    Args:
+        plugin: The plugin name.
+        packages: List of package update info.
+        error: Optional error message if check failed.
+    """
+
+    plugin: str
+    packages: list[PackageUpdateInfo] = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        """Returns True if the check completed without error."""
+        return self.error is None
+
+    @property
+    def updates_available(self) -> int:
+        """Returns the count of packages with updates available."""
+        return sum(1 for p in self.packages if p.update_available)
+
+
+class CheckParameters(BaseModel):
+    """Parameters for checking updates via plugins."""
+
+    plugins: list[str] | None = Field(
+        default=None, description='List of plugin names to check. None means all plugins.'
+    )
+    include_prereleases: bool = Field(default=False, description='Include pre-release versions')
 
 
 class HashAlgorithm(Enum):

@@ -1,10 +1,11 @@
 """Schema for Porringer"""
 
+import sys
 from abc import abstractmethod
 from typing import NewType, Protocol, TypeVar
 
 from packaging.version import Version
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PorringerModel(BaseModel):
@@ -14,6 +15,27 @@ class PorringerModel(BaseModel):
 
 
 PackageName = NewType('PackageName', str)
+
+
+class PluginDependency(PorringerModel):
+    """Defines a dependency on another plugin"""
+
+    plugin: str = Field(description='The name of the required plugin')
+    required: bool = Field(default=True, description='Whether this dependency is required (True) or optional (False)')
+    platforms: list[str] = Field(
+        default_factory=list,
+        description='List of platforms where this dependency applies (e.g., ["win32"]). Empty means all platforms.',
+    )
+
+    def is_applicable(self) -> bool:
+        """Check if this dependency applies to the current platform.
+
+        Returns:
+            True if the dependency applies to the current platform
+        """
+        if not self.platforms:
+            return True
+        return sys.platform in self.platforms
 
 
 class Package(PorringerModel):
@@ -71,6 +93,18 @@ class Plugin(Protocol):
             The plugin's information
         """
         raise NotImplementedError
+
+    @staticmethod
+    def dependencies() -> list[PluginDependency]:
+        """Declares plugin dependencies on other plugins.
+
+        Dependencies can be platform-specific and either required or optional.
+        Override this method to declare dependencies for your plugin.
+
+        Returns:
+            A list of plugin dependencies
+        """
+        return []
 
     @property
     def distribution(self) -> Distribution:

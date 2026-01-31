@@ -20,6 +20,12 @@ class NpmEnvironment(Environment):
     as the backend package manager.
     """
 
+    @staticmethod
+    @override
+    def install_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to install a package via npm."""
+        return ['npm', 'install', '-g', str(package)]
+
     @override
     def install(self, params: InstallParameters) -> Package | None:
         """Installs the given package identified by its name using npm."""
