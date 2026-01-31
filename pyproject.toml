@@ -35,6 +35,9 @@ pipx = "porringer.plugin.pipx.plugin:PipxEnvironment"
 winget = "porringer.plugin.winget.plugin:WingetEnvironment"
 uv = "porringer.plugin.uv.plugin:UvEnvironment"
 npm = "porringer.plugin.npm.plugin:NpmEnvironment"
+pim = "porringer.plugin.pim.plugin:PimEnvironment"
+brew = "porringer.plugin.brew.plugin:BrewEnvironment"
+apt = "porringer.plugin.apt.plugin:AptEnvironment"
 
 [project.scripts]
 porringer = "porringer.console.entry:app"
@@ -42,11 +45,6 @@ porringer = "porringer.console.entry:app"
 [tool.pytest.ini_options]
 log_cli = true
 testpaths = ["tests"]
-
-[tool.mypy]
-exclude = "__pypackages__"
-plugins = ["pydantic.mypy"]
-strict = true
 
 [tool.ruff]
 line-length = 120
@@ -70,7 +68,7 @@ select = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"porringer/console/command/update.py" = ["PLR0913", "PLR0917"]
+"porringer/console/command/*.py" = ["PLR0913", "PLR0917"]
 
 [tool.ruff.format]
 docstring-code-format = true

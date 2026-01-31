@@ -1,0 +1,274 @@
+"""Porringer CLI install command module"""
+
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from rich.panel import Panel
+
+from porringer.api import API
+from porringer.console.schema import Configuration
+from porringer.schema import (
+    APIParameters,
+    BatchSetupResults,
+    SetupActionResult,
+    SetupParameters,
+)
+from porringer.utility.exception import ManifestError
+
+app = typer.Typer()
+
+# Exit codes
+EXIT_SUCCESS = 0
+EXIT_FAILURE = 1
+DEFAULT_TIMEOUT = 300
+
+# Arrow prefix for command display
+ARROW = '→'
+
+
+@dataclass
+class ManifestOptions:
+    """Options for manifest install operations.
+
+    Attributes:
+        path: Path to manifest file or directory.
+        all_cached: Use all cached directories.
+        dry_run: Preview without executing.
+        timeout: Timeout in seconds for commands.
+        fail_fast: Stop on first error.
+    """
+
+    path: Path | None = None
+    all_cached: bool = False
+    dry_run: bool = False
+    timeout: int = DEFAULT_TIMEOUT
+    fail_fast: bool = True
+
+
+def _create_api(configuration: Configuration) -> API:
+    """Create and return API instance.
+
+    Args:
+        configuration: CLI configuration.
+
+    Returns:
+        Initialized API instance.
+    """
+    api_parameters = APIParameters(logging.getLogger('porringer'))
+    return API(configuration.local_configuration, api_parameters)
+
+
+def _format_cli_command(result: SetupActionResult) -> str:
+    """Format an action result as a CLI command string.
+
+    Args:
+        result: The action result.
+
+    Returns:
+        Formatted command string with arrow prefix.
+    """
+    action = result.action
+    if action.cli_command:
+        return ' '.join(action.cli_command)
+    # Fallback to description if no CLI command
+    return action.description
+
+
+def _display_summary(configuration: Configuration, results: BatchSetupResults, dry_run: bool) -> None:
+    """Display summary panel.
+
+    Args:
+        configuration: CLI configuration with console.
+        results: Batch execution results.
+        dry_run: Whether this was a dry run.
+    """
+    configuration.console.print()
+
+    # Count non-skipped results
+    total_displayed = sum(1 for mr in results.manifest_results for r in mr.results if not r.skipped)
+    succeeded = sum(1 for mr in results.manifest_results for r in mr.results if r.success and not r.skipped)
+    failed = sum(1 for mr in results.manifest_results for r in mr.results if not r.success and not r.skipped)
+
+    if dry_run:
+        configuration.console.print(
+            Panel(
+                f'[dim]Dry run complete.[/dim] {total_displayed} action(s) would be executed.',
+                border_style='dim',
+            )
+        )
+    elif results.success:
+        configuration.console.print(
+            Panel(
+                f'[green]Install complete![/green] {succeeded} action(s) succeeded.',
+                border_style='green',
+            )
+        )
+    else:
+        configuration.console.print(
+            Panel(
+                f'[red]Install failed![/red] {succeeded} succeeded, {failed} failed.',
+                border_style='red',
+            )
+        )
+
+
+def _display_results(configuration: Configuration, results: BatchSetupResults, dry_run: bool) -> None:
+    """Display execution results with arrow-prefixed commands.
+
+    Args:
+        configuration: CLI configuration with console.
+        results: Batch execution results.
+        dry_run: Whether this was a dry run.
+    """
+    for manifest_result in results.manifest_results:
+        configuration.console.print(f'\n[bold]Manifest:[/bold] {manifest_result.manifest_path}')
+
+        displayed_count = 0
+        for result in manifest_result.results:
+            # Skip actions that were skipped (e.g., plugin checks that passed)
+            if result.skipped:
+                continue
+
+            displayed_count += 1
+            command_str = _format_cli_command(result)
+
+            if result.success:
+                if dry_run:
+                    configuration.console.print(f'  [dim]{ARROW}[/dim] {command_str}')
+                else:
+                    configuration.console.print(f'  [green]{ARROW}[/green] {command_str}')
+            else:
+                configuration.console.print(f'  [red]{ARROW}[/red] {command_str}')
+                if result.message:
+                    configuration.console.print(f'    [dim]{result.message}[/dim]')
+
+        if displayed_count == 0:
+            configuration.console.print('  [dim]No actions to perform[/dim]')
+
+    for path, error in results.failed_paths:
+        configuration.console.print(f'\n[red]Failed:[/red] {path}')
+        configuration.console.print(f'  [dim]{error}[/dim]')
+
+    _display_summary(configuration, results, dry_run)
+
+
+def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> None:
+    """Handle manifest install execution.
+
+    Args:
+        configuration: CLI configuration.
+        options: Manifest options.
+
+    Raises:
+        typer.Exit: On error.
+    """
+    api = _create_api(configuration)
+
+    # Determine what paths to use
+    if options.all_cached:
+        setup_params = SetupParameters(
+            paths=None, timeout=options.timeout, fail_fast=options.fail_fast, dry_run=options.dry_run
+        )
+    elif options.path:
+        if not options.path.exists():
+            configuration.console.print(f'[red]Error:[/red] Path does not exist: {options.path}')
+            raise typer.Exit(EXIT_FAILURE)
+        setup_params = SetupParameters(
+            paths=options.path.resolve(),
+            timeout=options.timeout,
+            fail_fast=options.fail_fast,
+            dry_run=options.dry_run,
+        )
+    else:
+        # Default to current directory
+        setup_params = SetupParameters(
+            paths=Path('.').resolve(),
+            timeout=options.timeout,
+            fail_fast=options.fail_fast,
+            dry_run=options.dry_run,
+        )
+
+    # Preview to get actions
+    try:
+        preview_results = api.update.preview_batch(setup_params)
+    except (ManifestError, ValueError) as e:
+        error_msg = e.error if isinstance(e, ManifestError) else str(e)
+        configuration.console.print(f'[red]Error:[/red] {error_msg}')
+        raise typer.Exit(EXIT_FAILURE) from e
+
+    # Check for failed paths (no manifest found)
+    if preview_results.failed_paths and not preview_results.manifest_results:
+        for _path, error in preview_results.failed_paths:
+            configuration.console.print(f'[red]Error:[/red] {error}')
+        raise typer.Exit(EXIT_FAILURE)
+
+    if preview_results.total_actions == 0 and not preview_results.failed_paths:
+        configuration.console.print('[yellow]No actions to execute[/yellow]')
+        return
+
+    # Execute (handles dry-run internally)
+    execute_results = api.update.execute_batch(preview_results, setup_params)
+
+    _display_results(configuration, execute_results, options.dry_run)
+
+    if not options.dry_run and not execute_results.success:
+        raise typer.Exit(EXIT_FAILURE)
+
+
+@app.callback(invoke_without_command=True)
+def install_default(
+    context: typer.Context,
+    *,
+    path: Annotated[
+        Path | None,
+        typer.Option(
+            '--path',
+            '-p',
+            help='Path to manifest file (porringer.json) or directory containing one',
+        ),
+    ] = None,
+    all_cached: Annotated[
+        bool,
+        typer.Option('--all', '-a', help='Run on all cached directories'),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option('--dry-run', '-n', help='Preview actions without executing them'),
+    ] = False,
+    timeout: Annotated[
+        int,
+        typer.Option('--timeout', '-t', help='Timeout in seconds for post-install commands'),
+    ] = DEFAULT_TIMEOUT,
+    fail_fast: Annotated[
+        bool,
+        typer.Option('--fail-fast/--no-fail-fast', help='Stop on first error'),
+    ] = True,
+) -> None:
+    """Install packages from a manifest file.
+
+    Reads the manifest from the specified path (or current directory) and installs
+    all packages and runs post-install commands.
+
+    Use --dry-run to preview what would be executed without making changes.
+    Use --all to run on all cached directories at once.
+
+    Examples:
+        porringer install                        # Run in current directory
+        porringer install --path ./my-project    # Run in specific directory
+        porringer install --dry-run              # Preview without executing
+        porringer install --all                  # Run on all cached directories
+    """
+    configuration = context.ensure_object(Configuration)
+
+    options = ManifestOptions(
+        path=path,
+        all_cached=all_cached,
+        dry_run=dry_run,
+        timeout=timeout,
+        fail_fast=fail_fast,
+    )
+
+    _handle_manifest(configuration, options)

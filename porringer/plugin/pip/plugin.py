@@ -8,10 +8,14 @@ from typing import override
 from porringer.core.plugin_schema.environment import (
     Environment,
     InstallParameters,
+    ProviderRequirement,
     UninstallParameters,
     UpgradeParameters,
 )
 from porringer.core.schema import Package, PackageName
+
+# Capability identifier for Python runtime providers
+PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
 
 
 class PipEnvironment(Environment):
@@ -19,7 +23,54 @@ class PipEnvironment(Environment):
 
     Provides methods to install, search, uninstall, upgrade, and list Python packages using pip
     as the backend package manager.
+
+    This plugin can optionally use a Python runtime provider (like pim) for managing
+    the underlying Python installation.
     """
+
+    @staticmethod
+    @override
+    def requires_providers() -> list[ProviderRequirement]:
+        """Declares that pip can optionally use a Python runtime provider.
+
+        The provider is optional - pip can also work with system-installed Python.
+        Returns a list of platform-specific providers that the builder can select from:
+        - pim: Python Install Manager (Windows)
+        - brew: Homebrew (macOS)
+        - apt: APT package manager (Linux)
+
+        NOTE: Currently defaults to using the latest available Python from the provider.
+        Future versions may support configuration for selecting specific versions.
+
+        Returns:
+            A list of provider requirements for each supported platform
+        """
+        return [
+            # Windows: Python Install Manager
+            ProviderRequirement(
+                capability=PYTHON_RUNTIME_CAPABILITY,
+                required=False,
+                provider_plugin='pim',
+            ),
+            # macOS: Homebrew
+            ProviderRequirement(
+                capability=PYTHON_RUNTIME_CAPABILITY,
+                required=False,
+                provider_plugin='brew',
+            ),
+            # Linux: APT
+            ProviderRequirement(
+                capability=PYTHON_RUNTIME_CAPABILITY,
+                required=False,
+                provider_plugin='apt',
+            ),
+        ]
+
+    @staticmethod
+    @override
+    def install_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to install a package via pip."""
+        return ['pip', 'install', str(package)]
 
     @override
     def install(self, params: InstallParameters) -> Package | None:

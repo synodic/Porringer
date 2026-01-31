@@ -20,6 +20,12 @@ class WingetEnvironment(Environment):
     as the backend package manager.
     """
 
+    @staticmethod
+    @override
+    def install_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to install a package via winget."""
+        return ['winget', 'install', '--id', str(package)]
+
     @override
     def install(self, params: InstallParameters) -> Package | None:
         logger = logging.getLogger('porringer.winget.install')

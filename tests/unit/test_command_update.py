@@ -1,115 +1,95 @@
 """Test the update command"""
 
 import tempfile
-from logging import Logger
 from pathlib import Path
 
 import pytest
 from packaging.version import Version
-from typer.testing import CliRunner
 
-from porringer.api import API
-from porringer.console.entry import app
 from porringer.schema import (
-    APIParameters,
-    CheckUpdateParameters,
+    CheckParameters,
+    CheckResult,
     DownloadParameters,
     HashAlgorithm,
-    LocalConfiguration,
-    UpdateInfo,
-    UpdateSource,
+    PackageUpdateInfo,
 )
 from porringer.utility.download import compute_file_hash, parse_hash_string
-from porringer.utility.exception import UpdateError
+
+# Test exit codes
+EXIT_CODE_SUCCESS = 0
+EXIT_CODE_FAILURE = 1
 
 
-class TestUpdateCheck:
-    """Tests for update checking"""
+class TestCheckParameters:
+    """Tests for check parameters"""
 
     @staticmethod
-    def test_check_parameters_validation() -> None:
-        """Test that CheckUpdateParameters validates correctly"""
-        params = CheckUpdateParameters(
-            source=UpdateSource.GITHUB_RELEASES,
-            current_version='1.0.0',
-            repo='owner/repo',
-        )
-        assert params.source == UpdateSource.GITHUB_RELEASES
-        assert params.current_version == '1.0.0'
-        assert params.repo == 'owner/repo'
+    def test_check_parameters_defaults() -> None:
+        """Test that CheckParameters has correct defaults"""
+        params = CheckParameters()
+        assert params.plugins is None
         assert params.include_prereleases is False
 
     @staticmethod
-    def test_check_github_requires_repo() -> None:
-        """Test that GitHub source requires repo parameter"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
+    def test_check_parameters_with_plugins() -> None:
+        """Test CheckParameters with specific plugins"""
+        params = CheckParameters(plugins=['pip', 'pipx'], include_prereleases=True)
+        assert params.plugins == ['pip', 'pipx']
+        assert params.include_prereleases is True
 
-        params = CheckUpdateParameters(
-            source=UpdateSource.GITHUB_RELEASES,
-            current_version='1.0.0',
-        )
 
-        with pytest.raises(UpdateError, match='repo'):
-            api.update.check(params)
+class TestCheckResult:
+    """Tests for CheckResult dataclass"""
 
     @staticmethod
-    def test_check_pypi_requires_package() -> None:
-        """Test that PyPI source requires package parameter"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
-        params = CheckUpdateParameters(
-            source=UpdateSource.PYPI,
-            current_version='1.0.0',
+    def test_check_result_success() -> None:
+        """Test CheckResult with successful check"""
+        result = CheckResult(
+            plugin='pip',
+            packages=[
+                PackageUpdateInfo(
+                    name='requests',
+                    current_version=Version('2.28.0'),
+                    latest_version=Version('2.31.0'),
+                    update_available=True,
+                )
+            ],
         )
-
-        with pytest.raises(UpdateError, match='package'):
-            api.update.check(params)
+        assert result.success is True
+        assert result.updates_available == 1
+        assert result.error is None
 
     @staticmethod
-    def test_check_custom_requires_url() -> None:
-        """Test that custom source requires url parameter"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
-        params = CheckUpdateParameters(
-            source=UpdateSource.CUSTOM_URL,
-            current_version='1.0.0',
-        )
-
-        with pytest.raises(UpdateError, match='url'):
-            api.update.check(params)
-
-
-class TestUpdateInfo:
-    """Tests for UpdateInfo dataclass"""
+    def test_check_result_no_updates() -> None:
+        """Test CheckResult with no updates"""
+        result = CheckResult(plugin='pip', packages=[])
+        assert result.success is True
+        assert result.updates_available == 0
 
     @staticmethod
-    def test_update_info_available() -> None:
-        """Test UpdateInfo when update is available"""
-        info = UpdateInfo(
-            available=True,
-            current_version=Version('1.0.0'),
-            latest_version=Version('2.0.0'),
-            download_url='https://example.com/v2.0.0.zip',
-        )
-        assert info.available is True
-        assert info.current_version == Version('1.0.0')
-        assert info.latest_version == Version('2.0.0')
+    def test_check_result_error() -> None:
+        """Test CheckResult with error"""
+        result = CheckResult(plugin='pip', error='Connection failed')
+        assert result.success is False
+        assert result.updates_available == 0
+
+
+class TestPackageUpdateInfo:
+    """Tests for PackageUpdateInfo dataclass"""
 
     @staticmethod
-    def test_update_info_not_available() -> None:
-        """Test UpdateInfo when no update is available"""
-        info = UpdateInfo(
-            available=False,
-            current_version=Version('2.0.0'),
+    def test_package_update_info() -> None:
+        """Test PackageUpdateInfo fields"""
+        info = PackageUpdateInfo(
+            name='requests',
+            current_version=Version('2.28.0'),
+            latest_version=Version('2.31.0'),
+            update_available=True,
         )
-        assert info.available is False
-        assert info.latest_version is None
+        assert info.name == 'requests'
+        assert info.current_version == Version('2.28.0')
+        assert info.latest_version == Version('2.31.0')
+        assert info.update_available is True
 
 
 class TestDownloadParameters:
@@ -142,49 +122,6 @@ class TestDownloadParameters:
         chunk_size_default = DownloadParameters.model_fields['chunk_size'].default
         assert params.timeout == timeout_default
         assert params.chunk_size == chunk_size_default
-
-
-class TestUpdateCLI:
-    """Tests for update CLI commands"""
-
-    @staticmethod
-    def test_update_check_invalid_source(test_config) -> None:
-        """Test that invalid source is rejected"""
-        runner = CliRunner()
-
-        result = runner.invoke(
-            app,
-            ['update', 'check', '--source', 'invalid', '--current', '1.0.0'],
-            obj=test_config,
-        )
-
-        assert result.exit_code == 1
-
-    @staticmethod
-    def test_update_check_github_missing_repo(test_config) -> None:
-        """Test that GitHub source without repo shows error"""
-        runner = CliRunner()
-
-        result = runner.invoke(
-            app,
-            ['update', 'check', '--source', 'github', '--current', '1.0.0'],
-            obj=test_config,
-        )
-
-        assert result.exit_code == 1
-
-    @staticmethod
-    def test_update_check_pypi_missing_package(test_config) -> None:
-        """Test that PyPI source without package shows error"""
-        runner = CliRunner()
-
-        result = runner.invoke(
-            app,
-            ['update', 'check', '--source', 'pypi', '--current', '1.0.0'],
-            obj=test_config,
-        )
-
-        assert result.exit_code == 1
 
 
 class TestDownloadUtility:
