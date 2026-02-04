@@ -26,18 +26,9 @@ homepage = "https://github.com/synodic/porringer"
 repository = "https://github.com/synodic/porringer"
 
 [dependency-groups]
-lint = [
-    "ruff>=0.15.0",
-    "pyrefly>=0.51.0",
-]
-test = [
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-    "pytest-mock>=3.15.1",
-]
-docs = [
-    "zensical>=0.0.21",
-]
+lint = ["ruff>=0.15.0", "pyrefly>=0.51.0"]
+test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
+docs = ["zensical>=0.0.21"]
 
 [project.entry-points."porringer.environment"]
 pip = "porringer.plugin.pip.plugin:PipEnvironment"
@@ -103,6 +94,7 @@ format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
 test = "pytest --cov=porringer --verbose tests"
 type-check = "pyrefly check"
+generate = "zensical build --clean"
 serve = "zensical serve"
 
 [build-system]
