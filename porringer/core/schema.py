@@ -42,7 +42,7 @@ class Package(PorringerModel):
     """Package definition"""
 
     name: PackageName
-    version: str
+    version: str | None = None
 
 
 class SupportedFeatures(PorringerModel):

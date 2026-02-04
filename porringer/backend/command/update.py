@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 import subprocess
 import tomllib
+from dataclasses import dataclass
 from logging import Logger
 from pathlib import Path
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import Version
 
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.core.plugin_schema.environment import Environment, InstallParameters
-from porringer.core.schema import PackageName
+from porringer.core.schema import Package, PackageName
 from porringer.schema import (
     BatchSetupResults,
+    CancellationToken,
     DownloadParameters,
     DownloadResult,
+    InstallProgressCallback,
     ProgressCallback,
     SetupAction,
     SetupActionResult,
@@ -28,6 +36,15 @@ from porringer.schema import (
 from porringer.utility.download import download_file
 from porringer.utility.exception import ManifestError
 from porringer.utility.utility import canonicalize_type
+
+
+@dataclass
+class _InstallContext:
+    """Context for install operations."""
+
+    parameters: SetupParameters
+    progress_callback: InstallProgressCallback | None
+    cancellation_token: CancellationToken | None = None
 
 
 class UpdateCommands:
@@ -470,6 +487,43 @@ class UpdateCommands:
             self.logger.error(message)
             return SetupActionResult(action=action, success=False, message=message)
 
+    @staticmethod
+    def _is_package_installed(
+        package: str,
+        installed_packages: list[Package],
+    ) -> tuple[bool, str | None]:
+        """Checks if a package is already installed with a compatible version.
+
+        Args:
+            package: The package specification (e.g., 'ruff>=0.1.0')
+            installed_packages: List of installed packages from the environment
+
+        Returns:
+            Tuple of (is_installed, skip_reason or None)
+        """
+        try:
+            req = Requirement(package)
+        except Exception:
+            # If we can't parse, just do name matching with canonicalization
+            canonical_name = canonicalize_name(package.strip())
+            for installed in installed_packages:
+                if canonicalize_name(str(installed.name)) == canonical_name:
+                    return True, f'{installed.name}=={installed.version} already installed'
+            return False, None
+
+        canonical_name = canonicalize_name(req.name)
+        for installed in installed_packages:
+            if canonicalize_name(str(installed.name)) == canonical_name:
+                if not req.specifier:
+                    return True, f'{installed.name}=={installed.version} already installed'
+                if installed.version is not None:
+                    try:
+                        if Version(installed.version) in req.specifier:
+                            return True, f'{installed.name}=={installed.version} satisfies {package}'
+                    except Exception:
+                        pass
+        return False, None
+
     def _execute_install_package(self, action: SetupAction, environments: dict[str, Environment]) -> SetupActionResult:
         """Executes a package installation.
 
@@ -487,6 +541,22 @@ class UpdateCommands:
             return SetupActionResult(action=action, success=False, message=f"Plugin '{action.plugin}' is not available")
 
         environment = environments[action.plugin]
+
+        # Check if package is already installed
+        try:
+            installed_packages = environment.packages()
+            is_installed, skip_reason = UpdateCommands._is_package_installed(action.package, installed_packages)
+            if is_installed:
+                self.logger.info(f"Skipping '{action.package}': {skip_reason}")
+                return SetupActionResult(
+                    action=action,
+                    success=True,
+                    skipped=True,
+                    skip_reason=skip_reason,
+                )
+        except Exception as e:
+            self.logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
+
         self.logger.info(f"Installing '{action.package}' via {action.plugin}")
 
         try:
@@ -542,3 +612,394 @@ class UpdateCommands:
             return SetupActionResult(action=action, success=False, message=message)
         except Exception as e:
             return SetupActionResult(action=action, success=False, message=str(e))
+
+    # --- Async Execution Methods ---
+
+    async def _async_execute_install_package(
+        self,
+        action: SetupAction,
+        environments: dict[str, Environment],
+    ) -> SetupActionResult:
+        """Asynchronously executes a package installation.
+
+        Args:
+            action: The install action.
+            environments: Dict of instantiated environment plugins.
+
+        Returns:
+            The result of the installation.
+        """
+        if action.plugin is None or action.package is None:
+            return SetupActionResult(action=action, success=False, message='Plugin or package not specified')
+
+        if action.plugin not in environments:
+            return SetupActionResult(action=action, success=False, message=f"Plugin '{action.plugin}' is not available")
+
+        environment = environments[action.plugin]
+
+        # Check if package is already installed
+        try:
+            # Run packages() in executor since it may be blocking
+            loop = asyncio.get_running_loop()
+            installed_packages = await loop.run_in_executor(None, environment.packages)
+            is_installed, skip_reason = UpdateCommands._is_package_installed(action.package, installed_packages)
+            if is_installed:
+                self.logger.info(f"Skipping '{action.package}': {skip_reason}")
+                return SetupActionResult(
+                    action=action,
+                    success=True,
+                    skipped=True,
+                    skip_reason=skip_reason,
+                )
+        except Exception as e:
+            self.logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
+
+        self.logger.info(f"Installing '{action.package}' via {action.plugin}")
+
+        try:
+            params = InstallParameters(name=action.package, dry=False)
+            result = await environment.async_install(params)
+
+            if result is not None:
+                return SetupActionResult(action=action, success=True, message=f'Installed {result.name}')
+            else:
+                return SetupActionResult(action=action, success=False, message=f"Failed to install '{action.package}'")
+        except Exception as e:
+            return SetupActionResult(action=action, success=False, message=str(e))
+
+    async def _execute_check_actions_async(
+        self,
+        check_actions: list[SetupAction],
+        available_plugins: set[str],
+        parameters: SetupParameters,
+        progress_callback: InstallProgressCallback | None,
+    ) -> tuple[list[SetupActionResult], bool]:
+        """Execute CHECK_PLUGIN actions sequentially.
+
+        Returns:
+            Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
+        """
+        results: list[SetupActionResult] = []
+        for action in check_actions:
+            if parameters.dry_run:
+                result = self._dry_run_action(action, available_plugins)
+            else:
+                result = self._execute_check_plugin(action, available_plugins)
+            results.append(result)
+            if progress_callback:
+                progress_callback(action, result)
+            if not result.success and not result.skipped:
+                self.logger.error(f'Action failed: {action.description} - {result.message}')
+                if parameters.fail_fast:
+                    return results, False
+        return results, True
+
+    async def _execute_install_actions_async(
+        self,
+        install_actions: list[SetupAction],
+        environments: dict[str, Environment],
+        available_plugins: set[str],
+        context: _InstallContext,
+    ) -> tuple[list[SetupActionResult], bool]:
+        """Execute INSTALL_PACKAGE actions with parallel support.
+
+        Returns:
+            Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
+        """
+        if context.parameters.dry_run:
+            return self._dry_run_install_actions(install_actions, available_plugins, context.progress_callback), True
+
+        parallel_actions, sequential_actions = self._group_actions_by_parallelism(install_actions, environments)
+
+        results: list[SetupActionResult] = []
+
+        # Execute parallel actions concurrently
+        if parallel_actions:
+            parallel_results, should_continue = await self._run_parallel_installs(
+                parallel_actions, environments, context
+            )
+            results.extend(parallel_results)
+            if not should_continue:
+                return results, False
+
+        # Execute sequential actions one at a time
+        sequential_results, should_continue = await self._run_sequential_installs(
+            sequential_actions, environments, context
+        )
+        results.extend(sequential_results)
+
+        return results, should_continue
+
+    def _dry_run_install_actions(
+        self,
+        install_actions: list[SetupAction],
+        available_plugins: set[str],
+        progress_callback: InstallProgressCallback | None,
+    ) -> list[SetupActionResult]:
+        """Execute dry-run for install actions."""
+        results: list[SetupActionResult] = []
+        for action in install_actions:
+            result = self._dry_run_action(action, available_plugins)
+            results.append(result)
+            if progress_callback:
+                progress_callback(action, result)
+        return results
+
+    @staticmethod
+    def _group_actions_by_parallelism(
+        install_actions: list[SetupAction],
+        environments: dict[str, Environment],
+    ) -> tuple[list[SetupAction], list[SetupAction]]:
+        """Group actions into parallel and sequential based on plugin support."""
+        parallel_actions: list[SetupAction] = []
+        sequential_actions: list[SetupAction] = []
+
+        for action in install_actions:
+            if action.plugin and action.plugin in environments and environments[action.plugin].supports_parallel():
+                parallel_actions.append(action)
+            else:
+                sequential_actions.append(action)
+
+        return parallel_actions, sequential_actions
+
+    async def _run_sequential_installs(
+        self,
+        sequential_actions: list[SetupAction],
+        environments: dict[str, Environment],
+        context: _InstallContext,
+    ) -> tuple[list[SetupActionResult], bool]:
+        """Run install actions sequentially with cancellation support."""
+        results: list[SetupActionResult] = []
+        for action in sequential_actions:
+            # Check for cancellation before each install
+            if context.cancellation_token is not None:
+                context.cancellation_token.raise_if_cancelled()
+
+            if context.progress_callback:
+                context.progress_callback(action, None)
+            result = await self._async_execute_install_package(action, environments)
+            results.append(result)
+            if context.progress_callback:
+                context.progress_callback(action, result)
+            if not result.success and not result.skipped and context.parameters.fail_fast:
+                self.logger.error(f'Action failed: {action.description} - {result.message}')
+                return results, False
+        return results, True
+
+    async def _run_parallel_installs(
+        self,
+        parallel_actions: list[SetupAction],
+        environments: dict[str, Environment],
+        context: _InstallContext,
+    ) -> tuple[list[SetupActionResult], bool]:
+        """Run install actions in parallel using TaskGroup.
+
+        Uses asyncio.TaskGroup (Python 3.11+) for structured concurrency.
+        All tasks are automatically cancelled if any raises an unhandled exception.
+
+        Returns:
+            Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
+        """
+        # Check for cancellation before starting parallel installs
+        if context.cancellation_token is not None:
+            context.cancellation_token.raise_if_cancelled()
+
+        results: dict[int, SetupActionResult] = {}
+        action_indices = {id(action): i for i, action in enumerate(parallel_actions)}
+
+        async def install_with_callback(action: SetupAction) -> None:
+            if context.progress_callback:
+                context.progress_callback(action, None)
+            try:
+                result = await self._async_execute_install_package(action, environments)
+            except Exception as e:
+                result = SetupActionResult(action=action, success=False, message=str(e))
+            if context.progress_callback:
+                context.progress_callback(action, result)
+            results[action_indices[id(action)]] = result
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for action in parallel_actions:
+                    tg.create_task(install_with_callback(action))
+        except ExceptionGroup as eg:
+            # TaskGroup raises ExceptionGroup if any task fails with unhandled exception
+            # Our install_with_callback catches exceptions, so this shouldn't happen normally
+            self.logger.error(f'Parallel install failed with exceptions: {eg.exceptions}')
+
+        # Convert dict to ordered list
+        result_list = [results.get(i) for i in range(len(parallel_actions))]
+        final_results: list[SetupActionResult] = []
+
+        for action, maybe_result in zip(parallel_actions, result_list, strict=False):
+            action_result: SetupActionResult
+            if maybe_result is None:
+                # Task was cancelled before completing
+                action_result = SetupActionResult(action=action, success=False, message='Task cancelled')
+            else:
+                action_result = maybe_result
+            final_results.append(action_result)
+            if not action_result.success and not action_result.skipped and context.parameters.fail_fast:
+                self.logger.error(f'Action failed: {action.description} - {action_result.message}')
+                return final_results, False
+
+        return final_results, True
+
+    async def _execute_command_actions_async(
+        self,
+        command_actions: list[SetupAction],
+        available_plugins: set[str],
+        working_dir: Path,
+        parameters: SetupParameters,
+        progress_callback: InstallProgressCallback | None,
+    ) -> list[SetupActionResult]:
+        """Execute RUN_COMMAND actions sequentially."""
+        results: list[SetupActionResult] = []
+        for action in command_actions:
+            if parameters.dry_run:
+                result = self._dry_run_action(action, available_plugins)
+            else:
+                result = self._execute_run_command(action, working_dir, parameters.timeout)
+            results.append(result)
+            if progress_callback:
+                progress_callback(action, result)
+            if not result.success and not result.skipped:
+                self.logger.error(f'Action failed: {action.description} - {result.message}')
+                if parameters.fail_fast:
+                    break
+        return results
+
+    async def execute_single_async(
+        self,
+        actions: list[SetupAction],
+        path: Path,
+        parameters: SetupParameters,
+        progress_callback: InstallProgressCallback | None = None,
+        cancellation_token: CancellationToken | None = None,
+    ) -> SetupResults:
+        """Asynchronously executes setup actions for a single path with parallel support.
+
+        Package installations are executed in parallel when plugins support it.
+        CHECK_PLUGIN and RUN_COMMAND actions are executed sequentially.
+
+        Uses asyncio.TaskGroup (Python 3.11+) for structured concurrency.
+
+        Args:
+            actions: The list of actions to execute (from preview).
+            path: The path this execution is for (used for working directory).
+            parameters: The setup parameters.
+            progress_callback: Optional callback for progress updates.
+            cancellation_token: Optional token for cooperative cancellation.
+
+        Returns:
+            SetupResults containing the results of each action.
+
+        Raises:
+            asyncio.CancelledError: If cancellation_token is cancelled.
+        """
+        # Check for cancellation before starting
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+
+        self.logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
+
+        environments = self._get_available_environments()
+        available_plugins = set(environments.keys())
+        working_dir = path if path.is_dir() else path.parent
+
+        # Populate CLI commands for all actions
+        for action in actions:
+            action.cli_command = UpdateCommands._get_cli_command(action, environments)
+
+        # Separate actions by type
+        check_actions = [a for a in actions if a.action_type == SetupActionType.CHECK_PLUGIN]
+        install_actions = [a for a in actions if a.action_type == SetupActionType.INSTALL_PACKAGE]
+        command_actions = [a for a in actions if a.action_type == SetupActionType.RUN_COMMAND]
+
+        results: list[SetupActionResult] = []
+
+        # Execute CHECK_PLUGIN actions
+        check_results, should_continue = await self._execute_check_actions_async(
+            check_actions, available_plugins, parameters, progress_callback
+        )
+        results.extend(check_results)
+        if not should_continue:
+            return SetupResults(actions=actions, results=results)
+
+        # Execute INSTALL_PACKAGE actions
+        if install_actions:
+            context = _InstallContext(
+                parameters=parameters,
+                progress_callback=progress_callback,
+                cancellation_token=cancellation_token,
+            )
+            install_results, should_continue = await self._execute_install_actions_async(
+                install_actions,
+                environments,
+                available_plugins,
+                context,
+            )
+            results.extend(install_results)
+            if not should_continue:
+                return SetupResults(actions=actions, results=results)
+
+        # Execute RUN_COMMAND actions
+        command_results = await self._execute_command_actions_async(
+            command_actions, available_plugins, working_dir, parameters, progress_callback
+        )
+        results.extend(command_results)
+
+        return SetupResults(actions=actions, results=results)
+
+    async def execute_batch_async(
+        self,
+        previews: BatchSetupResults,
+        parameters: SetupParameters,
+        progress_callback: InstallProgressCallback | None = None,
+        cancellation_token: CancellationToken | None = None,
+    ) -> BatchSetupResults:
+        """Asynchronously execute setup actions for multiple manifests.
+
+        Uses structured concurrency patterns for clean cancellation.
+
+        Args:
+            previews: The batch preview results containing actions per manifest.
+            parameters: The setup parameters.
+            progress_callback: Optional callback for progress updates.
+            cancellation_token: Optional token for cooperative cancellation.
+
+        Returns:
+            BatchSetupResults containing execution results for each manifest.
+
+        Raises:
+            asyncio.CancelledError: If cancellation_token is cancelled.
+        """
+        self.logger.info(f'Executing setup async for {len(previews.manifest_results)} manifest(s)')
+
+        manifest_results: list[SetupResults] = []
+        failed_paths: list[tuple[Path, str]] = list(previews.failed_paths)
+
+        for preview in previews.manifest_results:
+            # Check for cancellation before each manifest
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled()
+
+            if preview.manifest_path is None:
+                continue
+
+            result = await self.execute_single_async(
+                preview.actions,
+                preview.manifest_path,
+                parameters,
+                progress_callback,
+                cancellation_token,
+            )
+            result.manifest_path = preview.manifest_path
+            manifest_results.append(result)
+
+            # Check for failures
+            has_failure = any(not r.success for r in result.results)
+            if has_failure and parameters.fail_fast:
+                break
+
+        return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)

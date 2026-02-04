@@ -1,96 +1,45 @@
 """Exception definitions"""
 
 
-class ProcessError(Exception):
+class PorringerError(Exception):
+    """Base class for all Porringer exceptions.
+
+    Provides a common error property for accessing the error message.
+    """
+
+    def __init__(self, error: str) -> None:
+        """Initializes the error.
+
+        Args:
+            error: The error message
+        """
+        self._error = error
+        super().__init__(error)
+
+    @property
+    def error(self) -> str:
+        """Returns the underlying error.
+
+        Returns:
+            The underlying error message
+        """
+        return self._error
+
+
+class ProcessError(PorringerError):
     """Raised when there is a configuration error"""
 
-    def __init__(self, error: str) -> None:
-        """Initializes the error
 
-        Args:
-            error: The error message
-        """
-        self._error = error
-
-        super().__init__(error)
-
-    @property
-    def error(self) -> str:
-        """Returns the underlying error
-
-        Returns:
-            str -- The underlying error
-        """
-        return self._error
-
-
-class PluginError(Exception):
+class PluginError(PorringerError):
     """Raised when there is a plugin error"""
 
-    def __init__(self, error: str) -> None:
-        """Initializes the error
 
-        Args:
-            error: The error message
-        """
-        self._error = error
-
-        super().__init__(error)
-
-    @property
-    def error(self) -> str:
-        """Returns the underlying error
-
-        Returns:
-            str -- The underlying error
-        """
-        return self._error
-
-
-class NotSupportedError(Exception):
+class NotSupportedError(PorringerError):
     """Raised when something is not supported"""
 
-    def __init__(self, error: str) -> None:
-        """Initializes the error
 
-        Args:
-            error: The error message
-        """
-        self._error = error
-
-        super().__init__(error)
-
-    @property
-    def error(self) -> str:
-        """Returns the underlying error
-
-        Returns:
-            str -- The underlying error
-        """
-        return self._error
-
-
-class SetupError(Exception):
+class SetupError(PorringerError):
     """Base class for setup-related errors"""
-
-    def __init__(self, error: str) -> None:
-        """Initializes the error
-
-        Args:
-            error: The error message
-        """
-        self._error = error
-
-        super().__init__(error)
-
-    @property
-    def error(self) -> str:
-        """Returns the underlying error
-
-        Returns:
-            str -- The underlying error
-        """
-        return self._error
 
 
 class ManifestError(SetupError):
@@ -150,24 +99,5 @@ class PluginDependencyError(PluginError):
         return self._dependency
 
 
-class UpdateError(Exception):
+class UpdateError(PorringerError):
     """Raised when there is an error checking for or downloading updates"""
-
-    def __init__(self, error: str) -> None:
-        """Initializes the error
-
-        Args:
-            error: The error message
-        """
-        self._error = error
-
-        super().__init__(error)
-
-    @property
-    def error(self) -> str:
-        """Returns the underlying error
-
-        Returns:
-            str -- The underlying error
-        """
-        return self._error

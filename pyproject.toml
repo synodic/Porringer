@@ -17,7 +17,8 @@ dependencies = [
   "pydantic>=2.12.5",
   "platformdirs>=4.5.1",
   "userpath>=1.9.2",
-  "packaging>=25.0",
+  "packaging>=26.0",
+  "httpx>=0.28.1",
 ]
 
 [project.urls]
@@ -25,9 +26,18 @@ homepage = "https://github.com/synodic/porringer"
 repository = "https://github.com/synodic/porringer"
 
 [dependency-groups]
-lint = ["ruff>=0.14.13", "pyrefly>=0.48.2"]
-test = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "pytest-mock>=3.15.1"]
-docs = ["zensical>=0.0.16"]
+lint = [
+    "ruff>=0.15.0",
+    "pyrefly>=0.51.0",
+]
+test = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "pytest-mock>=3.15.1",
+]
+docs = [
+    "zensical>=0.0.21",
+]
 
 [project.entry-points."porringer.environment"]
 pip = "porringer.plugin.pip.plugin:PipEnvironment"

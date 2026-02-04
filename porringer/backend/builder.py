@@ -1,7 +1,6 @@
 """Builder"""
 
 from importlib import metadata
-from inspect import getmodule
 from logging import Logger
 
 from packaging.version import Version
@@ -58,7 +57,7 @@ class Builder:
                     f" of '{group_name}'"
                 )
             else:
-                self.logger.warning(f'{group_name} plugin found: {canonicalized.name} from {getmodule(loaded_type)}')
+                self.logger.debug(f'{group_name} plugin found: {canonicalized.name}')
                 plugin_types.append(PluginInformation(loaded_type, entry_point.dist))
 
         if check_dependencies:

@@ -1,5 +1,6 @@
 """Plugin utilities for package environments"""
 
+import asyncio
 from abc import abstractmethod
 from typing import override
 
@@ -159,6 +160,35 @@ class Environment(Plugin):
         """
         return []
 
+    @staticmethod
+    def supports_parallel() -> bool:
+        """Returns whether this plugin supports parallel package installations.
+
+        Some package managers (like pip without --no-deps) may have issues with
+        concurrent installations. Override this method to return False if the
+        plugin requires sequential installation.
+
+        Returns:
+            True if parallel installation is supported, False otherwise.
+        """
+        return True
+
+    async def async_install(self, params: InstallParameters) -> Package | None:
+        """Asynchronously installs the given package identified by its name.
+
+        Default implementation wraps the synchronous install() in an executor.
+        Override this method for true async implementations using
+        asyncio.create_subprocess_exec().
+
+        Args:
+            params: The installation parameters
+
+        Returns:
+            The package, or None if installation failed
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.install, params)
+
     @abstractmethod
     def packages(self) -> list[Package]:
         """Gathers installed packages in the given environment
@@ -216,7 +246,8 @@ class Environment(Plugin):
         """
         raise NotImplementedError
 
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    @staticmethod
+    def check_updates(params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates using the plugin's native tooling.
 
         This method is optional. Plugins that don't support update checking

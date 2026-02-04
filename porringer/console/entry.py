@@ -38,7 +38,8 @@ class TyperHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         """Emits the log record to typer"""
         level = next(level for level in LOG_LEVELS if level.name == record.levelname)
-        self.console.print(record, style=level.colour)
+        message = self.format(record)
+        self.console.print(message, style=level.colour)
 
 
 def version_callback(value: bool) -> None:

@@ -2,11 +2,10 @@
 
 import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import override
-
-from platformdirs import user_data_dir
 
 from porringer.core.plugin_schema.environment import (
     Environment,
@@ -16,9 +15,31 @@ from porringer.core.plugin_schema.environment import (
     UpgradeParameters,
 )
 from porringer.core.schema import Package, PackageName
+from porringer.utility.utility import async_run_command
 
 # Capability identifier for Python runtime providers
 PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
+
+
+def _get_pipx_venvs_dir() -> Path:
+    """Get the pipx venvs directory.
+
+    Checks PIPX_HOME environment variable first, then falls back to
+    the default pipx location (~/.local/pipx on Linux/macOS, ~/pipx on Windows).
+
+    Returns:
+        Path to the pipx venvs directory.
+    """
+    pipx_home = os.environ.get('PIPX_HOME')
+    if pipx_home:
+        return Path(pipx_home) / 'venvs'
+
+    # Default pipx home location (not platformdirs)
+    # On Windows: ~/pipx, on Unix: ~/.local/pipx
+    if os.name == 'nt':
+        return Path.home() / 'pipx' / 'venvs'
+    else:
+        return Path.home() / '.local' / 'pipx' / 'venvs'
 
 
 class PipxEnvironment(Environment):
@@ -82,7 +103,7 @@ class PipxEnvironment(Environment):
         args = ['pipx', 'install', str(params.name)]
         if params.dry:
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.name, version='unknown')
+            return Package(name=params.name, version=None)
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
             logger.info(result.stdout)
@@ -92,7 +113,29 @@ class PipxEnvironment(Environment):
         except Exception as e:
             logger.error(f'Failed to install {params.name}: {e}')
             return None
-        return Package(name=params.name, version='unknown')
+        return Package(name=params.name, version=None)
+
+    @override
+    async def async_install(self, params: InstallParameters) -> Package | None:
+        """Asynchronously installs the given package using pipx."""
+        logger = logging.getLogger('porringer.pipx.install')
+        args = ['pipx', 'install', str(params.name)]
+        if params.dry:
+            logger.info(f'[dry-run] Would run: {" ".join(args)}')
+            return Package(name=params.name, version=None)
+        try:
+            result = await async_run_command(args)
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                return None
+        except TimeoutError:
+            logger.error(f'Timeout installing {params.name}')
+            return None
+        except Exception as e:
+            logger.error(f'Failed to install {params.name}: {e}')
+            return None
+        return Package(name=params.name, version=None)
 
     @override
     def search(self, name: PackageName) -> Package | None:
@@ -104,6 +147,7 @@ class PipxEnvironment(Environment):
         Returns:
             The package, or None if it doesn't exist
         """
+        raise NotImplementedError
 
     @override
     def uninstall(self, params: UninstallParameters) -> list[Package | None]:
@@ -114,13 +158,13 @@ class PipxEnvironment(Environment):
             args = ['pipx', 'uninstall', str(name)]
             if params.dry:
                 logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version='unknown'))
+                results.append(Package(name=name, version=None))
                 continue
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version='unknown'))
+                    results.append(Package(name=name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -138,13 +182,13 @@ class PipxEnvironment(Environment):
             args = ['pipx', 'upgrade', str(name)]
             if params.dry:
                 logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version='unknown'))
+                results.append(Package(name=name, version=None))
                 continue
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version='unknown'))
+                    results.append(Package(name=name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -161,19 +205,19 @@ class PipxEnvironment(Environment):
             A list of packages
         """
         packages: list[Package] = []
-        pipx_home = Path(user_data_dir('pipx', 'pypa')) / 'venvs'
+        pipx_venvs = _get_pipx_venvs_dir()
 
-        if not pipx_home.exists():
+        if not pipx_venvs.exists():
             return packages
 
-        for venv_dir in pipx_home.iterdir():
+        for venv_dir in pipx_venvs.iterdir():
             metadata_file = venv_dir / 'pipx_metadata.json'
             if metadata_file.exists():
                 try:
                     metadata = json.loads(metadata_file.read_text())
                     main_package = metadata.get('main_package', {})
                     name = main_package.get('package')
-                    version = main_package.get('package_version', 'unknown')
+                    version = main_package.get('package_version')
                     if name:
                         packages.append(Package(name=PackageName(name), version=version))
                 except json.JSONDecodeError, KeyError:
