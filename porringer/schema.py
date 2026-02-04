@@ -1,11 +1,13 @@
 """Schema"""
 
-from collections.abc import Callable, Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from importlib.metadata import Distribution
 from logging import Logger
 from pathlib import Path
+from queue import Empty, Queue
 
 from packaging.version import Version
 from platformdirs import user_cache_dir
@@ -86,12 +88,140 @@ class SetupActionResult:
         success: Whether the action succeeded.
         message: Optional message (error details on failure).
         skipped: Whether the action was skipped (e.g., plugin check found plugin).
+        skip_reason: Human-readable reason for skipping (e.g., 'already installed').
     """
 
     action: SetupAction
     success: bool
     message: str | None = None
     skipped: bool = False
+    skip_reason: str | None = None
+
+
+# Type alias for install progress callback: (action, result) -> None
+# Note: Callbacks are invoked from the asyncio event loop thread.
+# GUI applications must marshal updates to their UI thread.
+InstallProgressCallback = Callable[[SetupAction, SetupActionResult | None], None]
+
+# Async-aware progress callback that can be awaited
+AsyncInstallProgressCallback = Callable[[SetupAction, SetupActionResult | None], Awaitable[None]]
+
+
+@dataclass
+class ThreadSafeProgressAdapter:
+    """Adapter that queues progress updates for thread-safe GUI consumption.
+
+    Use this when integrating with GUI frameworks that require UI updates
+    on a specific thread (Qt, Tkinter, GTK, etc.).
+
+    The adapter collects updates in a thread-safe queue. The GUI's main
+    thread can poll or be notified to process updates.
+
+    Example (Qt):
+        adapter = ThreadSafeProgressAdapter()
+
+        # In async context:
+        await commands.execute_batch_async(previews, params, adapter.callback)
+
+        # In Qt main thread (e.g., via QTimer):
+        for action, result in adapter.drain():
+            update_progress_bar(action, result)
+    """
+
+    _queue: Queue[tuple[SetupAction, SetupActionResult | None]] = field(default_factory=Queue, init=False)
+    _on_update: Callable[[], None] | None = None
+
+    def __init__(self, on_update: Callable[[], None] | None = None) -> None:
+        """Initialize the adapter.
+
+        Args:
+            on_update: Optional callback to invoke (thread-safely) when an
+                update is queued. Use this to signal the GUI thread to
+                process updates (e.g., QApplication.postEvent).
+        """
+        self._queue = Queue()
+        self._on_update = on_update
+
+    def callback(self, action: SetupAction, result: SetupActionResult | None) -> None:
+        """Progress callback that queues updates thread-safely.
+
+        This method is safe to call from any thread (including asyncio).
+        """
+        self._queue.put((action, result))
+        if self._on_update:
+            self._on_update()
+
+    def drain(self) -> list[tuple[SetupAction, SetupActionResult | None]]:
+        """Drain all queued updates.
+
+        Call this from the GUI thread to get pending updates.
+
+        Returns:
+            List of (action, result) tuples in order received.
+        """
+        updates: list[tuple[SetupAction, SetupActionResult | None]] = []
+        while True:
+            try:
+                updates.append(self._queue.get_nowait())
+            except Empty:
+                break
+        return updates
+
+    def pending(self) -> int:
+        """Return the number of pending updates."""
+        return self._queue.qsize()
+
+
+@dataclass
+class CancellationToken:
+    """Token for cooperative cancellation of async operations.
+
+    Used by GUI applications to request cancellation of long-running
+    async operations like batch installs.
+
+    Example:
+        token = CancellationToken()
+        task = asyncio.create_task(long_operation(token))
+        # Later...
+        token.cancel()
+    """
+
+    _cancelled: bool = field(default=False, init=False)
+    _event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+        self._event.set()
+
+    @property
+    def is_cancelled(self) -> bool:
+        """Check if cancellation has been requested."""
+        return self._cancelled
+
+    async def wait_cancelled(self) -> None:
+        """Wait until cancellation is requested."""
+        await self._event.wait()
+
+    def raise_if_cancelled(self) -> None:
+        """Raise asyncio.CancelledError if cancellation was requested."""
+        if self._cancelled:
+            raise asyncio.CancelledError('Operation cancelled by token')
+
+
+@dataclass
+class InstallProgress:
+    """Progress information for installation operations.
+
+    Args:
+        total: Total number of actions.
+        completed: Number of completed actions.
+        current_action: The action currently being executed.
+    """
+
+    total: int
+    completed: int
+    current_action: SetupAction | None = None
 
 
 class Prerequisite(BaseModel):

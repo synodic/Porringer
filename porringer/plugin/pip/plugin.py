@@ -13,6 +13,7 @@ from porringer.core.plugin_schema.environment import (
     UpgradeParameters,
 )
 from porringer.core.schema import Package, PackageName
+from porringer.utility.utility import async_run_command
 
 # Capability identifier for Python runtime providers
 PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
@@ -72,6 +73,12 @@ class PipEnvironment(Environment):
         """Returns the CLI command to install a package via pip."""
         return ['pip', 'install', str(package)]
 
+    @staticmethod
+    @override
+    def supports_parallel() -> bool:
+        """Pip does not support parallel installs safely due to potential conflicts."""
+        return False
+
     @override
     def install(self, params: InstallParameters) -> Package | None:
         """Installs the given package identified by its name using pip."""
@@ -88,7 +95,28 @@ class PipEnvironment(Environment):
         except Exception as e:
             logger.error(f'Failed to install {params.name}: {e}')
             return None
-        return Package(name=params.name, version='unknown')
+        return Package(name=params.name, version=None)
+
+    @override
+    async def async_install(self, params: InstallParameters) -> Package | None:
+        """Asynchronously installs the given package using pip."""
+        logger = logging.getLogger('porringer.pip.install')
+        args = ['python', '-m', 'pip', 'install', str(params.name)]
+        if params.dry:
+            args.append('--dry-run')
+        try:
+            result = await async_run_command(args)
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                return None
+        except TimeoutError:
+            logger.error(f'Timeout installing {params.name}')
+            return None
+        except Exception as e:
+            logger.error(f'Failed to install {params.name}: {e}')
+            return None
+        return Package(name=params.name, version=None)
 
     @override
     def search(self, name: PackageName) -> Package | None:
@@ -100,6 +128,7 @@ class PipEnvironment(Environment):
         Returns:
             The package, or None if it doesn't exist
         """
+        raise NotImplementedError
 
     @override
     def uninstall(self, params: UninstallParameters) -> list[Package | None]:
@@ -114,7 +143,7 @@ class PipEnvironment(Environment):
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version='unknown'))
+                    results.append(Package(name=name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -136,7 +165,7 @@ class PipEnvironment(Environment):
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version='unknown'))
+                    results.append(Package(name=name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)

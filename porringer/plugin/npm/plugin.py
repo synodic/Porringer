@@ -42,7 +42,7 @@ class NpmEnvironment(Environment):
         except Exception as e:
             logger.error(f'Failed to install {params.name}: {e}')
             return None
-        return Package(name=params.name, version='unknown')
+        return Package(name=params.name, version=None)
 
     @override
     def search(self, name: PackageName) -> Package | None:
@@ -54,6 +54,7 @@ class NpmEnvironment(Environment):
         Returns:
             The package, or None if it doesn't exist
         """
+        raise NotImplementedError
 
     @override
     def uninstall(self, params: UninstallParameters) -> list[Package | None]:
@@ -68,7 +69,7 @@ class NpmEnvironment(Environment):
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version='unknown'))
+                    results.append(Package(name=name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -90,7 +91,7 @@ class NpmEnvironment(Environment):
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version='unknown'))
+                    results.append(Package(name=name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)

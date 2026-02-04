@@ -90,7 +90,7 @@ class AptEnvironment(Environment):
                 logger.info(result.stdout)
             except Exception:
                 pass
-            return Package(name=params.name, version='unknown')
+            return Package(name=params.name, version=None)
 
         # Use -y to auto-confirm
         args = ['apt', 'install', '-y', package]
@@ -112,7 +112,7 @@ class AptEnvironment(Environment):
 
         # Try to get the installed version
         version = self.__class__._get_package_version(package)
-        return Package(name=params.name, version=version or 'unknown')
+        return Package(name=params.name, version=version)
 
     @override
     def search(self, name: PackageName) -> Package | None:
@@ -185,7 +185,7 @@ class AptEnvironment(Environment):
                     logger.info(result.stdout)
                 except Exception:
                     pass
-                results.append(Package(name=name, version='unknown'))
+                results.append(Package(name=name, version=None))
                 continue
 
             # Use -y to auto-confirm
@@ -195,7 +195,7 @@ class AptEnvironment(Environment):
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version='unknown'))
+                    results.append(Package(name=name, version=None))
                 else:
                     logger.error(result.stderr)
                     if 'Permission denied' in result.stderr or 'are you root?' in result.stderr:
@@ -236,7 +236,7 @@ class AptEnvironment(Environment):
                     logger.info(result.stdout)
                 except Exception:
                     pass
-                results.append(Package(name=name, version='unknown'))
+                results.append(Package(name=name, version=None))
                 continue
 
             # Use install --only-upgrade to upgrade a specific package
@@ -247,7 +247,7 @@ class AptEnvironment(Environment):
                 logger.info(result.stdout)
                 if result.returncode == 0:
                     version = self.__class__._get_package_version(package)
-                    results.append(Package(name=name, version=version or 'unknown'))
+                    results.append(Package(name=name, version=version))
                 else:
                     logger.error(result.stderr)
                     if 'Permission denied' in result.stderr or 'are you root?' in result.stderr:

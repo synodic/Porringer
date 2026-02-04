@@ -79,7 +79,7 @@ class BrewEnvironment(Environment):
         if params.dry:
             args.append('--dry-run')
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.name, version='unknown')
+            return Package(name=params.name, version=None)
 
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
@@ -96,7 +96,7 @@ class BrewEnvironment(Environment):
 
         # Try to get the installed version
         version = self.__class__._get_formula_version(formula)
-        return Package(name=params.name, version=version or 'unknown')
+        return Package(name=params.name, version=version)
 
     @override
     def search(self, name: PackageName) -> Package | None:
@@ -161,14 +161,14 @@ class BrewEnvironment(Environment):
             if params.dry:
                 args.append('--dry-run')
                 logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version='unknown'))
+                results.append(Package(name=name, version=None))
                 continue
 
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version='unknown'))
+                    results.append(Package(name=name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -201,7 +201,7 @@ class BrewEnvironment(Environment):
             if params.dry:
                 args.append('--dry-run')
                 logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version='unknown'))
+                results.append(Package(name=name, version=None))
                 continue
 
             try:
@@ -209,7 +209,7 @@ class BrewEnvironment(Environment):
                 logger.info(result.stdout)
                 if result.returncode == 0:
                     version = self.__class__._get_formula_version(formula)
-                    results.append(Package(name=name, version=version or 'unknown'))
+                    results.append(Package(name=name, version=version))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
