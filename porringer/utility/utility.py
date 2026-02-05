@@ -2,8 +2,10 @@
 
 import asyncio
 import contextlib
+import os
 import re
 import subprocess
+import sys
 from typing import Any, NamedTuple, NewType
 
 TypeName = NewType('TypeName', str)
@@ -166,3 +168,15 @@ def canonicalize_type(input_type: type[Any]) -> TypeID:
         The type identifier
     """
     return canonicalize_name(input_type.__name__)
+
+
+def is_pipx_installation() -> bool:
+    """Check if Porringer is installed via pipx.
+
+    Determines whether the current Python executable is running inside
+    a pipx-managed virtual environment by checking the path structure.
+
+    Returns:
+        True if running in a pipx venv, False otherwise.
+    """
+    return sys.prefix.split(os.sep)[-3:-1] == ['pipx', 'venvs']

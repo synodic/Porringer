@@ -6,8 +6,14 @@ from typing import Annotated
 import typer
 
 from porringer.api import API
+from porringer.backend.schema import (
+    PluginInstallParameters,
+    PluginUninstallParameters,
+    PluginUpdateParameters,
+)
 from porringer.console.schema import Configuration
 from porringer.schema import APIParameters, ListPluginsParameters
+from porringer.utility.exception import PluginError
 
 app = typer.Typer()
 
@@ -38,29 +44,83 @@ def plugin_list(
 
 @app.command('install')
 def plugin_install(
-    context: typer.Context, plugins: Annotated[list[str], typer.Argument(help='Plugins to install')]
+    context: typer.Context,
+    plugins: Annotated[list[str], typer.Argument(help='Plugins to install (PyPI package names)')],
+    dry_run: Annotated[bool, typer.Option('--dry-run', help='Show what would be done without executing')] = False,
 ) -> None:
-    """Install plugins"""
-    for _plugin in plugins:
-        pass
+    """Install plugins from PyPI"""
+    configuration = context.ensure_object(Configuration)
+
+    api_parameters = APIParameters(logging.getLogger('porringer'))
+    api = API(configuration.local_configuration, api_parameters)
+
+    for plugin in plugins:
+        try:
+            params = PluginInstallParameters(name=plugin, dry=dry_run)
+            result = api.plugin.install(params)
+
+            if result.success:
+                configuration.console.print(f'[green]{result.message}[/green]')
+            else:
+                configuration.console.print(f'[red]{result.message}[/red]')
+                raise typer.Exit(code=1)
+        except PluginError as e:
+            configuration.console.print(f'[red]Error: {e.error}[/red]')
+            raise typer.Exit(code=1) from None
 
 
 @app.command('update')
 def plugin_update(
-    context: typer.Context, plugins: Annotated[list[str], typer.Argument(help='Plugins to update')]
+    context: typer.Context,
+    plugins: Annotated[list[str], typer.Argument(help='Plugins to update (PyPI package names)')],
+    dry_run: Annotated[bool, typer.Option('--dry-run', help='Show what would be done without executing')] = False,
 ) -> None:
-    """Update plugins"""
-    for _plugin in plugins:
-        pass
+    """Update installed plugins"""
+    configuration = context.ensure_object(Configuration)
+
+    api_parameters = APIParameters(logging.getLogger('porringer'))
+    api = API(configuration.local_configuration, api_parameters)
+
+    params = PluginUpdateParameters(names=plugins, dry=dry_run)
+    results = api.plugin.update(params)
+
+    has_failure = False
+    for result in results:
+        if result.success:
+            configuration.console.print(f'[green]{result.message}[/green]')
+        else:
+            configuration.console.print(f'[red]{result.message}[/red]')
+            has_failure = True
+
+    if has_failure:
+        raise typer.Exit(code=1)
 
 
 @app.command('uninstall')
 def plugin_uninstall(
-    context: typer.Context, plugins: Annotated[list[str], typer.Argument(help='Plugins to remove')]
+    context: typer.Context,
+    plugins: Annotated[list[str], typer.Argument(help='Plugins to remove (PyPI package names)')],
+    dry_run: Annotated[bool, typer.Option('--dry-run', help='Show what would be done without executing')] = False,
 ) -> None:
     """Remove installed plugins"""
-    for _plugin in plugins:
-        pass
+    configuration = context.ensure_object(Configuration)
+
+    api_parameters = APIParameters(logging.getLogger('porringer'))
+    api = API(configuration.local_configuration, api_parameters)
+
+    params = PluginUninstallParameters(names=plugins, dry=dry_run)
+    results = api.plugin.uninstall(params)
+
+    has_failure = False
+    for result in results:
+        if result.success:
+            configuration.console.print(f'[green]{result.message}[/green]')
+        else:
+            configuration.console.print(f'[red]{result.message}[/red]')
+            has_failure = True
+
+    if has_failure:
+        raise typer.Exit(code=1)
 
 
 @app.callback(invoke_without_command=True, no_args_is_help=True)

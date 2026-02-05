@@ -562,23 +562,39 @@ class UpdateCommands:
             self.logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
 
         self.logger.info(f"Installing '{action.package}' via {action.plugin}")
+        return self._attempt_package_installation(action, environment)
+
+    def _attempt_package_installation(self, action: SetupAction, environment: Environment) -> SetupActionResult:
+        """Attempt to install a package via the given environment plugin.
+
+        Args:
+            action: The install action.
+            environment: The environment plugin to use for installation.
+
+        Returns:
+            The result of the installation attempt.
+        """
+        success = False
+        message = ''
 
         try:
             params = InstallParameters(name=action.package, dry=False)
             result = environment.install(params)
-
             if result is not None:
-                return SetupActionResult(action=action, success=True, message=f'Installed {result.name}')
+                success = True
+                message = f'Installed {result.name}'
             else:
-                return SetupActionResult(action=action, success=False, message=f"Failed to install '{action.package}'")
+                message = f"Failed to install '{action.package}'"
         except PluginError as e:
             self.logger.error(f'Plugin error installing {action.package}: {e}')
-            return SetupActionResult(action=action, success=False, message=str(e))
+            message = str(e)
         except subprocess.SubprocessError as e:
             self.logger.error(f'Subprocess error installing {action.package}: {e}')
-            return SetupActionResult(action=action, success=False, message=str(e))
+            message = str(e)
         except Exception as e:
-            return SetupActionResult(action=action, success=False, message=str(e))
+            message = str(e)
+
+        return SetupActionResult(action=action, success=success, message=message)
 
     def _execute_run_command(self, action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
         """Executes a post-install command.
@@ -667,26 +683,45 @@ class UpdateCommands:
             self.logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
 
         self.logger.info(f"Installing '{action.package}' via {action.plugin}")
+        return await self._attempt_async_package_installation(action, environment)
+
+    async def _attempt_async_package_installation(
+        self, action: SetupAction, environment: Environment
+    ) -> SetupActionResult:
+        """Attempt to asynchronously install a package via the given environment plugin.
+
+        Args:
+            action: The install action.
+            environment: The environment plugin to use for installation.
+
+        Returns:
+            The result of the installation attempt.
+        """
+        success = False
+        message = ''
 
         try:
             params = InstallParameters(name=action.package, dry=False)
             result = await environment.async_install(params)
 
             if result is not None:
-                return SetupActionResult(action=action, success=True, message=f'Installed {result.name}')
+                success = True
+                message = f'Installed {result.name}'
             else:
-                return SetupActionResult(action=action, success=False, message=f"Failed to install '{action.package}'")
+                message = f"Failed to install '{action.package}'"
         except PluginError as e:
             self.logger.error(f'Plugin error installing {action.package}: {e}')
-            return SetupActionResult(action=action, success=False, message=str(e))
+            message = str(e)
         except asyncio.CancelledError:
             self.logger.error(f'Installation cancelled for {action.package}')
-            return SetupActionResult(action=action, success=False, message='Installation cancelled')
+            message = 'Installation cancelled'
         except TimeoutError as e:
             self.logger.error(f'Timeout installing {action.package}: {e}')
-            return SetupActionResult(action=action, success=False, message=str(e))
+            message = str(e)
         except Exception as e:
-            return SetupActionResult(action=action, success=False, message=str(e))
+            message = str(e)
+
+        return SetupActionResult(action=action, success=success, message=message)
 
     async def _execute_check_actions_async(
         self,
