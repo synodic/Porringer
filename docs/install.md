@@ -11,12 +11,23 @@ Porringer looks for manifests in this order:
 
 ## Manifest Schema
 
-| Field           | Type   | Description                                                  |
-| --------------- | ------ | ------------------------------------------------------------ |
-| `version`       | string | Schema version (currently `"1"`)                             |
-| `prerequisites` | array  | Plugins that must be available                               |
-| `packages`      | object | Packages to install per plugin (plugin name → package list)  |
-| `post_install`  | array  | Commands to run after installation                           |
+| Field           | Type   | Description                                                           |
+| --------------- | ------ | --------------------------------------------------------------------- |
+| `version`       | string | Schema version (currently `"1"`)                                      |
+| `prerequisites` | array  | Plugins that must be available (with optional platform filtering)     |
+| `packages`      | object | Packages to install per plugin (plugin name → package list)           |
+| `post_install`  | array  | Commands to run after installation                                    |
+
+### Prerequisite Schema
+
+Each item in `prerequisites` has:
+
+| Field       | Type   | Description                                                              |
+| ----------- | ------ | ------------------------------------------------------------------------ |
+| `plugin`    | string | The plugin name that must be available (e.g., `pip`, `pipx`, `winget`) |
+| `platforms` | array  | Optional platform filter (e.g., `["win32", "darwin", "linux"]`)         |
+
+If `platforms` is omitted or empty, the prerequisite applies to all platforms.
 
 ## Execute Installation
 
