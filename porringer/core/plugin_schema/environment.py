@@ -161,6 +161,18 @@ class Environment(Plugin):
         return []
 
     @staticmethod
+    def is_available() -> bool:
+        """Checks if the underlying package manager is available on the system.
+
+        Override this method to verify that the CLI tool is installed and accessible.
+        The default implementation returns True.
+
+        Returns:
+            True if the package manager is available, False otherwise.
+        """
+        return True
+
+    @staticmethod
     def supports_parallel() -> bool:
         """Returns whether this plugin supports parallel package installations.
 

@@ -254,6 +254,8 @@ class UpdateCommands:
 
         # Add prerequisite check actions
         for prereq in manifest.prerequisites:
+            if not prereq.is_applicable():
+                continue
             actions.append(
                 SetupAction(
                     action_type=SetupActionType.CHECK_PLUGIN,
