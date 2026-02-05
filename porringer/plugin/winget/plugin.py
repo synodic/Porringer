@@ -58,6 +58,12 @@ class WingetEnvironment(Environment):
             if result.returncode != 0:
                 logger.error(result.stderr)
                 return None
+        except FileNotFoundError:
+            logger.error('winget not found. Install it from https://github.com/microsoft/winget-cli')
+            return None
+        except subprocess.SubprocessError as e:
+            logger.error(f'Failed to install {params.name}: {e}')
+            return None
         except Exception as e:
             logger.error(f'Failed to install {params.name}: {e}')
             return None
@@ -101,6 +107,12 @@ class WingetEnvironment(Environment):
                 else:
                     logger.error(result.stderr)
                     results.append(None)
+            except FileNotFoundError:
+                logger.error('winget not found')
+                results.append(None)
+            except subprocess.SubprocessError as e:
+                logger.error(f'Failed to uninstall {name}: {e}')
+                results.append(None)
             except Exception as e:
                 logger.error(f'Failed to uninstall {name}: {e}')
                 results.append(None)
@@ -132,6 +144,12 @@ class WingetEnvironment(Environment):
                 else:
                     logger.error(result.stderr)
                     results.append(None)
+            except FileNotFoundError:
+                logger.error('winget not found')
+                results.append(None)
+            except subprocess.SubprocessError as e:
+                logger.error(f'Failed to upgrade {name}: {e}')
+                results.append(None)
             except Exception as e:
                 logger.error(f'Failed to upgrade {name}: {e}')
                 results.append(None)

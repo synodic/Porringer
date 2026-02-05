@@ -16,6 +16,7 @@ from porringer.schema import (
     CheckResult,
     PackageUpdateInfo,
 )
+from porringer.utility.exception import PluginError, UpdateError
 
 app = typer.Typer()
 
@@ -78,6 +79,12 @@ def _check_plugin_updates(
 
             results.append(CheckResult(plugin=plugin_name, packages=package_infos))
 
+        except PluginError as e:
+            logger.error(f'Plugin error checking updates for {plugin_name}: {e}')
+            results.append(CheckResult(plugin=plugin_name, error=str(e)))
+        except UpdateError as e:
+            logger.error(f'Update check error for {plugin_name}: {e}')
+            results.append(CheckResult(plugin=plugin_name, error=str(e)))
         except Exception as e:
             logger.warning(f'Failed to check updates for {plugin_name}: {e}')
             results.append(CheckResult(plugin=plugin_name, error=str(e)))

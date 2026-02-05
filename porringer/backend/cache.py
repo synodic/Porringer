@@ -1,7 +1,10 @@
 """Directory cache management for manifest directories."""
 
+import json
 from logging import Logger
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from porringer.schema import DirectoryCache, ManifestDirectory
 
@@ -45,6 +48,15 @@ class DirectoryCacheManager:
             try:
                 self._cache = DirectoryCache.model_validate_json(self._cache_path.read_text(encoding='utf-8'))
                 self.logger.debug(f'Loaded directory cache from {self._cache_path}')
+            except json.JSONDecodeError as e:
+                self.logger.warning(f'Invalid JSON in cache file, creating new: {e}')
+                self._cache = DirectoryCache()
+            except ValidationError as e:
+                self.logger.warning(f'Invalid cache format, creating new: {e}')
+                self._cache = DirectoryCache()
+            except (OSError, PermissionError) as e:
+                self.logger.warning(f'Failed to read cache file, creating new: {e}')
+                self._cache = DirectoryCache()
             except Exception as e:
                 self.logger.warning(f'Failed to load directory cache, creating new: {e}')
                 self._cache = DirectoryCache()
@@ -66,6 +78,16 @@ class DirectoryCacheManager:
             temp_path.write_text(self._cache.model_dump_json(indent=2), encoding='utf-8')
             temp_path.replace(self._cache_path)
             self.logger.debug(f'Saved directory cache to {self._cache_path}')
+        except PermissionError as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            self.logger.error(f'Permission denied writing cache: {e}')
+            raise
+        except OSError as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            self.logger.error(f'Failed to write cache: {e}')
+            raise
         except Exception:
             if temp_path.exists():
                 temp_path.unlink()

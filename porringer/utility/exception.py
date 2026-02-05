@@ -43,21 +43,29 @@ class SetupError(PorringerError):
 
 
 class ManifestError(SetupError):
-    """Raised when there is an error with the setup manifest"""
+    """Raised when there is an error with the setup manifest.
 
-    pass
+    This includes errors such as:
+    - Invalid JSON/TOML syntax
+    - Missing required fields
+    - Invalid package specifications
+    """
 
 
 class CommandTimeoutError(SetupError):
-    """Raised when a post-install command exceeds the allowed timeout"""
+    """Raised when a post-install command exceeds the allowed timeout.
 
-    pass
+    This exception is raised when a command specified in the manifest
+    runs longer than the configured timeout duration.
+    """
 
 
 class PrerequisiteError(SetupError):
-    """Raised when a prerequisite plugin is not available"""
+    """Raised when a prerequisite plugin is not available.
 
-    pass
+    This exception indicates that a required package manager or plugin
+    is missing or not installed on the system.
+    """
 
 
 class PluginDependencyError(PluginError):

@@ -39,6 +39,12 @@ class NpmEnvironment(Environment):
             if result.returncode != 0:
                 logger.error(result.stderr)
                 return None
+        except FileNotFoundError:
+            logger.error('npm not found. Install Node.js from https://nodejs.org')
+            return None
+        except subprocess.SubprocessError as e:
+            logger.error(f'Failed to install {params.name}: {e}')
+            return None
         except Exception as e:
             logger.error(f'Failed to install {params.name}: {e}')
             return None
@@ -73,6 +79,12 @@ class NpmEnvironment(Environment):
                 else:
                     logger.error(result.stderr)
                     results.append(None)
+            except FileNotFoundError:
+                logger.error('npm not found')
+                results.append(None)
+            except subprocess.SubprocessError as e:
+                logger.error(f'Failed to uninstall {name}: {e}')
+                results.append(None)
             except Exception as e:
                 logger.error(f'Failed to uninstall {name}: {e}')
                 results.append(None)
@@ -95,6 +107,12 @@ class NpmEnvironment(Environment):
                 else:
                     logger.error(result.stderr)
                     results.append(None)
+            except FileNotFoundError:
+                logger.error('npm not found')
+                results.append(None)
+            except subprocess.SubprocessError as e:
+                logger.error(f'Failed to upgrade {name}: {e}')
+                results.append(None)
             except Exception as e:
                 logger.error(f'Failed to upgrade {name}: {e}')
                 results.append(None)
