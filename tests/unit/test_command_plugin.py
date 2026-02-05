@@ -38,6 +38,9 @@ class TestCommandPlugin:
         results = api.plugin.list(params)
 
         assert results
+        # Each result should have an installed status based on is_available()
+        for result in results:
+            assert isinstance(result.installed, bool)
 
     @staticmethod
     def test_plugin_update() -> None:

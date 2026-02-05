@@ -329,6 +329,7 @@ class ListPluginResults:
     Args:
         name: The name of the plugin.
         version: The version of the plugin.
+        installed: Whether the underlying package manager is available on the system.
     """
 
     name: str

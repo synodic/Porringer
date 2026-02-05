@@ -1,5 +1,6 @@
 """The plugin command module."""
 
+import builtins
 import subprocess
 import sys
 from importlib import metadata
@@ -164,7 +165,7 @@ class PluginCommands:
 
         return subprocess.run(args, capture_output=True, text=True, check=False)
 
-    def uninstall(self, parameters: PluginUninstallParameters) -> list[PluginOperationResult]:
+    def uninstall(self, parameters: PluginUninstallParameters) -> builtins.list[PluginOperationResult]:
         """Uninstall plugin packages.
 
         Args:
@@ -237,7 +238,7 @@ class PluginCommands:
 
         return results
 
-    def update(self, parameters: PluginUpdateParameters) -> list[PluginOperationResult]:
+    def update(self, parameters: PluginUpdateParameters) -> builtins.list[PluginOperationResult]:
         """Update plugin packages.
 
         Args:
