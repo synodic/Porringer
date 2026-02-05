@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from logging import Logger
 from pathlib import Path
 from typing import Any, BinaryIO
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import httpx
@@ -184,6 +185,15 @@ def _download_with_temp_file(
 
     except TimeoutError:
         return DownloadResult(success=False, message=f'Download timed out after {parameters.timeout} seconds')
+    except HTTPError as e:
+        logger.error(f'Download failed with HTTP error {e.code}: {e.reason}')
+        return DownloadResult(success=False, message=f'HTTP Error {e.code}: {e.reason}')
+    except URLError as e:
+        logger.error(f'Download failed with network error: {e.reason}')
+        return DownloadResult(success=False, message=f'Network error: {e.reason}')
+    except OSError as e:
+        logger.error(f'Download failed with file error: {e}')
+        return DownloadResult(success=False, message=str(e))
     except Exception as e:
         logger.error(f'Download failed: {e}')
         return DownloadResult(success=False, message=str(e))

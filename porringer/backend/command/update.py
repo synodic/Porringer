@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from logging import Logger
 from pathlib import Path
 
-from packaging.requirements import Requirement
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
@@ -34,7 +34,7 @@ from porringer.schema import (
     SetupResults,
 )
 from porringer.utility.download import download_file
-from porringer.utility.exception import ManifestError
+from porringer.utility.exception import ManifestError, PluginError
 from porringer.utility.utility import canonicalize_type
 
 
@@ -505,7 +505,7 @@ class UpdateCommands:
         """
         try:
             req = Requirement(package)
-        except Exception:
+        except InvalidRequirement:
             # If we can't parse, just do name matching with canonicalization
             canonical_name = canonicalize_name(package.strip())
             for installed in installed_packages:
@@ -522,7 +522,7 @@ class UpdateCommands:
                     try:
                         if Version(installed.version) in req.specifier:
                             return True, f'{installed.name}=={installed.version} satisfies {package}'
-                    except Exception:
+                    except InvalidVersion:
                         pass
         return False, None
 
@@ -556,6 +556,8 @@ class UpdateCommands:
                     skipped=True,
                     skip_reason=skip_reason,
                 )
+        except PluginError as e:
+            self.logger.debug(f'Plugin error checking packages for {action.plugin}: {e}')
         except Exception as e:
             self.logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
 
@@ -569,6 +571,12 @@ class UpdateCommands:
                 return SetupActionResult(action=action, success=True, message=f'Installed {result.name}')
             else:
                 return SetupActionResult(action=action, success=False, message=f"Failed to install '{action.package}'")
+        except PluginError as e:
+            self.logger.error(f'Plugin error installing {action.package}: {e}')
+            return SetupActionResult(action=action, success=False, message=str(e))
+        except subprocess.SubprocessError as e:
+            self.logger.error(f'Subprocess error installing {action.package}: {e}')
+            return SetupActionResult(action=action, success=False, message=str(e))
         except Exception as e:
             return SetupActionResult(action=action, success=False, message=str(e))
 
@@ -653,6 +661,8 @@ class UpdateCommands:
                     skipped=True,
                     skip_reason=skip_reason,
                 )
+        except PluginError as e:
+            self.logger.debug(f'Plugin error checking packages for {action.plugin}: {e}')
         except Exception as e:
             self.logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
 
@@ -666,6 +676,15 @@ class UpdateCommands:
                 return SetupActionResult(action=action, success=True, message=f'Installed {result.name}')
             else:
                 return SetupActionResult(action=action, success=False, message=f"Failed to install '{action.package}'")
+        except PluginError as e:
+            self.logger.error(f'Plugin error installing {action.package}: {e}')
+            return SetupActionResult(action=action, success=False, message=str(e))
+        except asyncio.CancelledError:
+            self.logger.error(f'Installation cancelled for {action.package}')
+            return SetupActionResult(action=action, success=False, message='Installation cancelled')
+        except TimeoutError as e:
+            self.logger.error(f'Timeout installing {action.package}: {e}')
+            return SetupActionResult(action=action, success=False, message=str(e))
         except Exception as e:
             return SetupActionResult(action=action, success=False, message=str(e))
 
