@@ -1,10 +1,46 @@
 """Utilities for managing and checking the Porringer installation version."""
 
 import importlib.metadata
-import os
-import subprocess
-import sys
 from logging import Logger
+
+import httpx
+from packaging.version import Version
+
+from porringer.schema import PackageUpdateInfo
+
+PYPI_URL = 'https://pypi.org/pypi/porringer/json'
+PACKAGE_NAME = 'porringer'
+
+
+async def get_latest_pypi_version() -> Version | None:
+    """Fetch the latest version of porringer from PyPI.
+
+    Returns:
+        The latest version as a Version object, or None if fetch failed.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(PYPI_URL)
+            response.raise_for_status()
+            json_data = response.json()
+            version_str = json_data.get('info', {}).get('version')
+            if version_str:
+                return Version(version_str)
+    except (httpx.HTTPError, KeyError, ValueError):
+        pass
+    return None
+
+
+def get_current_version() -> Version | None:
+    """Get the currently installed version of porringer.
+
+    Returns:
+        The current version as a Version object, or None if not found.
+    """
+    try:
+        return Version(importlib.metadata.version(PACKAGE_NAME))
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 class SelfCommands:
@@ -18,50 +54,24 @@ class SelfCommands:
         """
         self.logger = logger
 
-    @staticmethod
-    def is_pipx_installation() -> bool:
-        """Check if Porringer is installed via pipx.
+    async def check(self) -> PackageUpdateInfo:
+        """Check for updates to the Porringer package by querying PyPI.
 
         Returns:
-            bool: True if the current Python environment is a pipx-managed venv, False otherwise.
+            PackageUpdateInfo with current version, latest version, and update status.
         """
-        return sys.prefix.split(os.sep)[-3:-1] == ['pipx', 'venvs']
+        current = get_current_version()
+        latest = await get_latest_pypi_version()
 
-    def update(self) -> None:
-        """Upgrade the Porringer package using pipx if installed via pipx.
+        update_available = False
+        if current is not None and latest is not None:
+            update_available = latest > current
 
-        Raises:
-            NotImplementedError: If Porringer is not installed via pipx.
-        """
-        if self.is_pipx_installation():
-            subprocess.run(['pipx', 'upgrade', 'porringer'], check=True)
-        else:
-            raise NotImplementedError()
+        self.logger.debug(f'Current version: {current}, Latest version: {latest}')
 
-    def check(self) -> bool:
-        """Check for updates to the Porringer package using pipx if installed via pipx.
-
-        Returns:
-            True if an update is available, False otherwise.
-
-        Raises:
-            NotImplementedError: If Porringer is not installed via pipx.
-        """
-        if self.is_pipx_installation():
-            # Check if an update is available without installing it
-            result = subprocess.run(
-                ['pipx', 'runpip', 'porringer', 'index', 'versions', 'porringer'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode == 0:
-                # Parse output to see if there's a newer version
-                # Output format: "porringer (X.Y.Z)\nAvailable versions: ..."
-                current = importlib.metadata.version('porringer')
-                self.logger.info(f'Current version: {current}')
-                self.logger.info(result.stdout)
-                return True  # For now, just report that check was performed
-            return False
-        else:
-            raise NotImplementedError()
+        return PackageUpdateInfo(
+            name=PACKAGE_NAME,
+            current_version=current,
+            latest_version=latest,
+            update_available=update_available,
+        )
