@@ -23,7 +23,9 @@ See [Setup](https://synodic.github.io/porringer/setup) for setup instructions.
 
 ## Development
 
-See [Development](https://synodic.github.io/porringer/development) for build, test, and installation instructions.
+We use [pdm](https://pdm-project.org/en/latest/) as our build system and package manager. Scripts for development tasks are defined in `pyproject.toml` under the `[tool.pdm.scripts]` section.
+
+See [Development](https://synodic.github.io/porringer/development) for additional build, test, and installation instructions.
 
 For contribution guidelines, see [CONTRIBUTING.md](https://github.com/synodic/.github/blob/stable/CONTRIBUTING.md).
 
