@@ -26,7 +26,7 @@ async def get_latest_pypi_version() -> Version | None:
             version_str = json_data.get('info', {}).get('version')
             if version_str:
                 return Version(version_str)
-    except (httpx.HTTPError, KeyError, ValueError):
+    except httpx.HTTPError, KeyError, ValueError:
         pass
     return None
 

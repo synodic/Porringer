@@ -1,11 +1,27 @@
 """Test the command 'plugin'"""
 
+import os
+import sys
 from logging import Logger
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from porringer.api import API
 from porringer.backend.builder import Builder
+from porringer.backend.command.plugin import PluginCommands
+from porringer.backend.schema import (
+    PluginInstallParameters,
+    PluginUninstallParameters,
+    PluginUpdateParameters,
+)
 from porringer.schema import APIParameters, ListPluginsParameters, LocalConfiguration
+from porringer.utility.exception import PluginError
+from porringer.utility.utility import is_pipx_installation
+
+# Test constants
+NUM_PLUGINS_MULTIPLE = 3
+NUM_PLUGINS_PARTIAL = 2
 
 
 class TestCommandPlugin:
@@ -59,3 +75,282 @@ class TestCommandPlugin:
 
             # The result should be empty since the plugin couldn't be loaded
             assert result == []
+
+
+class TestPluginInstall:
+    """Test plugin install command"""
+
+    @staticmethod
+    def test_install_dry_run_pip() -> None:
+        """Test install dry run with pip (non-pipx installation)"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
+            params = PluginInstallParameters(name='some-plugin', dry=True)
+            result = commands.install(params)
+
+            assert result.success
+            assert 'Would install' in result.message
+            assert 'pip install' in result.message
+            assert 'some-plugin' in result.message
+
+    @staticmethod
+    def test_install_dry_run_pipx() -> None:
+        """Test install dry run with pipx installation"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
+            params = PluginInstallParameters(name='some-plugin', dry=True)
+            result = commands.install(params)
+
+            assert result.success
+            assert 'Would install' in result.message
+            assert 'pipx inject' in result.message
+            assert 'some-plugin' in result.message
+
+    @staticmethod
+    def test_install_failure_returns_error() -> None:
+        """Test that install failure returns error result"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = 'Package not found'
+
+        with (
+            patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
+            patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
+        ):
+            params = PluginInstallParameters(name='nonexistent-plugin', dry=False)
+            result = commands.install(params)
+
+            assert not result.success
+            assert 'failed' in result.message.lower()
+
+    @staticmethod
+    def test_install_validates_plugin_entry_point() -> None:
+        """Test that install validates the package provides entry points"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = 'Successfully installed'
+        mock_result.stderr = ''
+
+        # Mock that the package doesn't add any new entry points
+        with (
+            patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
+            patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
+            patch.object(commands, '_get_existing_plugin_packages', return_value=set()),
+        ):
+            params = PluginInstallParameters(name='not-a-plugin', dry=False)
+
+            with pytest.raises(PluginError) as exc_info:
+                commands.install(params)
+
+            assert 'not a valid Porringer plugin' in str(exc_info.value)
+
+    @staticmethod
+    def test_install_command_not_found() -> None:
+        """Test handling of FileNotFoundError"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        with (
+            patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True),
+            patch('porringer.backend.command.plugin.subprocess.run', side_effect=FileNotFoundError('pipx not found')),
+        ):
+            params = PluginInstallParameters(name='some-plugin', dry=False)
+            result = commands.install(params)
+
+            assert not result.success
+            assert 'not found' in result.message.lower()
+
+
+class TestPluginUninstall:
+    """Test plugin uninstall command"""
+
+    @staticmethod
+    def test_uninstall_dry_run_pip() -> None:
+        """Test uninstall dry run with pip"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
+            params = PluginUninstallParameters(names=['some-plugin'], dry=True)
+            results = commands.uninstall(params)
+
+            assert len(results) == 1
+            assert results[0].success
+            assert 'Would uninstall' in results[0].message
+            assert 'pip uninstall' in results[0].message
+
+    @staticmethod
+    def test_uninstall_dry_run_pipx() -> None:
+        """Test uninstall dry run with pipx"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
+            params = PluginUninstallParameters(names=['some-plugin'], dry=True)
+            results = commands.uninstall(params)
+
+            assert len(results) == 1
+            assert results[0].success
+            assert 'Would uninstall' in results[0].message
+            assert 'pipx uninject' in results[0].message
+
+    @staticmethod
+    def test_uninstall_multiple_plugins() -> None:
+        """Test uninstalling multiple plugins"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = 'Successfully uninstalled'
+        mock_result.stderr = ''
+
+        with (
+            patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
+            patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
+        ):
+            params = PluginUninstallParameters(names=['plugin-a', 'plugin-b', 'plugin-c'], dry=False)
+            results = commands.uninstall(params)
+
+            assert len(results) == NUM_PLUGINS_MULTIPLE
+            assert all(r.success for r in results)
+
+    @staticmethod
+    def test_uninstall_partial_failure() -> None:
+        """Test that partial failures are reported correctly"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        call_count = 0
+
+        def mock_run(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            # First call succeeds, second fails
+            if call_count == 1:
+                result.returncode = 0
+                result.stdout = 'Success'
+                result.stderr = ''
+            else:
+                result.returncode = 1
+                result.stderr = 'Package not found'
+            return result
+
+        with (
+            patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
+            patch('porringer.backend.command.plugin.subprocess.run', side_effect=mock_run),
+        ):
+            params = PluginUninstallParameters(names=['plugin-ok', 'plugin-fail'], dry=False)
+            results = commands.uninstall(params)
+
+            assert len(results) == NUM_PLUGINS_PARTIAL
+            assert results[0].success
+            assert not results[1].success
+
+
+class TestPluginUpdate:
+    """Test plugin update command"""
+
+    @staticmethod
+    def test_update_dry_run_pip() -> None:
+        """Test update dry run with pip"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
+            params = PluginUpdateParameters(names=['some-plugin'], dry=True)
+            results = commands.update(params)
+
+            assert len(results) == 1
+            assert results[0].success
+            assert 'Would update' in results[0].message
+            assert '--upgrade' in results[0].message
+
+    @staticmethod
+    def test_update_dry_run_pipx() -> None:
+        """Test update dry run with pipx"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
+            params = PluginUpdateParameters(names=['some-plugin'], dry=True)
+            results = commands.update(params)
+
+            assert len(results) == 1
+            assert results[0].success
+            assert 'Would update' in results[0].message
+            assert 'pipx runpip' in results[0].message
+
+    @staticmethod
+    def test_update_success() -> None:
+        """Test successful update"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = 'Successfully upgraded'
+        mock_result.stderr = ''
+
+        with (
+            patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
+            patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
+        ):
+            params = PluginUpdateParameters(names=['some-plugin'], dry=False)
+            results = commands.update(params)
+
+            assert len(results) == 1
+            assert results[0].success
+            assert 'Successfully updated' in results[0].message
+
+    @staticmethod
+    def test_update_failure() -> None:
+        """Test update failure"""
+        logger = Logger('test')
+        commands = PluginCommands(logger)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = 'No matching distribution'
+
+        with (
+            patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
+            patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
+        ):
+            params = PluginUpdateParameters(names=['nonexistent-plugin'], dry=False)
+            results = commands.update(params)
+
+            assert len(results) == 1
+            assert not results[0].success
+            assert 'failed' in results[0].message.lower()
+
+
+class TestPipxDetection:
+    """Test pipx installation detection utility"""
+
+    @staticmethod
+    def test_is_pipx_installation_true() -> None:
+        """Test detection when running in pipx environment"""
+        # Mock sys.prefix to look like a pipx venv (using os.sep for cross-platform)
+        pipx_path = os.sep.join(['', 'home', 'user', '.local', 'pipx', 'venvs', 'porringer'])
+        with patch.object(sys, 'prefix', pipx_path):
+            assert is_pipx_installation()
+
+    @staticmethod
+    def test_is_pipx_installation_false() -> None:
+        """Test detection when running in regular venv"""
+        # Mock sys.prefix to look like a regular venv
+        venv_path = os.sep.join(['', 'home', 'user', 'projects', 'porringer', '.venv'])
+        with patch.object(sys, 'prefix', venv_path):
+            assert not is_pipx_installation()
