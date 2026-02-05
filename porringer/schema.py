@@ -1,6 +1,7 @@
 """Schema"""
 
 import asyncio
+import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -228,6 +229,20 @@ class Prerequisite(BaseModel):
     """A prerequisite plugin that must be available."""
 
     plugin: str = Field(description='The plugin name that must be available')
+    platforms: list[str] = Field(
+        default_factory=list,
+        description='List of platforms where this prerequisite applies (e.g., ["win32"]). Empty means all platforms.',
+    )
+
+    def is_applicable(self) -> bool:
+        """Check if this prerequisite applies to the current platform.
+
+        Returns:
+            True if the prerequisite applies to the current platform
+        """
+        if not self.platforms:
+            return True
+        return sys.platform in self.platforms
 
 
 class SetupManifest(BaseModel):

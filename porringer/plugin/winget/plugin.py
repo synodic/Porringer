@@ -1,6 +1,7 @@
 """Plugin implementation"""
 
 import logging
+import shutil
 import subprocess
 from typing import override
 
@@ -19,6 +20,16 @@ class WingetEnvironment(Environment):
     Provides methods to install, search, uninstall, upgrade, and list packages using winget
     as the backend package manager.
     """
+
+    @staticmethod
+    @override
+    def is_available() -> bool:
+        """Checks if winget is available on the system.
+
+        Returns:
+            True if winget is found on PATH, False otherwise.
+        """
+        return shutil.which('winget') is not None
 
     @staticmethod
     @override

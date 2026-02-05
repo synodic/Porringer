@@ -6,6 +6,24 @@
         },
         {
             "plugin": "pipx"
+        },
+        {
+            "plugin": "winget",
+            "platforms": [
+                "win32"
+            ]
+        },
+        {
+            "plugin": "apt",
+            "platforms": [
+                "linux"
+            ]
+        },
+        {
+            "plugin": "brew",
+            "platforms": [
+                "darwin"
+            ]
         }
     ],
     "packages": {

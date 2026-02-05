@@ -1,6 +1,7 @@
 """Test the setup/manifest functionality in install command"""
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from typer.testing import CliRunner
 
 from porringer.api import API
 from porringer.console.entry import app
-from porringer.schema import SetupActionType, SetupParameters
+from porringer.schema import Prerequisite, SetupActionType, SetupParameters
 from porringer.utility.exception import ManifestError
 
 # Test constants
@@ -33,6 +34,46 @@ THREE_ACTIONS = 3
 TWO_ACTIONS = 2
 SINGLE_FAILED_PATH = 1
 NO_FAILED_PATHS = 0
+
+
+class TestPrerequisite:
+    """Tests for Prerequisite platform filtering"""
+
+    @staticmethod
+    def test_is_applicable_no_platforms() -> None:
+        """Prerequisite with no platforms should apply to all platforms"""
+        prereq = Prerequisite(plugin='pip')
+        assert prereq.is_applicable() is True
+
+    @staticmethod
+    def test_is_applicable_with_empty_platforms() -> None:
+        """Prerequisite with empty platforms list should apply to all platforms"""
+        prereq = Prerequisite(plugin='pip', platforms=[])
+        assert prereq.is_applicable() is True
+
+    @staticmethod
+    def test_is_applicable_matching_platform() -> None:
+        """Prerequisite should apply when current platform is in the list"""
+        prereq = Prerequisite(plugin='test', platforms=[sys.platform])
+        assert prereq.is_applicable() is True
+
+    @staticmethod
+    def test_is_applicable_non_matching_platform() -> None:
+        """Prerequisite should not apply when current platform is not in the list"""
+        prereq = Prerequisite(plugin='test', platforms=['nonexistent_platform'])
+        assert prereq.is_applicable() is False
+
+    @staticmethod
+    def test_is_applicable_multiple_platforms_matching() -> None:
+        """Prerequisite should apply when current platform is one of multiple"""
+        prereq = Prerequisite(plugin='test', platforms=['win32', 'darwin', 'linux', sys.platform])
+        assert prereq.is_applicable() is True
+
+    @staticmethod
+    def test_is_applicable_multiple_platforms_not_matching() -> None:
+        """Prerequisite should not apply when current platform is not in multiple"""
+        prereq = Prerequisite(plugin='test', platforms=['nonexistent1', 'nonexistent2'])
+        assert prereq.is_applicable() is False
 
 
 class TestSetupManifest:
