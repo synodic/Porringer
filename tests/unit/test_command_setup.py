@@ -2,21 +2,14 @@
 
 import json
 import tempfile
-from logging import Logger
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from porringer.api import API
-from porringer.backend.schema import GlobalConfiguration
 from porringer.console.entry import app
-from porringer.schema import (
-    APIParameters,
-    LocalConfiguration,
-    SetupActionType,
-    SetupParameters,
-)
+from porringer.schema import SetupActionType, SetupParameters
 from porringer.utility.exception import ManifestError
 
 # Test constants
@@ -46,12 +39,8 @@ class TestSetupManifest:
     """Tests for manifest loading"""
 
     @staticmethod
-    def test_load_json_manifest() -> None:
+    def test_load_json_manifest(test_api: API) -> None:
         """Test loading a porringer.json manifest"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
@@ -61,19 +50,15 @@ class TestSetupManifest:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = api.update.preview_single(Path(tmpdir))
+            results = test_api.update.preview_single(Path(tmpdir))
 
             assert results.manifest_path == manifest_path
             # 1 install + 1 command = 2 actions
             assert len(results.actions) == EXPECTED_ACTIONS_JSON_MANIFEST
 
     @staticmethod
-    def test_load_pyproject_manifest() -> None:
+    def test_load_pyproject_manifest(test_api: API) -> None:
         """Test loading from pyproject.toml [tool.porringer]"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             pyproject_path = Path(tmpdir) / 'pyproject.toml'
             pyproject_content = """
@@ -83,32 +68,24 @@ packages.pip = ["requests"]
 """
             pyproject_path.write_text(pyproject_content)
 
-            results = api.update.preview_single(Path(tmpdir))
+            results = test_api.update.preview_single(Path(tmpdir))
 
             assert results.manifest_path == pyproject_path
             assert len(results.actions) == 1  # 1 install
 
     @staticmethod
-    def test_missing_manifest_raises_error() -> None:
+    def test_missing_manifest_raises_error(test_api: API) -> None:
         """Test that missing manifest raises ManifestError"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
         with tempfile.TemporaryDirectory() as tmpdir, pytest.raises(ManifestError):
-            api.update.preview_single(Path(tmpdir))
+            test_api.update.preview_single(Path(tmpdir))
 
 
 class TestSetupPreview:
     """Tests for setup preview"""
 
     @staticmethod
-    def test_preview_builds_actions() -> None:
+    def test_preview_builds_actions(test_api: API) -> None:
         """Test that preview builds correct action types"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
@@ -119,7 +96,7 @@ class TestSetupPreview:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = api.update.preview_single(Path(tmpdir))
+            results = test_api.update.preview_single(Path(tmpdir))
 
             # 1 check + 2 installs + 1 command = 4 actions
             assert len(results.actions) == EXPECTED_ACTIONS_WITH_PREREQUISITES
@@ -135,31 +112,23 @@ class TestSetupBatch:
     """Tests for batch setup operations"""
 
     @staticmethod
-    def test_preview_batch_single_path() -> None:
+    def test_preview_batch_single_path(test_api: API) -> None:
         """Test batch preview with a single path"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir))
-            results = api.update.preview_batch(params)
+            results = test_api.update.preview_batch(params)
 
             assert len(results.manifest_results) == 1
             assert results.total_actions == 1
             assert len(results.failed_paths) == 0
 
     @staticmethod
-    def test_preview_batch_multiple_paths() -> None:
+    def test_preview_batch_multiple_paths(test_api: API) -> None:
         """Test batch preview with multiple paths"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create two project directories with manifests
             project1 = Path(tmpdir) / 'project1'
@@ -173,19 +142,15 @@ class TestSetupBatch:
             )
 
             params = SetupParameters(paths=[project1, project2])
-            results = api.update.preview_batch(params)
+            results = test_api.update.preview_batch(params)
 
             assert len(results.manifest_results) == DUAL_MANIFESTS
             assert results.total_actions == THREE_ACTIONS  # 1 + 2
             assert len(results.failed_paths) == NO_FAILED_PATHS
 
     @staticmethod
-    def test_preview_batch_with_failures() -> None:
+    def test_preview_batch_with_failures(test_api: API) -> None:
         """Test batch preview continues on manifest errors"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project1 = Path(tmpdir) / 'project1'
             project2 = Path(tmpdir) / 'project2'
@@ -196,85 +161,61 @@ class TestSetupBatch:
             (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
 
             params = SetupParameters(paths=[project1, project2], fail_fast=False)
-            results = api.update.preview_batch(params)
+            results = test_api.update.preview_batch(params)
 
             assert len(results.manifest_results) == SINGLE_MANIFEST
             assert len(results.failed_paths) == SINGLE_FAILED_PATH
             assert results.failed_paths[FIRST_ACTION_INDEX][0] == project2
 
     @staticmethod
-    def test_preview_batch_from_cache() -> None:
+    def test_preview_batch_from_cache(test_api: API, temp_cache_dir) -> None:
         """Test batch preview using cached directories"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create temp directories for config/data
-            data_dir = Path(tmpdir) / 'data'
-            config_dir = Path(tmpdir) / 'config'
-            cache_dir = Path(tmpdir) / 'cache'
+        tmp_path, _ = temp_cache_dir
+        project1 = tmp_path / 'project1'
+        project1.mkdir()
 
-            local_config = LocalConfiguration(cache_directory=cache_dir)
-            global_config = GlobalConfiguration(config_directory=config_dir, data_directory=data_dir)
-            parameters = APIParameters(logger=Logger('test'))
-            api = API(local_config, parameters, global_config)
+        (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
 
-            project1 = Path(tmpdir) / 'project1'
-            project1.mkdir()
+        # Add to cache
+        test_api.cache.add_directory(project1)
 
-            (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
+        # Preview from cache (paths=None)
+        params = SetupParameters(paths=None)
+        results = test_api.update.preview_batch(params)
 
-            # Add to cache
-            api.cache.add_directory(project1)
-
-            # Preview from cache (paths=None)
-            params = SetupParameters(paths=None)
-            results = api.update.preview_batch(params)
-
-            assert len(results.manifest_results) == SINGLE_MANIFEST
-            assert results.total_actions == SINGLE_MANIFEST
+        assert len(results.manifest_results) == SINGLE_MANIFEST
+        assert results.total_actions == SINGLE_MANIFEST
 
     @staticmethod
-    def test_preview_batch_from_all_cached() -> None:
+    def test_preview_batch_from_all_cached(test_api: API, temp_cache_dir) -> None:
         """Test batch preview using all cached directories"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create temp directories for config/data
-            data_dir = Path(tmpdir) / 'data'
-            config_dir = Path(tmpdir) / 'config'
-            cache_dir = Path(tmpdir) / 'cache'
+        tmp_path, _ = temp_cache_dir
+        project1 = tmp_path / 'project1'
+        project2 = tmp_path / 'project2'
+        project1.mkdir()
+        project2.mkdir()
 
-            local_config = LocalConfiguration(cache_directory=cache_dir)
-            global_config = GlobalConfiguration(config_directory=config_dir, data_directory=data_dir)
-            parameters = APIParameters(logger=Logger('test'))
-            api = API(local_config, parameters, global_config)
+        (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
+        (project2 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['flask']}}))
 
-            project1 = Path(tmpdir) / 'project1'
-            project2 = Path(tmpdir) / 'project2'
-            project1.mkdir()
-            project2.mkdir()
+        # Add directories to cache
+        test_api.cache.add_directory(project1)
+        test_api.cache.add_directory(project2)
 
-            (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
-            (project2 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['flask']}}))
+        # Preview from all cached
+        params = SetupParameters(paths=None)
+        results = test_api.update.preview_batch(params)
 
-            # Add directories to cache
-            api.cache.add_directory(project1)
-            api.cache.add_directory(project2)
-
-            # Preview from all cached
-            params = SetupParameters(paths=None)
-            results = api.update.preview_batch(params)
-
-            assert len(results.manifest_results) == DUAL_MANIFESTS
-            assert results.total_actions == TWO_ACTIONS
+        assert len(results.manifest_results) == DUAL_MANIFESTS
+        assert results.total_actions == TWO_ACTIONS
 
 
 class TestSetupCLI:
     """Tests for setup CLI commands (now via install)"""
 
     @staticmethod
-    def test_install_dry_run_api() -> None:
+    def test_install_dry_run_api(test_api: API) -> None:
         """Test the install --dry-run functionality via API"""
-        config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
@@ -282,8 +223,8 @@ class TestSetupCLI:
 
             # Test dry-run via API
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            preview = api.update.preview_batch(setup_params)
-            results = api.update.execute_batch(preview, setup_params)
+            preview = test_api.update.preview_batch(setup_params)
+            results = test_api.update.execute_batch(preview, setup_params)
 
             # Should have 1 action for pip install
             assert len(results.manifest_results) == 1
