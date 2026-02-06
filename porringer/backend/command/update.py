@@ -23,7 +23,11 @@ from porringer.schema import (
     BatchSetupResults,
     DownloadParameters,
     DownloadResult,
+    ManifestDiagnostic,
+    ManifestDiagnosticSeverity,
     ManifestMetadata,
+    ManifestValidationCode,
+    ManifestValidationResult,
     ProgressCallback,
     ProgressEvent,
     ProgressEventKind,
@@ -70,6 +74,118 @@ class UpdateCommands:
         logger.info(f'Downloading: {parameters.url}')
 
         return download_file(parameters, progress_callback)
+
+    # --- Validation Methods ---
+
+    def validate_manifest(self, path: Path) -> ManifestValidationResult:
+        """Validate a manifest for errors without executing any operations.
+
+        Checks syntax, schema version, required fields, plugin availability,
+        package-name validity, and duplicate packages across plugins.
+
+        Args:
+            path: Path to a manifest file or directory containing one.
+
+        Returns:
+            Structured validation result with diagnostics.
+        """
+        diagnostics: list[ManifestDiagnostic] = []
+
+        def _error(field: str, message: str, code: ManifestValidationCode) -> None:
+            diagnostics.append(ManifestDiagnostic(field, message, code, ManifestDiagnosticSeverity.ERROR))
+
+        def _warning(field: str, message: str, code: ManifestValidationCode) -> None:
+            diagnostics.append(ManifestDiagnostic(field, message, code, ManifestDiagnosticSeverity.WARNING))
+
+        # --- File resolution & syntax ---
+        if not path.exists():
+            _error('path', f'Path does not exist: {path}', ManifestValidationCode.PATH_NOT_FOUND)
+            return ManifestValidationResult(diagnostics=diagnostics)
+
+        try:
+            _, manifest = UpdateCommands._find_manifest(path)
+        except ManifestError as exc:
+            msg = str(exc)
+            if 'No manifest found' in msg or 'No [tool.porringer]' in msg:
+                code = ManifestValidationCode.NO_MANIFEST
+            elif 'Invalid JSON' in msg or 'Invalid TOML' in msg:
+                code = ManifestValidationCode.SYNTAX_ERROR
+            else:
+                code = ManifestValidationCode.SCHEMA_INVALID
+            _error('', msg, code)
+            return ManifestValidationResult(diagnostics=diagnostics)
+
+        # --- Schema version ---
+        supported_versions = {'1'}
+        if manifest.version not in supported_versions:
+            _error(
+                'version',
+                f"Unsupported schema version '{manifest.version}'. Supported: {', '.join(sorted(supported_versions))}",
+                ManifestValidationCode.UNSUPPORTED_VERSION,
+            )
+
+        # --- Plugin availability ---
+        try:
+            available_plugins = set(self._get_available_environments().keys())
+        except Exception:
+            available_plugins = set()
+
+        for i, prereq in enumerate(manifest.prerequisites):
+            if prereq.plugin not in available_plugins:
+                _error(
+                    f'prerequisites[{i}].plugin',
+                    f"Plugin '{prereq.plugin}' is not installed or recognized",
+                    ManifestValidationCode.UNKNOWN_PLUGIN,
+                )
+
+        for plugin_name in manifest.packages:
+            if plugin_name not in available_plugins:
+                _error(
+                    f'packages.{plugin_name}',
+                    f"Plugin '{plugin_name}' is not installed or recognized",
+                    ManifestValidationCode.UNKNOWN_PLUGIN,
+                )
+
+        # --- Package name validity ---
+        for plugin_name, packages in manifest.packages.items():
+            for j, spec in enumerate(packages):
+                try:
+                    Requirement(spec.name)
+                except InvalidRequirement as exc:
+                    _warning(
+                        f'packages.{plugin_name}[{j}].name',
+                        f"Invalid package specifier '{spec.name}': {exc}",
+                        ManifestValidationCode.INVALID_PACKAGE_NAME,
+                    )
+
+        # --- Duplicate packages across plugins ---
+        seen: dict[str, list[str]] = {}
+        for plugin_name, packages in manifest.packages.items():
+            for spec in packages:
+                try:
+                    canonical = str(canonicalize_name(Requirement(spec.name).name))
+                except InvalidRequirement:
+                    canonical = spec.name.lower()
+                seen.setdefault(canonical, []).append(plugin_name)
+
+        for pkg_name, plugins in seen.items():
+            if len(plugins) > 1:
+                _warning(
+                    'packages',
+                    f"Package '{pkg_name}' is listed under multiple plugins: {', '.join(plugins)}",
+                    ManifestValidationCode.DUPLICATE_PACKAGE,
+                )
+
+        return ManifestValidationResult(diagnostics=diagnostics)
+
+    @staticmethod
+    def manifest_schema() -> dict:
+        """Export a JSON Schema representation of the manifest format.
+
+        Returns:
+            A dict containing the JSON Schema for ``SetupManifest``.
+        """
+        return SetupManifest.model_json_schema()
 
     # --- Manifest/Setup Methods ---
 

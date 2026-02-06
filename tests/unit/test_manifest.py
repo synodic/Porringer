@@ -10,7 +10,14 @@ from typer.testing import CliRunner
 
 from porringer.api import API
 from porringer.console.entry import app
-from porringer.schema import Prerequisite, SetupActionType, SetupManifest, SetupParameters
+from porringer.schema import (
+    ManifestDiagnosticSeverity,
+    ManifestValidationCode,
+    Prerequisite,
+    SetupActionType,
+    SetupManifest,
+    SetupParameters,
+)
 from porringer.utility.exception import ManifestError
 from tests.conftest import execute_via_stream
 
@@ -393,3 +400,237 @@ class TestSetupCLI:
             )
 
             assert result.exit_code == EXIT_CODE_FAILURE
+
+
+# --- Validation constants ---
+TWO_ERRORS = 2
+THREE_WARNINGS = 3
+
+
+class TestManifestValidation:
+    """Tests for validate_manifest() API"""
+
+    @staticmethod
+    def test_valid_manifest(test_api: API) -> None:
+        """A well-formed manifest with recognized plugins returns valid=True"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'packages': {'pip': ['requests']},
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is True
+            assert len(result.errors) == 0
+
+    @staticmethod
+    def test_path_not_found(test_api: API) -> None:
+        """Non-existent path produces PATH_NOT_FOUND error"""
+        result = test_api.update.validate_manifest(Path('/nonexistent/path'))
+
+        assert result.valid is False
+        assert len(result.errors) == 1
+        assert result.errors[0].code == ManifestValidationCode.PATH_NOT_FOUND
+
+    @staticmethod
+    def test_no_manifest_in_directory(test_api: API) -> None:
+        """Empty directory produces NO_MANIFEST error"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is False
+            assert len(result.errors) == 1
+            assert result.errors[0].code == ManifestValidationCode.NO_MANIFEST
+
+    @staticmethod
+    def test_invalid_json_syntax(test_api: API) -> None:
+        """Malformed JSON produces SYNTAX_ERROR"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_path.write_text('{bad json!!!}')
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is False
+            assert result.errors[0].code == ManifestValidationCode.SYNTAX_ERROR
+
+    @staticmethod
+    def test_invalid_toml_syntax(test_api: API) -> None:
+        """Malformed TOML produces SYNTAX_ERROR"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            toml_path = Path(tmpdir) / 'pyproject.toml'
+            toml_path.write_text('[[[invalid toml')
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is False
+            assert result.errors[0].code == ManifestValidationCode.SYNTAX_ERROR
+
+    @staticmethod
+    def test_unsupported_version(test_api: API) -> None:
+        """Unrecognized schema version produces UNSUPPORTED_VERSION error"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '99', 'packages': {'pip': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is False
+            version_errors = [e for e in result.errors if e.code == ManifestValidationCode.UNSUPPORTED_VERSION]
+            assert len(version_errors) == 1
+            assert version_errors[0].field == 'version'
+
+    @staticmethod
+    def test_unknown_plugin_in_packages(test_api: API) -> None:
+        """Unrecognized plugin name in packages produces UNKNOWN_PLUGIN error"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'nonexistent_manager': ['foo']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is False
+            plugin_errors = [e for e in result.errors if e.code == ManifestValidationCode.UNKNOWN_PLUGIN]
+            assert len(plugin_errors) == 1
+            assert plugin_errors[0].field == 'packages.nonexistent_manager'
+
+    @staticmethod
+    def test_unknown_plugin_in_prerequisites(test_api: API) -> None:
+        """Unrecognized plugin in prerequisites produces UNKNOWN_PLUGIN error"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'prerequisites': [{'plugin': 'nonexistent'}],
+                'packages': {'pip': ['requests']},
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is False
+            plugin_errors = [e for e in result.errors if e.code == ManifestValidationCode.UNKNOWN_PLUGIN]
+            assert len(plugin_errors) >= 1
+            prereq_error = [e for e in plugin_errors if 'prerequisites' in e.field]
+            assert len(prereq_error) == 1
+            assert prereq_error[0].field == 'prerequisites[0].plugin'
+
+    @staticmethod
+    def test_invalid_package_name_warning(test_api: API) -> None:
+        """Invalid package specifier produces INVALID_PACKAGE_NAME warning"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['valid-package', '!!!invalid!!!']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            pkg_warnings = [w for w in result.warnings if w.code == ManifestValidationCode.INVALID_PACKAGE_NAME]
+            assert len(pkg_warnings) == 1
+            assert pkg_warnings[0].field == 'packages.pip[1].name'
+
+    @staticmethod
+    def test_duplicate_packages_warning(test_api: API) -> None:
+        """Same package under multiple plugins produces DUPLICATE_PACKAGE warning"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'packages': {
+                    'pip': ['requests'],
+                    'pipx': ['requests'],
+                },
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            dup_warnings = [w for w in result.warnings if w.code == ManifestValidationCode.DUPLICATE_PACKAGE]
+            assert len(dup_warnings) == 1
+            assert 'requests' in dup_warnings[0].message
+
+    @staticmethod
+    def test_field_paths_are_specific(test_api: API) -> None:
+        """Error field paths point to precise locations"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'prerequisites': [{'plugin': 'nonexistent_a'}, {'plugin': 'nonexistent_b'}],
+                'packages': {'pip': ['requests']},
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            prereq_errors = [e for e in result.errors if 'prerequisites' in e.field]
+            assert len(prereq_errors) == TWO_ERRORS
+            assert prereq_errors[0].field == 'prerequisites[0].plugin'
+            assert prereq_errors[1].field == 'prerequisites[1].plugin'
+
+    @staticmethod
+    def test_validation_does_not_execute(test_api: API) -> None:
+        """Validation does not trigger any install operations"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'packages': {'pip': ['requests']},
+                'post_install': ['echo should-not-run'],
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            # This should return quickly without executing anything
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is True
+
+    @staticmethod
+    def test_multiple_errors_and_warnings(test_api: API) -> None:
+        """Multiple issues are all reported in a single result"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '99',
+                'prerequisites': [{'plugin': 'nonexistent'}],
+                'packages': {'fake_plugin': ['!!!bad!!!', 'also-bad[>=']},
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            result = test_api.update.validate_manifest(Path(tmpdir))
+
+            assert result.valid is False
+            # At least: unsupported_version + unknown prereq plugin + unknown packages plugin
+            assert len(result.errors) >= THREE_WARNINGS
+
+
+class TestManifestSchema:
+    """Tests for manifest_schema() export"""
+
+    @staticmethod
+    def test_manifest_schema_returns_dict() -> None:
+        """manifest_schema() returns a valid JSON Schema dict"""
+        from porringer.backend.command.update import UpdateCommands
+
+        schema = UpdateCommands.manifest_schema()
+
+        assert isinstance(schema, dict)
+        assert 'properties' in schema
+
+    @staticmethod
+    def test_manifest_schema_contains_expected_fields() -> None:
+        """Exported schema contains the main manifest fields"""
+        from porringer.backend.command.update import UpdateCommands
+
+        schema = UpdateCommands.manifest_schema()
+        props = schema['properties']
+
+        assert 'version' in props
+        assert 'packages' in props
+        assert 'prerequisites' in props
+        assert 'post_install' in props
