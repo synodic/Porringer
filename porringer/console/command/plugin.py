@@ -1,6 +1,5 @@
 """Porringer CLI plugin command module"""
 
-import logging
 from typing import Annotated
 
 import typer
@@ -12,7 +11,7 @@ from porringer.backend.schema import (
     PluginUpdateParameters,
 )
 from porringer.console.schema import Configuration
-from porringer.schema import APIParameters, ListPluginsParameters
+from porringer.schema import ListPluginsParameters
 from porringer.utility.exception import PluginError
 
 app = typer.Typer()
@@ -29,8 +28,7 @@ def plugin_list(
     """
     configuration = context.ensure_object(Configuration)
 
-    api_parameters = APIParameters(logging.getLogger('porringer'))
-    api = API(configuration.local_configuration, api_parameters)
+    api = API(configuration.local_configuration)
 
     list_parameters = ListPluginsParameters()
     results = api.plugin.list(list_parameters)
@@ -51,8 +49,7 @@ def plugin_install(
     """Install plugins from PyPI"""
     configuration = context.ensure_object(Configuration)
 
-    api_parameters = APIParameters(logging.getLogger('porringer'))
-    api = API(configuration.local_configuration, api_parameters)
+    api = API(configuration.local_configuration)
 
     for plugin in plugins:
         try:
@@ -78,8 +75,7 @@ def plugin_update(
     """Update installed plugins"""
     configuration = context.ensure_object(Configuration)
 
-    api_parameters = APIParameters(logging.getLogger('porringer'))
-    api = API(configuration.local_configuration, api_parameters)
+    api = API(configuration.local_configuration)
 
     params = PluginUpdateParameters(names=plugins, dry=dry_run)
     results = api.plugin.update(params)
@@ -105,8 +101,7 @@ def plugin_uninstall(
     """Remove installed plugins"""
     configuration = context.ensure_object(Configuration)
 
-    api_parameters = APIParameters(logging.getLogger('porringer'))
-    api = API(configuration.local_configuration, api_parameters)
+    api = API(configuration.local_configuration)
 
     params = PluginUninstallParameters(names=plugins, dry=dry_run)
     results = api.plugin.uninstall(params)

@@ -1,12 +1,14 @@
 """Utilities for managing and checking the Porringer installation version."""
 
 import importlib.metadata
-from logging import Logger
+import logging
 
 import httpx
 from packaging.version import Version
 
 from porringer.schema import PackageUpdateInfo
+
+logger = logging.getLogger(__name__)
 
 PYPI_URL = 'https://pypi.org/pypi/porringer/json'
 PACKAGE_NAME = 'porringer'
@@ -46,13 +48,9 @@ def get_current_version() -> Version | None:
 class SelfCommands:
     """Commands related to the Porringer installation."""
 
-    def __init__(self, logger: Logger) -> None:
-        """Initialize the SelfCommands class.
-
-        Args:
-            logger: Logger instance for logging actions.
-        """
-        self.logger = logger
+    def __init__(self) -> None:
+        """Initialize the SelfCommands class."""
+        pass
 
     async def check(self) -> PackageUpdateInfo:
         """Check for updates to the Porringer package by querying PyPI.
@@ -67,7 +65,7 @@ class SelfCommands:
         if current is not None and latest is not None:
             update_available = latest > current
 
-        self.logger.debug(f'Current version: {current}, Latest version: {latest}')
+        logger.debug(f'Current version: {current}, Latest version: {latest}')
 
         return PackageUpdateInfo(
             name=PACKAGE_NAME,

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shlex
 import subprocess
 import tomllib
 from dataclasses import dataclass
-from logging import Logger
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -37,6 +37,8 @@ from porringer.utility.download import download_file
 from porringer.utility.exception import ManifestError, PluginError
 from porringer.utility.utility import canonicalize_type
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class _InstallContext:
@@ -50,14 +52,12 @@ class _InstallContext:
 class UpdateCommands:
     """Update commands for downloading updates and setting up from manifests."""
 
-    def __init__(self, logger: Logger, cache_manager: DirectoryCacheManager | None = None) -> None:
+    def __init__(self, cache_manager: DirectoryCacheManager | None = None) -> None:
         """Initialize the UpdateCommands class.
 
         Args:
-            logger: Logger instance for logging actions.
             cache_manager: Optional cache manager for resolving cached paths.
         """
-        self.logger = logger
         self._cache_manager = cache_manager
 
     def download(
@@ -74,9 +74,9 @@ class UpdateCommands:
         Returns:
             DownloadResult with success status and details.
         """
-        self.logger.info(f'Downloading: {parameters.url}')
+        logger.info(f'Downloading: {parameters.url}')
 
-        return download_file(parameters, self.logger, progress_callback)
+        return download_file(parameters, progress_callback)
 
     # --- Manifest/Setup Methods ---
 
@@ -204,7 +204,7 @@ class UpdateCommands:
         Returns:
             Dict mapping plugin name to instantiated environment.
         """
-        builder = Builder(self.logger)
+        builder = Builder()
         plugin_infos = builder.find_environments()
         environments = builder.build_environments(plugin_infos)
 
@@ -301,7 +301,7 @@ class UpdateCommands:
         Raises:
             ManifestError: If the manifest cannot be found or parsed.
         """
-        self.logger.info(f'Previewing setup from: {path}')
+        logger.info(f'Previewing setup from: {path}')
 
         manifest_path, manifest = UpdateCommands._find_manifest(path)
         actions = UpdateCommands._build_actions(manifest)
@@ -318,7 +318,7 @@ class UpdateCommands:
             BatchSetupResults containing previews for each manifest.
         """
         paths = self._resolve_paths(parameters)
-        self.logger.info(f'Previewing setup for {len(paths)} path(s)')
+        logger.info(f'Previewing setup for {len(paths)} path(s)')
 
         manifest_results: list[SetupResults] = []
         failed_paths: list[tuple[Path, str]] = []
@@ -345,7 +345,7 @@ class UpdateCommands:
         Returns:
             SetupResults containing the results of each action.
         """
-        self.logger.info(f'Executing {len(actions)} setup actions (dry_run={parameters.dry_run})')
+        logger.info(f'Executing {len(actions)} setup actions (dry_run={parameters.dry_run})')
 
         # Get fresh plugin state
         environments = self._get_available_environments()
@@ -367,7 +367,7 @@ class UpdateCommands:
 
             # Fail fast on error (but not on skipped)
             if not result.success and not result.skipped:
-                self.logger.error(f'Action failed: {action.description} - {result.message}')
+                logger.error(f'Action failed: {action.description} - {result.message}')
                 if not parameters.dry_run:
                     break
 
@@ -409,7 +409,7 @@ class UpdateCommands:
                             action.package, installed_packages
                         )
                         if is_installed:
-                            self.logger.info(f"Dry-run: skipping '{action.package}': {skip_reason}")
+                            logger.info(f"Dry-run: skipping '{action.package}': {skip_reason}")
                             return SetupActionResult(
                                 action=action,
                                 success=True,
@@ -417,9 +417,9 @@ class UpdateCommands:
                                 skip_reason=skip_reason,
                             )
                     except PluginError as e:
-                        self.logger.debug(f'Dry-run: plugin error checking packages for {action.plugin}: {e}')
+                        logger.debug(f'Dry-run: plugin error checking packages for {action.plugin}: {e}')
                     except Exception as e:
-                        self.logger.debug(f'Dry-run: could not check installed packages for {action.plugin}: {e}')
+                        logger.debug(f'Dry-run: could not check installed packages for {action.plugin}: {e}')
                 # Simulate success when state check is unavailable or package is not installed
                 return SetupActionResult(action=action, success=True)
             case SetupActionType.RUN_COMMAND:
@@ -440,7 +440,7 @@ class UpdateCommands:
         Returns:
             BatchSetupResults containing execution results for each manifest.
         """
-        self.logger.info(f'Executing setup for {len(previews.manifest_results)} manifest(s)')
+        logger.info(f'Executing setup for {len(previews.manifest_results)} manifest(s)')
 
         manifest_results: list[SetupResults] = []
         failed_paths: list[tuple[Path, str]] = list(previews.failed_paths)
@@ -505,12 +505,12 @@ class UpdateCommands:
             return SetupActionResult(action=action, success=False, message='No plugin specified')
 
         if action.plugin in available_plugins:
-            self.logger.info(f"Plugin '{action.plugin}' is available")
+            logger.info(f"Plugin '{action.plugin}' is available")
             # Mark as skipped since the plugin was found - no need to display this
             return SetupActionResult(action=action, success=True, skipped=True)
         else:
             message = f"Required plugin '{action.plugin}' is not available"
-            self.logger.error(message)
+            logger.error(message)
             return SetupActionResult(action=action, success=False, message=message)
 
     @staticmethod
@@ -573,7 +573,7 @@ class UpdateCommands:
             installed_packages = environment.packages()
             is_installed, skip_reason = UpdateCommands._is_package_installed(action.package, installed_packages)
             if is_installed:
-                self.logger.info(f"Skipping '{action.package}': {skip_reason}")
+                logger.info(f"Skipping '{action.package}': {skip_reason}")
                 return SetupActionResult(
                     action=action,
                     success=True,
@@ -581,11 +581,11 @@ class UpdateCommands:
                     skip_reason=skip_reason,
                 )
         except PluginError as e:
-            self.logger.debug(f'Plugin error checking packages for {action.plugin}: {e}')
+            logger.debug(f'Plugin error checking packages for {action.plugin}: {e}')
         except Exception as e:
-            self.logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
+            logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
 
-        self.logger.info(f"Installing '{action.package}' via {action.plugin}")
+        logger.info(f"Installing '{action.package}' via {action.plugin}")
         return self._attempt_package_installation(action, environment)
 
     def _attempt_package_installation(self, action: SetupAction, environment: Environment) -> SetupActionResult:
@@ -610,10 +610,10 @@ class UpdateCommands:
             else:
                 message = f"Failed to install '{action.package}'"
         except PluginError as e:
-            self.logger.error(f'Plugin error installing {action.package}: {e}')
+            logger.error(f'Plugin error installing {action.package}: {e}')
             message = str(e)
         except subprocess.SubprocessError as e:
-            self.logger.error(f'Subprocess error installing {action.package}: {e}')
+            logger.error(f'Subprocess error installing {action.package}: {e}')
             message = str(e)
         except Exception as e:
             message = str(e)
@@ -634,7 +634,7 @@ class UpdateCommands:
         if action.command is None or len(action.command) == 0:
             return SetupActionResult(action=action, success=False, message='No command specified')
 
-        self.logger.info(f'Running command: {" ".join(action.command)}')
+        logger.info(f'Running command: {" ".join(action.command)}')
 
         try:
             result = subprocess.run(
@@ -655,7 +655,7 @@ class UpdateCommands:
                 )
         except subprocess.TimeoutExpired:
             message = f'Command timed out after {timeout} seconds'
-            self.logger.error(message)
+            logger.error(message)
             return SetupActionResult(action=action, success=False, message=message)
         except FileNotFoundError:
             message = f'Command not found: {action.command[0]}'
@@ -694,7 +694,7 @@ class UpdateCommands:
             installed_packages = await loop.run_in_executor(None, environment.packages)
             is_installed, skip_reason = UpdateCommands._is_package_installed(action.package, installed_packages)
             if is_installed:
-                self.logger.info(f"Skipping '{action.package}': {skip_reason}")
+                logger.info(f"Skipping '{action.package}': {skip_reason}")
                 return SetupActionResult(
                     action=action,
                     success=True,
@@ -702,11 +702,11 @@ class UpdateCommands:
                     skip_reason=skip_reason,
                 )
         except PluginError as e:
-            self.logger.debug(f'Plugin error checking packages for {action.plugin}: {e}')
+            logger.debug(f'Plugin error checking packages for {action.plugin}: {e}')
         except Exception as e:
-            self.logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
+            logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
 
-        self.logger.info(f"Installing '{action.package}' via {action.plugin}")
+        logger.info(f"Installing '{action.package}' via {action.plugin}")
         return await self._attempt_async_package_installation(action, environment)
 
     async def _attempt_async_package_installation(
@@ -734,13 +734,13 @@ class UpdateCommands:
             else:
                 message = f"Failed to install '{action.package}'"
         except PluginError as e:
-            self.logger.error(f'Plugin error installing {action.package}: {e}')
+            logger.error(f'Plugin error installing {action.package}: {e}')
             message = str(e)
         except asyncio.CancelledError:
-            self.logger.error(f'Installation cancelled for {action.package}')
+            logger.error(f'Installation cancelled for {action.package}')
             message = 'Installation cancelled'
         except TimeoutError as e:
-            self.logger.error(f'Timeout installing {action.package}: {e}')
+            logger.error(f'Timeout installing {action.package}: {e}')
             message = str(e)
         except Exception as e:
             message = str(e)
@@ -770,7 +770,7 @@ class UpdateCommands:
             if progress_callback:
                 progress_callback(action, result)
             if not result.success and not result.skipped:
-                self.logger.error(f'Action failed: {action.description} - {result.message}')
+                logger.error(f'Action failed: {action.description} - {result.message}')
                 if parameters.fail_fast:
                     return results, False
         return results, True
@@ -866,7 +866,7 @@ class UpdateCommands:
             if context.progress_callback:
                 context.progress_callback(action, result)
             if not result.success and not result.skipped and context.parameters.fail_fast:
-                self.logger.error(f'Action failed: {action.description} - {result.message}')
+                logger.error(f'Action failed: {action.description} - {result.message}')
                 return results, False
         return results, True
 
@@ -909,7 +909,7 @@ class UpdateCommands:
         except ExceptionGroup as eg:
             # TaskGroup raises ExceptionGroup if any task fails with unhandled exception
             # Our install_with_callback catches exceptions, so this shouldn't happen normally
-            self.logger.error(f'Parallel install failed with exceptions: {eg.exceptions}')
+            logger.error(f'Parallel install failed with exceptions: {eg.exceptions}')
 
         # Convert dict to ordered list
         result_list = [results.get(i) for i in range(len(parallel_actions))]
@@ -924,7 +924,7 @@ class UpdateCommands:
                 action_result = maybe_result
             final_results.append(action_result)
             if not action_result.success and not action_result.skipped and context.parameters.fail_fast:
-                self.logger.error(f'Action failed: {action.description} - {action_result.message}')
+                logger.error(f'Action failed: {action.description} - {action_result.message}')
                 return final_results, False
 
         return final_results, True
@@ -949,7 +949,7 @@ class UpdateCommands:
             if progress_callback:
                 progress_callback(action, result)
             if not result.success and not result.skipped:
-                self.logger.error(f'Action failed: {action.description} - {result.message}')
+                logger.error(f'Action failed: {action.description} - {result.message}')
                 if parameters.fail_fast:
                     break
         return results
@@ -986,7 +986,7 @@ class UpdateCommands:
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
 
-        self.logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
+        logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
         environments = self._get_available_environments()
         available_plugins = set(environments.keys())
@@ -1059,7 +1059,7 @@ class UpdateCommands:
         Raises:
             asyncio.CancelledError: If cancellation_token is cancelled.
         """
-        self.logger.info(f'Executing setup async for {len(previews.manifest_results)} manifest(s)')
+        logger.info(f'Executing setup async for {len(previews.manifest_results)} manifest(s)')
 
         manifest_results: list[SetupResults] = []
         failed_paths: list[tuple[Path, str]] = list(previews.failed_paths)

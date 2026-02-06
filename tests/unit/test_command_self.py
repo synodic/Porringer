@@ -1,6 +1,5 @@
 """Test the command 'self'"""
 
-from logging import Logger
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -14,7 +13,6 @@ from porringer.backend.command.self import (
     get_latest_pypi_version,
 )
 from porringer.schema import (
-    APIParameters,
     CheckPorringerParameters,
     LocalConfiguration,
     PackageUpdateInfo,
@@ -29,8 +27,7 @@ class TestCommandSelf:
     async def test_self_check_returns_package_info() -> None:
         """Test that check() returns PackageUpdateInfo"""
         config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
+        api = API(config)
 
         CheckPorringerParameters()
 
@@ -87,8 +84,7 @@ class TestVersionHelpers:
     async def test_check_update_available() -> None:
         """Test that check() correctly identifies available updates"""
         config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
+        api = API(config)
 
         with (
             patch('porringer.backend.command.self.get_current_version', return_value=Version('1.0.0')),
@@ -108,8 +104,7 @@ class TestVersionHelpers:
     async def test_check_no_update_available() -> None:
         """Test that check() correctly identifies when already up to date"""
         config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
+        api = API(config)
 
         with (
             patch('porringer.backend.command.self.get_current_version', return_value=Version('2.0.0')),

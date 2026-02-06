@@ -102,18 +102,18 @@ class TestDirectoryCachePersistence:
     """Tests for cache persistence"""
 
     @staticmethod
-    def test_cache_persists_across_instances(test_logger, temp_cache_dir) -> None:
+    def test_cache_persists_across_instances(temp_cache_dir) -> None:
         """Test that cache data persists when creating new manager instance"""
         tmp_path, data_dir = temp_cache_dir
         target_dir = tmp_path / 'project'
         target_dir.mkdir()
 
         # First manager adds data
-        manager1 = DirectoryCacheManager(data_dir, test_logger)
+        manager1 = DirectoryCacheManager(data_dir)
         manager1.add_directory(target_dir, name='Test')
 
         # Second manager reads persisted data
-        manager2 = DirectoryCacheManager(data_dir, test_logger)
+        manager2 = DirectoryCacheManager(data_dir)
         directories = manager2.list_directories()
 
         assert len(directories) == 1

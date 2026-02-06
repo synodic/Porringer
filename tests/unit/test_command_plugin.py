@@ -2,7 +2,6 @@
 
 import os
 import sys
-from logging import Logger
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +14,7 @@ from porringer.backend.schema import (
     PluginUninstallParameters,
     PluginUpdateParameters,
 )
-from porringer.schema import APIParameters, ListPluginsParameters, LocalConfiguration
+from porringer.schema import ListPluginsParameters, LocalConfiguration
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import is_pipx_installation
 
@@ -31,8 +30,7 @@ class TestCommandPlugin:
     def test_plugin_list() -> None:
         """Test the plugin list"""
         config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
+        api = API(config)
 
         params = ListPluginsParameters()
         results = api.plugin.list(params)
@@ -46,8 +44,7 @@ class TestCommandPlugin:
     def test_plugin_update() -> None:
         """Test the plugin update"""
         config = LocalConfiguration()
-        parameters = APIParameters(logger=Logger('test'))
-        api = API(config, parameters)
+        api = API(config)
 
         params = ListPluginsParameters()
         results = api.plugin.list(params)
@@ -62,8 +59,7 @@ class TestCommandPlugin:
         has registered entry points for plugins that cannot be imported because the
         module doesn't exist in that context.
         """
-        logger = Logger('test')
-        builder = Builder(logger)
+        builder = Builder()
 
         # Create a mock entry point that raises ModuleNotFoundError when loaded
         mock_entry_point = MagicMock()
@@ -86,8 +82,7 @@ class TestPluginInstall:
     @staticmethod
     def test_install_dry_run_pip() -> None:
         """Test install dry run with pip (non-pipx installation)"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
             params = PluginInstallParameters(name='some-plugin', dry=True)
@@ -101,8 +96,7 @@ class TestPluginInstall:
     @staticmethod
     def test_install_dry_run_pipx() -> None:
         """Test install dry run with pipx installation"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
             params = PluginInstallParameters(name='some-plugin', dry=True)
@@ -116,8 +110,7 @@ class TestPluginInstall:
     @staticmethod
     def test_install_failure_returns_error() -> None:
         """Test that install failure returns error result"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         mock_result = MagicMock()
         mock_result.returncode = 1
@@ -136,8 +129,7 @@ class TestPluginInstall:
     @staticmethod
     def test_install_validates_plugin_entry_point() -> None:
         """Test that install validates the package provides entry points"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -160,8 +152,7 @@ class TestPluginInstall:
     @staticmethod
     def test_install_command_not_found() -> None:
         """Test handling of FileNotFoundError"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         with (
             patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True),
@@ -180,8 +171,7 @@ class TestPluginUninstall:
     @staticmethod
     def test_uninstall_dry_run_pip() -> None:
         """Test uninstall dry run with pip"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
             params = PluginUninstallParameters(names=['some-plugin'], dry=True)
@@ -195,8 +185,7 @@ class TestPluginUninstall:
     @staticmethod
     def test_uninstall_dry_run_pipx() -> None:
         """Test uninstall dry run with pipx"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
             params = PluginUninstallParameters(names=['some-plugin'], dry=True)
@@ -210,8 +199,7 @@ class TestPluginUninstall:
     @staticmethod
     def test_uninstall_multiple_plugins() -> None:
         """Test uninstalling multiple plugins"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -231,8 +219,7 @@ class TestPluginUninstall:
     @staticmethod
     def test_uninstall_partial_failure() -> None:
         """Test that partial failures are reported correctly"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         call_count = 0
 
@@ -268,8 +255,7 @@ class TestPluginUpdate:
     @staticmethod
     def test_update_dry_run_pip() -> None:
         """Test update dry run with pip"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
             params = PluginUpdateParameters(names=['some-plugin'], dry=True)
@@ -283,8 +269,7 @@ class TestPluginUpdate:
     @staticmethod
     def test_update_dry_run_pipx() -> None:
         """Test update dry run with pipx"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
             params = PluginUpdateParameters(names=['some-plugin'], dry=True)
@@ -298,8 +283,7 @@ class TestPluginUpdate:
     @staticmethod
     def test_update_success() -> None:
         """Test successful update"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -320,8 +304,7 @@ class TestPluginUpdate:
     @staticmethod
     def test_update_failure() -> None:
         """Test update failure"""
-        logger = Logger('test')
-        commands = PluginCommands(logger)
+        commands = PluginCommands()
 
         mock_result = MagicMock()
         mock_result.returncode = 1

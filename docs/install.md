@@ -64,9 +64,9 @@ porringer install --all
 
 ```python
 from porringer.api import API
-from porringer.schema import APIParameters, LocalConfiguration, SetupParameters
+from porringer.schema import LocalConfiguration, SetupParameters
 
-api = API(LocalConfiguration(), APIParameters(logger))
+api = API(LocalConfiguration())
 
 # Preview (dry run)
 preview = api.update.preview_batch(SetupParameters(paths=project_path))
