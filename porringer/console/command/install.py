@@ -1,7 +1,6 @@
 """Porringer CLI install command module"""
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -13,7 +12,6 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
 from porringer.api import API
 from porringer.console.schema import Configuration
 from porringer.schema import (
-    APIParameters,
     BatchSetupResults,
     SetupAction,
     SetupActionResult,
@@ -60,8 +58,7 @@ def _create_api(configuration: Configuration) -> API:
     Returns:
         Initialized API instance.
     """
-    api_parameters = APIParameters(logging.getLogger('porringer'))
-    return API(configuration.local_configuration, api_parameters)
+    return API(configuration.local_configuration)
 
 
 def _format_cli_command(result: SetupActionResult) -> str:

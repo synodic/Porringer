@@ -1,7 +1,7 @@
 """Builder"""
 
+import logging
 from importlib import metadata
-from logging import Logger
 
 from packaging.version import Version
 
@@ -11,13 +11,15 @@ from porringer.schema import PluginInformation
 from porringer.utility.exception import PluginDependencyError
 from porringer.utility.utility import canonicalize_type
 
+logger = logging.getLogger(__name__)
+
 
 class Builder:
     """Helper class for building Porringer projects"""
 
-    def __init__(self, logger: Logger) -> None:
+    def __init__(self) -> None:
         """Initializes the builder"""
-        self.logger = logger
+        pass
 
     def find_environments(self, check_dependencies: bool = True) -> list[PluginInformation[Environment]]:
         """Searches for registered environment plugins
@@ -40,24 +42,24 @@ class Builder:
             try:
                 loaded_type = entry_point.load()
             except ModuleNotFoundError as e:
-                self.logger.warning(f"Plugin '{entry_point.name}' could not be loaded: {e}. Skipping")
+                logger.warning(f"Plugin '{entry_point.name}' could not be loaded: {e}. Skipping")
                 continue
 
             canonicalized = canonicalize_type(loaded_type)
 
             if entry_point.dist is None:
-                self.logger.error(f"Plugin '{canonicalized.name}' is not installed. Skipping")
+                logger.error(f"Plugin '{canonicalized.name}' is not installed. Skipping")
                 continue
 
             # TODO: Add metadata to plugin information, percolate to pytest_synodic API
 
             if not issubclass(loaded_type, Environment):
-                self.logger.warning(
+                logger.warning(
                     f"Found incompatible plugin. The '{canonicalized.name}' plugin must be an instance"
                     f" of '{group_name}'"
                 )
             else:
-                self.logger.debug(f'{group_name} plugin found: {canonicalized.name}')
+                logger.debug(f'{group_name} plugin found: {canonicalized.name}')
                 plugin_types.append(PluginInformation(loaded_type, entry_point.dist))
 
         if check_dependencies:
@@ -95,7 +97,7 @@ class Builder:
             for dep in dependencies:
                 # Skip dependencies that don't apply to the current platform
                 if not dep.is_applicable():
-                    self.logger.debug(
+                    logger.debug(
                         f"Plugin '{plugin_name}' dependency on '{dep.plugin}' "
                         f'skipped (not applicable to current platform)'
                     )
@@ -103,14 +105,14 @@ class Builder:
 
                 if dep.plugin not in available_plugins:
                     if dep.required:
-                        self.logger.error(f"Plugin '{plugin_name}' requires '{dep.plugin}' but it is not available")
+                        logger.error(f"Plugin '{plugin_name}' requires '{dep.plugin}' but it is not available")
                         raise PluginDependencyError(plugin_name, dep.plugin)
                     else:
-                        self.logger.warning(
+                        logger.warning(
                             f"Plugin '{plugin_name}' has optional dependency on '{dep.plugin}' which is not available"
                         )
                 else:
-                    self.logger.debug(f"Plugin '{plugin_name}' dependency on '{dep.plugin}' satisfied")
+                    logger.debug(f"Plugin '{plugin_name}' dependency on '{dep.plugin}' satisfied")
 
             if can_load:
                 resolved_plugins.append(plugin_info)

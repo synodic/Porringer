@@ -6,7 +6,7 @@ import hashlib
 import http.client
 import tempfile
 from dataclasses import dataclass
-from logging import Logger
+import logging
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
@@ -23,20 +23,21 @@ from porringer.schema import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class _DownloadState:
     """State for download operation.
 
     Args:
         parameters: Download parameters.
-        logger: Logger instance.
         expected_algorithm: Hash algorithm if verifying.
         expected_digest: Expected hash digest if verifying.
         progress_callback: Optional progress callback.
     """
 
     parameters: DownloadParameters
-    logger: Logger
     expected_algorithm: HashAlgorithm | None
     expected_digest: str | None
     progress_callback: ProgressCallback | None
@@ -91,7 +92,6 @@ def compute_file_hash(path: Path, algorithm: HashAlgorithm, chunk_size: int = 81
 
 def download_file(
     parameters: DownloadParameters,
-    logger: Logger,
     progress_callback: ProgressCallback | None = None,
 ) -> DownloadResult:
     """Downloads a file with optional hash verification.
@@ -101,7 +101,6 @@ def download_file(
 
     Args:
         parameters: Download parameters.
-        logger: Logger instance.
         progress_callback: Optional callback for progress updates.
 
     Returns:
@@ -119,7 +118,7 @@ def download_file(
     parameters.destination.parent.mkdir(parents=True, exist_ok=True)
 
     # Download to temp file (atomic write pattern)
-    return _download_with_temp_file(parameters, logger, expected_algorithm, expected_digest, progress_callback)
+    return _download_with_temp_file(parameters, expected_algorithm, expected_digest, progress_callback)
 
 
 def _parse_and_validate_hash(
@@ -144,7 +143,6 @@ def _parse_and_validate_hash(
 
 def _download_with_temp_file(
     parameters: DownloadParameters,
-    logger: Logger,
     expected_algorithm: HashAlgorithm | None,
     expected_digest: str | None,
     progress_callback: ProgressCallback | None,
@@ -153,7 +151,6 @@ def _download_with_temp_file(
 
     Args:
         parameters: Download parameters.
-        logger: Logger instance.
         expected_algorithm: Hash algorithm for verification.
         expected_digest: Expected hash digest.
         progress_callback: Optional progress callback.
@@ -161,7 +158,7 @@ def _download_with_temp_file(
     Returns:
         DownloadResult.
     """
-    state = _DownloadState(parameters, logger, expected_algorithm, expected_digest, progress_callback)
+    state = _DownloadState(parameters, expected_algorithm, expected_digest, progress_callback)
     temp_path: Path | None = None
 
     try:
@@ -234,10 +231,10 @@ def _perform_download(temp_fd: int, state: _DownloadState) -> DownloadResult:
         with open(temp_fd, 'wb') as f:
             downloaded = _write_file_chunks(f, response, state, hasher)
 
-    state.logger.info(f'Downloaded {downloaded} bytes')
+    logger.info(f'Downloaded {downloaded} bytes')
 
     # Verify hash and size
-    result = _verify_download(downloaded, state.expected_digest, hasher, state.parameters, state.logger)
+    result = _verify_download(downloaded, state.expected_digest, hasher, state.parameters)
 
     if result:
         return result
@@ -303,7 +300,6 @@ def _verify_download(
     expected_digest: str | None,
     hasher: Any,
     parameters: DownloadParameters,
-    logger: Logger,
 ) -> DownloadResult | None:
     """Verify downloaded file hash and size.
 
@@ -312,7 +308,6 @@ def _verify_download(
         expected_digest: Expected hash digest.
         hasher: Hash object or None.
         parameters: Download parameters.
-        logger: Logger instance.
 
     Returns:
         DownloadResult on verification failure, None on success.
@@ -342,7 +337,6 @@ def _verify_download(
 
 async def async_download_file(
     parameters: DownloadParameters,
-    logger: Logger,
     progress_callback: ProgressCallback | None = None,
     cancellation_token: CancellationToken | None = None,
 ) -> DownloadResult:
@@ -359,7 +353,6 @@ async def async_download_file(
 
     Args:
         parameters: Download parameters.
-        logger: Logger instance.
         progress_callback: Optional callback for progress updates (downloaded, total).
         cancellation_token: Optional token for cooperative cancellation.
 
@@ -387,7 +380,6 @@ async def async_download_file(
     # Bundle state for download
     state = _DownloadState(
         parameters=parameters,
-        logger=logger,
         expected_algorithm=expected_algorithm,
         expected_digest=expected_digest,
         progress_callback=progress_callback,
@@ -534,10 +526,10 @@ async def _async_perform_download(
     except DownloadSizeMismatchError as e:
         return DownloadResult(success=False, message=str(e))
 
-    state.logger.info(f'Downloaded {downloaded} bytes')
+    logger.info(f'Downloaded {downloaded} bytes')
 
     # Verify hash and size (reuse sync verification logic)
-    error = _verify_download(downloaded, state.expected_digest, hasher, state.parameters, state.logger)
+    error = _verify_download(downloaded, state.expected_digest, hasher, state.parameters)
     if error:
         return error
 

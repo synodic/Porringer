@@ -35,7 +35,7 @@ def _check_plugin_updates(
         List of check results per plugin.
     """
     logger = logging.getLogger('porringer')
-    builder = Builder(logger)
+    builder = Builder()
 
     environment_types = builder.find_environments()
     environments = builder.build_environments(environment_types)

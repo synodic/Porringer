@@ -41,9 +41,9 @@ porringer download https://example.com/large-file.zip ./file.zip --timeout 600
 
 ```python
 from porringer.api import API
-from porringer.schema import APIParameters, LocalConfiguration, DownloadParameters
+from porringer.schema import LocalConfiguration, DownloadParameters
 
-api = API(LocalConfiguration(), APIParameters(logger))
+api = API(LocalConfiguration())
 
 params = DownloadParameters(
     url="https://example.com/file.zip",

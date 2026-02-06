@@ -1,6 +1,5 @@
 """Porringer CLI cache command module for managing manifest directories."""
 
-import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -9,7 +8,6 @@ from rich.table import Table
 
 from porringer.api import API
 from porringer.console.schema import Configuration
-from porringer.schema import APIParameters
 
 app = typer.Typer(help='Manage cached manifest directories')
 
@@ -42,7 +40,7 @@ def cache_add(
         name: Optional display name.
     """
     configuration = context.ensure_object(Configuration)
-    api = API(configuration.local_configuration, APIParameters(logging.getLogger('porringer')))
+    api = API(configuration.local_configuration)
 
     try:
         directory = api.cache.add_directory(path, name=name)
@@ -71,7 +69,7 @@ def cache_remove(
         path: Path to remove.
     """
     configuration = context.ensure_object(Configuration)
-    api = API(configuration.local_configuration, APIParameters(logging.getLogger('porringer')))
+    api = API(configuration.local_configuration)
 
     if api.cache.remove_directory(path):
         configuration.console.print(f'[green]Removed:[/green] {path}')
@@ -95,7 +93,7 @@ def cache_list(
         validate: Check if paths exist.
     """
     configuration = context.ensure_object(Configuration)
-    api = API(configuration.local_configuration, APIParameters(logging.getLogger('porringer')))
+    api = API(configuration.local_configuration)
 
     directories = api.cache.list_directories()
 
@@ -137,7 +135,7 @@ def cache_clear(
         yes: Skip confirmation.
     """
     configuration = context.ensure_object(Configuration)
-    api = API(configuration.local_configuration, APIParameters(logging.getLogger('porringer')))
+    api = API(configuration.local_configuration)
 
     if not yes and not typer.confirm('Clear all cached directories?', default=False):
         configuration.console.print('[yellow]Aborted[/yellow]')

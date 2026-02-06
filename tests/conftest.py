@@ -1,7 +1,6 @@
 """Shared pytest configuration and fixtures."""
 
 import tempfile
-from logging import Logger
 from pathlib import Path
 
 import pytest
@@ -11,7 +10,7 @@ from porringer.api import API
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.schema import GlobalConfiguration
 from porringer.console.schema import Configuration
-from porringer.schema import APIParameters, LocalConfiguration
+from porringer.schema import LocalConfiguration
 
 
 @pytest.fixture
@@ -19,12 +18,6 @@ def test_config() -> Configuration:
     """Configuration for CLI testing."""
     console = Console(no_color=True, force_terminal=False)
     return Configuration(console=console)
-
-
-@pytest.fixture
-def test_logger() -> Logger:
-    """Logger for testing."""
-    return Logger('test')
 
 
 @pytest.fixture
@@ -38,10 +31,10 @@ def temp_cache_dir():
 
 
 @pytest.fixture
-def cache_manager(test_logger, temp_cache_dir):
+def cache_manager(temp_cache_dir):
     """DirectoryCacheManager instance for testing."""
     _, data_dir = temp_cache_dir
-    return DirectoryCacheManager(data_dir, test_logger)
+    return DirectoryCacheManager(data_dir)
 
 
 @pytest.fixture
@@ -66,10 +59,9 @@ def test_local_configuration(temp_cache_dir):
 
 
 @pytest.fixture
-def test_api(test_logger, test_local_configuration, test_global_configuration):
+def test_api(test_local_configuration, test_global_configuration):
     """API instance with isolated temporary directories.
 
     This ensures tests don't modify the system's porringer cache.
     """
-    parameters = APIParameters(logger=test_logger)
-    return API(test_local_configuration, parameters, test_global_configuration)
+    return API(test_local_configuration, global_configuration=test_global_configuration)

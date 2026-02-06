@@ -1,14 +1,12 @@
 """Porringer CLI self command module."""
 
 import asyncio
-import logging
 
 import typer
 from rich.panel import Panel
 
 from porringer.api import API
 from porringer.console.schema import Configuration
-from porringer.schema import APIParameters
 
 app = typer.Typer()
 
@@ -21,8 +19,7 @@ def self_check(context: typer.Context) -> None:
     """
     configuration = context.ensure_object(Configuration)
 
-    api_parameters = APIParameters(logging.getLogger('porringer'))
-    api = API(configuration.local_configuration, api_parameters)
+    api = API(configuration.local_configuration)
 
     info = asyncio.run(api.porringer.check())
 

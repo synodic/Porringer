@@ -1,10 +1,10 @@
 """The plugin command module."""
 
 import builtins
+import logging
 import subprocess
 import sys
 from importlib import metadata
-from logging import Logger
 
 from porringer.backend.builder import Builder
 from porringer.backend.resolver import resolve_list_plugins_parameters
@@ -18,17 +18,15 @@ from porringer.schema import ListPluginResults, ListPluginsParameters
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import is_pipx_installation
 
+logger = logging.getLogger(__name__)
+
 
 class PluginCommands:
     """Plugin commands"""
 
-    def __init__(self, logger: Logger) -> None:
-        """Initialize the PluginCommands class.
-
-        Args:
-            logger: Logger instance for logging actions.
-        """
-        self.logger = logger
+    def __init__(self) -> None:
+        """Initialize the PluginCommands class."""
+        pass
 
     def list(self, parameters: ListPluginsParameters) -> list[ListPluginResults]:
         """Lists the plugins.
@@ -39,9 +37,9 @@ class PluginCommands:
         Returns:
             A list of registered plugins.
         """
-        self.logger.info('Listing plugins')
+        logger.info('Listing plugins')
 
-        builder = Builder(self.logger)
+        builder = Builder()
 
         environment_types = builder.find_environments()
 
@@ -78,7 +76,7 @@ class PluginCommands:
         Raises:
             PluginError: If installation fails or package is not a valid plugin.
         """
-        self.logger.info(f'Installing plugin: {parameters.name}')
+        logger.info(f'Installing plugin: {parameters.name}')
 
         # Get plugins before installation for comparison
         plugins_before = PluginCommands._get_existing_plugin_packages()
@@ -92,7 +90,7 @@ class PluginCommands:
         if parameters.dry:
             # For dry run, just show what would be done
             cmd_str = ' '.join(args)
-            self.logger.info(f'Dry run: would execute: {cmd_str}')
+            logger.info(f'Dry run: would execute: {cmd_str}')
             return PluginOperationResult(
                 plugin_name=parameters.name,
                 success=True,
@@ -102,21 +100,21 @@ class PluginCommands:
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
             if result.returncode != 0:
-                self.logger.error(f'Installation failed: {result.stderr}')
+                logger.error(f'Installation failed: {result.stderr}')
                 return PluginOperationResult(
                     plugin_name=parameters.name,
                     success=False,
                     message=f'Installation failed: {result.stderr.strip()}',
                 )
         except FileNotFoundError as e:
-            self.logger.error(f'Command not found: {e}')
+            logger.error(f'Command not found: {e}')
             return PluginOperationResult(
                 plugin_name=parameters.name,
                 success=False,
                 message=f'Command not found: {e}',
             )
         except subprocess.SubprocessError as e:
-            self.logger.error(f'Subprocess error: {e}')
+            logger.error(f'Subprocess error: {e}')
             return PluginOperationResult(
                 plugin_name=parameters.name,
                 success=False,
@@ -132,7 +130,7 @@ class PluginCommands:
         if not new_plugins:
             # The package installed but doesn't provide any porringer.environment entry points
             # Uninstall it and report error
-            self.logger.warning(
+            logger.warning(
                 f"Package '{parameters.name}' does not provide a porringer.environment entry point. Uninstalling."
             )
             PluginCommands._uninstall_package(parameters.name)
@@ -141,7 +139,7 @@ class PluginCommands:
                 '(missing porringer.environment entry point)'
             )
 
-        self.logger.info(f'Successfully installed plugin: {parameters.name}')
+        logger.info(f'Successfully installed plugin: {parameters.name}')
         return PluginOperationResult(
             plugin_name=parameters.name,
             success=True,
@@ -177,7 +175,7 @@ class PluginCommands:
         results: list[PluginOperationResult] = []
 
         for name in parameters.names:
-            self.logger.info(f'Uninstalling plugin: {name}')
+            logger.info(f'Uninstalling plugin: {name}')
 
             # Build uninstall command
             if is_pipx_installation():
@@ -187,7 +185,7 @@ class PluginCommands:
 
             if parameters.dry:
                 cmd_str = ' '.join(args)
-                self.logger.info(f'Dry run: would execute: {cmd_str}')
+                logger.info(f'Dry run: would execute: {cmd_str}')
                 results.append(
                     PluginOperationResult(
                         plugin_name=name,
@@ -200,7 +198,7 @@ class PluginCommands:
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 if result.returncode != 0:
-                    self.logger.error(f'Uninstall failed for {name}: {result.stderr}')
+                    logger.error(f'Uninstall failed for {name}: {result.stderr}')
                     results.append(
                         PluginOperationResult(
                             plugin_name=name,
@@ -209,7 +207,7 @@ class PluginCommands:
                         )
                     )
                 else:
-                    self.logger.info(f'Successfully uninstalled plugin: {name}')
+                    logger.info(f'Successfully uninstalled plugin: {name}')
                     results.append(
                         PluginOperationResult(
                             plugin_name=name,
@@ -218,7 +216,7 @@ class PluginCommands:
                         )
                     )
             except FileNotFoundError as e:
-                self.logger.error(f'Command not found: {e}')
+                logger.error(f'Command not found: {e}')
                 results.append(
                     PluginOperationResult(
                         plugin_name=name,
@@ -227,7 +225,7 @@ class PluginCommands:
                     )
                 )
             except subprocess.SubprocessError as e:
-                self.logger.error(f'Subprocess error: {e}')
+                logger.error(f'Subprocess error: {e}')
                 results.append(
                     PluginOperationResult(
                         plugin_name=name,
@@ -250,7 +248,7 @@ class PluginCommands:
         results: list[PluginOperationResult] = []
 
         for name in parameters.names:
-            self.logger.info(f'Updating plugin: {name}')
+            logger.info(f'Updating plugin: {name}')
 
             # Build update command
             if is_pipx_installation():
@@ -260,7 +258,7 @@ class PluginCommands:
 
             if parameters.dry:
                 cmd_str = ' '.join(args)
-                self.logger.info(f'Dry run: would execute: {cmd_str}')
+                logger.info(f'Dry run: would execute: {cmd_str}')
                 results.append(
                     PluginOperationResult(
                         plugin_name=name,
@@ -273,7 +271,7 @@ class PluginCommands:
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 if result.returncode != 0:
-                    self.logger.error(f'Update failed for {name}: {result.stderr}')
+                    logger.error(f'Update failed for {name}: {result.stderr}')
                     results.append(
                         PluginOperationResult(
                             plugin_name=name,
@@ -282,7 +280,7 @@ class PluginCommands:
                         )
                     )
                 else:
-                    self.logger.info(f'Successfully updated plugin: {name}')
+                    logger.info(f'Successfully updated plugin: {name}')
                     results.append(
                         PluginOperationResult(
                             plugin_name=name,
@@ -291,7 +289,7 @@ class PluginCommands:
                         )
                     )
             except FileNotFoundError as e:
-                self.logger.error(f'Command not found: {e}')
+                logger.error(f'Command not found: {e}')
                 results.append(
                     PluginOperationResult(
                         plugin_name=name,
@@ -300,7 +298,7 @@ class PluginCommands:
                     )
                 )
             except subprocess.SubprocessError as e:
-                self.logger.error(f'Subprocess error: {e}')
+                logger.error(f'Subprocess error: {e}')
                 results.append(
                     PluginOperationResult(
                         plugin_name=name,

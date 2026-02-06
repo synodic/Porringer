@@ -1,6 +1,5 @@
 """Porringer CLI download command module for downloading files."""
 
-import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -10,7 +9,6 @@ from rich.panel import Panel
 from porringer.api import API
 from porringer.console.schema import Configuration
 from porringer.schema import (
-    APIParameters,
     DownloadParameters,
     ProgressCallback,
 )
@@ -27,8 +25,7 @@ def _create_api(configuration: Configuration) -> API:
     Returns:
         Initialized API instance.
     """
-    api_parameters = APIParameters(logging.getLogger('porringer'))
-    return API(configuration.local_configuration, api_parameters)
+    return API(configuration.local_configuration)
 
 
 def _create_progress_callback(configuration: Configuration) -> ProgressCallback | None:

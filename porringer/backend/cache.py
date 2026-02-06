@@ -1,12 +1,14 @@
 """Directory cache management for manifest directories."""
 
 import json
-from logging import Logger
+import logging
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from porringer.schema import DirectoryCache, ManifestDirectory
+
+logger = logging.getLogger(__name__)
 
 
 class DirectoryCacheManager:
@@ -18,15 +20,13 @@ class DirectoryCacheManager:
 
     CACHE_FILENAME = 'directories.json'
 
-    def __init__(self, data_directory: Path, logger: Logger) -> None:
+    def __init__(self, data_directory: Path) -> None:
         """Initialize the cache manager.
 
         Args:
             data_directory: The directory where cache will be stored.
-            logger: Logger instance for logging actions.
         """
         self.data_directory = data_directory
-        self.logger = logger
         self._cache_path = data_directory / self.CACHE_FILENAME
         self._cache: DirectoryCache | None = None
 
@@ -47,18 +47,18 @@ class DirectoryCacheManager:
         if self._cache_path.exists():
             try:
                 self._cache = DirectoryCache.model_validate_json(self._cache_path.read_text(encoding='utf-8'))
-                self.logger.debug(f'Loaded directory cache from {self._cache_path}')
+                logger.debug(f'Loaded directory cache from {self._cache_path}')
             except json.JSONDecodeError as e:
-                self.logger.warning(f'Invalid JSON in cache file, creating new: {e}')
+                logger.warning(f'Invalid JSON in cache file, creating new: {e}')
                 self._cache = DirectoryCache()
             except ValidationError as e:
-                self.logger.warning(f'Invalid cache format, creating new: {e}')
+                logger.warning(f'Invalid cache format, creating new: {e}')
                 self._cache = DirectoryCache()
             except (OSError, PermissionError) as e:
-                self.logger.warning(f'Failed to read cache file, creating new: {e}')
+                logger.warning(f'Failed to read cache file, creating new: {e}')
                 self._cache = DirectoryCache()
             except Exception as e:
-                self.logger.warning(f'Failed to load directory cache, creating new: {e}')
+                logger.warning(f'Failed to load directory cache, creating new: {e}')
                 self._cache = DirectoryCache()
         else:
             self._cache = DirectoryCache()
@@ -77,16 +77,16 @@ class DirectoryCacheManager:
         try:
             temp_path.write_text(self._cache.model_dump_json(indent=2), encoding='utf-8')
             temp_path.replace(self._cache_path)
-            self.logger.debug(f'Saved directory cache to {self._cache_path}')
+            logger.debug(f'Saved directory cache to {self._cache_path}')
         except PermissionError as e:
             if temp_path.exists():
                 temp_path.unlink()
-            self.logger.error(f'Permission denied writing cache: {e}')
+            logger.error(f'Permission denied writing cache: {e}')
             raise
         except OSError as e:
             if temp_path.exists():
                 temp_path.unlink()
-            self.logger.error(f'Failed to write cache: {e}')
+            logger.error(f'Failed to write cache: {e}')
             raise
         except Exception:
             if temp_path.exists():
@@ -136,7 +136,7 @@ class DirectoryCacheManager:
         cache.directories.append(directory)
         self._save()
 
-        self.logger.info(f'Added directory: {normalized}')
+        logger.info(f'Added directory: {normalized}')
         return directory
 
     def remove_directory(self, path: Path) -> bool:
@@ -155,7 +155,7 @@ class DirectoryCacheManager:
             if DirectoryCacheManager._normalize_path(directory.path) == normalized:
                 cache.directories.pop(i)
                 self._save()
-                self.logger.info(f'Removed directory: {normalized}')
+                logger.info(f'Removed directory: {normalized}')
                 return True
 
         return False
@@ -219,4 +219,4 @@ class DirectoryCacheManager:
         """Clear all directories from the cache."""
         self._cache = DirectoryCache()
         self._save()
-        self.logger.info('Cleared directory cache')
+        logger.info('Cleared directory cache')

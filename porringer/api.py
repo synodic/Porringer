@@ -18,14 +18,14 @@ class API:
     def __init__(
         self,
         local_configuration: LocalConfiguration,
-        parameters: APIParameters,
+        parameters: APIParameters | None = None,
         global_configuration: GlobalConfiguration | None = None,
     ) -> None:
         """Initializes the API
 
         Args:
             local_configuration: The local configuration.
-            parameters: The API parameters including logger.
+            parameters: Optional API parameters (reserved for future use).
             global_configuration: Optional global configuration (uses defaults if not provided).
         """
         if global_configuration is None:
@@ -35,8 +35,8 @@ class API:
         self.parameters = parameters
 
         # Cache manager for directory storage
-        self.cache = DirectoryCacheManager(self.configuration.data_directory, self.parameters.logger)
+        self.cache = DirectoryCacheManager(self.configuration.data_directory)
 
-        self.plugin = PluginCommands(self.parameters.logger)
-        self.porringer = SelfCommands(self.parameters.logger)
-        self.update = UpdateCommands(self.parameters.logger, self.cache)
+        self.plugin = PluginCommands()
+        self.porringer = SelfCommands()
+        self.update = UpdateCommands(self.cache)

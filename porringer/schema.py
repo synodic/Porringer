@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from importlib.metadata import Distribution
-from logging import Logger
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -341,7 +340,7 @@ class ListPluginResults:
 class APIParameters:
     """Resolved configuration"""
 
-    logger: Logger
+    pass
 
 
 @dataclass
