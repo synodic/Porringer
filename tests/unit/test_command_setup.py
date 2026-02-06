@@ -241,3 +241,84 @@ class TestSetupCLI:
             result = runner.invoke(app, ['install', '--dry-run', '--path', tmpdir], obj=test_config)
 
             assert result.exit_code == EXIT_CODE_FAILURE
+
+
+class TestDryRunStateAware:
+    """Tests for state-aware dry-run (skipping already-installed packages)"""
+
+    @staticmethod
+    def test_dry_run_skips_installed_package(test_api: API) -> None:
+        """Test that dry-run detects an already-installed package and marks it skipped."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 'packaging' is always installed (it's a dependency of porringer itself)
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['packaging']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            preview = test_api.update.preview_batch(setup_params)
+            results = test_api.update.execute_batch(preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skipped is True
+            assert action_result.skip_reason is not None
+            assert 'packaging' in action_result.skip_reason
+
+    @staticmethod
+    def test_dry_run_does_not_skip_missing_package(test_api: API) -> None:
+        """Test that dry-run reports success without skip for a package that is not installed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            # Use a package name that should never be installed
+            manifest_data = {'version': '1', 'packages': {'pip': ['zzz-nonexistent-package-xyz']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            preview = test_api.update.preview_batch(setup_params)
+            results = test_api.update.execute_batch(preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skipped is False
+            assert action_result.skip_reason is None
+
+    @staticmethod
+    def test_dry_run_version_satisfied(test_api: API) -> None:
+        """Test that dry-run reports skipped when a version specifier is satisfied."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            # packaging>=1.0 should always be satisfied
+            manifest_data = {'version': '1', 'packages': {'pip': ['packaging>=1.0']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            preview = test_api.update.preview_batch(setup_params)
+            results = test_api.update.execute_batch(preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skipped is True
+            assert action_result.skip_reason is not None
+            assert 'satisfies' in action_result.skip_reason
+
+    @staticmethod
+    def test_dry_run_version_not_satisfied(test_api: API) -> None:
+        """Test that dry-run does not skip when a version specifier is not satisfied."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            # packaging>=99999 should never be satisfied
+            manifest_data = {'version': '1', 'packages': {'pip': ['packaging>=99999']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            preview = test_api.update.preview_batch(setup_params)
+            results = test_api.update.execute_batch(preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skipped is False
