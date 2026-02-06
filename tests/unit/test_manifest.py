@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from porringer.api import API
 from porringer.console.entry import app
-from porringer.schema import Prerequisite, SetupActionType, SetupParameters
+from porringer.schema import Prerequisite, SetupActionType, SetupManifest, SetupParameters
 from porringer.utility.exception import ManifestError
 
 # Test constants
@@ -249,6 +249,113 @@ class TestSetupBatch:
 
         assert len(results.manifest_results) == DUAL_MANIFESTS
         assert results.total_actions == TWO_ACTIONS
+
+
+class TestPackageSpec:
+    """Tests for PackageSpec model and string/object coercion"""
+
+    @staticmethod
+    def test_manifest_coerces_string_packages() -> None:
+        """String package entries are coerced to PackageSpec objects"""
+        manifest = SetupManifest(packages={'pip': ['requests', 'flask']})
+        assert len(manifest.packages['pip']) == 2
+        assert manifest.packages['pip'][0].name == 'requests'
+        assert manifest.packages['pip'][0].description is None
+
+    @staticmethod
+    def test_manifest_accepts_object_packages() -> None:
+        """Object package entries are parsed as PackageSpec"""
+        manifest = SetupManifest(packages={'pip': [{'name': 'ruff', 'description': 'Fast linter'}]})
+        assert manifest.packages['pip'][0].name == 'ruff'
+        assert manifest.packages['pip'][0].description == 'Fast linter'
+
+    @staticmethod
+    def test_manifest_mixed_string_and_object_packages() -> None:
+        """Manifest accepts a mix of string and object package entries"""
+        manifest = SetupManifest(
+            packages={
+                'pip': [
+                    'requests',
+                    {'name': 'ruff', 'description': 'Fast linter'},
+                    'pytest',
+                ]
+            }
+        )
+        pkgs = manifest.packages['pip']
+        assert len(pkgs) == 3
+        assert pkgs[0].name == 'requests'
+        assert pkgs[0].description is None
+        assert pkgs[1].name == 'ruff'
+        assert pkgs[1].description == 'Fast linter'
+        assert pkgs[2].name == 'pytest'
+        assert pkgs[2].description is None
+
+
+class TestManifestMetadata:
+    """Tests for manifest display metadata fields"""
+
+    @staticmethod
+    def test_metadata_in_json_manifest(test_api: API) -> None:
+        """Test that display metadata is loaded from JSON and propagated to SetupResults"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'name': 'Dev Environment',
+                'description': 'Tools for development',
+                'author': 'Synodic',
+                'url': 'https://example.com',
+                'packages': {'pip': ['requests']},
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir))
+
+            assert results.metadata is not None
+            assert results.metadata.name == 'Dev Environment'
+            assert results.metadata.description == 'Tools for development'
+            assert results.metadata.author == 'Synodic'
+            assert results.metadata.url == 'https://example.com/'
+
+    @staticmethod
+    def test_metadata_none_when_not_provided(test_api: API) -> None:
+        """Test that metadata fields are None when not in manifest"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir))
+
+            assert results.metadata is not None
+            assert results.metadata.name is None
+            assert results.metadata.description is None
+            assert results.metadata.author is None
+            assert results.metadata.url is None
+
+    @staticmethod
+    def test_package_description_in_actions(test_api: API) -> None:
+        """Test that per-package descriptions propagate to SetupAction"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'packages': {
+                    'pip': [
+                        {'name': 'ruff', 'description': 'Fast linter'},
+                        'pytest',
+                    ]
+                },
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir))
+
+            assert len(results.actions) == 2
+            assert results.actions[0].package == 'ruff'
+            assert results.actions[0].package_description == 'Fast linter'
+            assert results.actions[1].package == 'pytest'
+            assert results.actions[1].package_description is None
 
 
 class TestSetupCLI:
