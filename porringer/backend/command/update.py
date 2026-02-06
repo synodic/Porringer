@@ -25,6 +25,7 @@ from porringer.schema import (
     DownloadParameters,
     DownloadResult,
     InstallProgressCallback,
+    ManifestMetadata,
     ProgressCallback,
     SetupAction,
     SetupActionResult,
@@ -270,9 +271,10 @@ class UpdateCommands:
                 actions.append(
                     SetupAction(
                         action_type=SetupActionType.INSTALL_PACKAGE,
-                        description=f"Install '{package}' via {plugin_name}",
+                        description=f"Install '{package.name}' via {plugin_name}",
                         plugin=plugin_name,
-                        package=package,
+                        package=package.name,
+                        package_description=package.description,
                     )
                 )
 
@@ -305,8 +307,14 @@ class UpdateCommands:
 
         manifest_path, manifest = UpdateCommands._find_manifest(path)
         actions = UpdateCommands._build_actions(manifest)
+        metadata = ManifestMetadata(
+            name=manifest.name,
+            description=manifest.description,
+            author=manifest.author,
+            url=str(manifest.url) if manifest.url else None,
+        )
 
-        return SetupResults(actions=actions, manifest_path=manifest_path)
+        return SetupResults(actions=actions, manifest_path=manifest_path, metadata=metadata)
 
     def preview_batch(self, parameters: SetupParameters) -> BatchSetupResults:
         """Preview setup actions for multiple paths.

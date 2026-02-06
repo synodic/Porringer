@@ -1,5 +1,9 @@
 {
     "version": "1",
+    "name": "Python Dev Environment",
+    "description": "Common linting, formatting, and testing tools for Python development",
+    "author": "Synodic Software",
+    "url": "https://github.com/synodic/porringer",
     "prerequisites": [
         {
             "plugin": "pip"
@@ -28,13 +32,22 @@
     ],
     "packages": {
         "pip": [
-            "ruff",
-            "pyrefly",
+            {
+                "name": "ruff",
+                "description": "Fast Python linter and formatter"
+            },
+            {
+                "name": "pyrefly",
+                "description": "Python type checker"
+            },
             "pytest",
             "pytest-cov"
         ],
         "pipx": [
-            "pdm"
+            {
+                "name": "pdm",
+                "description": "Python package and dependency manager"
+            }
         ]
     }
 }

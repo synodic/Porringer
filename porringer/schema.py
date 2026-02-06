@@ -11,7 +11,7 @@ from queue import Empty, Queue
 
 from packaging.version import Version
 from platformdirs import user_cache_dir
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 # --- Directory Cache Schemas ---
 
@@ -69,6 +69,7 @@ class SetupAction:
         command: The command to run (for RUN_COMMAND).
         description: Human-readable description of the action.
         cli_command: The actual CLI command (for display purposes).
+        package_description: Optional per-package description from the manifest.
     """
 
     action_type: SetupActionType
@@ -77,6 +78,7 @@ class SetupAction:
     package: str | None = None
     command: list[str] | None = None
     cli_command: list[str] | None = None
+    package_description: str | None = None
 
 
 @dataclass
@@ -244,17 +246,47 @@ class Prerequisite(BaseModel):
         return sys.platform in self.platforms
 
 
+class PackageSpec(BaseModel):
+    """A package entry with optional display metadata.
+
+    Supports both string shorthand (just a package name) and object form
+    with additional metadata for GUI consumers.
+    """
+
+    name: str = Field(description='The package name')
+    description: str | None = Field(default=None, description='Human-readable description of this package')
+
+
 class SetupManifest(BaseModel):
     """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer]."""
 
     version: str = Field(default='1', description='Manifest schema version')
+    name: str | None = Field(default=None, description='Human-readable project/environment name')
+    description: str | None = Field(default=None, description='Short description shown in the install preview header')
+    author: str | None = Field(default=None, description='Author or organization name')
+    url: HttpUrl | None = Field(default=None, description='Project URL for reference')
     prerequisites: list[Prerequisite] = Field(
         default_factory=list, description='Plugins that must be available before setup'
     )
-    packages: dict[str, list[str]] = Field(
+    packages: dict[str, list[PackageSpec]] = Field(
         default_factory=dict, description='Packages to install per plugin (plugin name -> package list)'
     )
     post_install: list[str] = Field(default_factory=list, description='Commands to run after package installation')
+
+    @field_validator('packages', mode='before')
+    @classmethod
+    def _normalize_packages(cls, value: dict[str, list[str | dict]]) -> dict[str, list[dict]]:
+        """Normalize package entries: coerce plain strings into PackageSpec dicts."""
+        normalized: dict[str, list[dict]] = {}
+        for plugin, entries in value.items():
+            normalized_entries: list[dict] = []
+            for entry in entries:
+                if isinstance(entry, str):
+                    normalized_entries.append({'name': entry})
+                else:
+                    normalized_entries.append(entry)
+            normalized[plugin] = normalized_entries
+        return normalized
 
 
 class SetupParameters(BaseModel):
@@ -269,17 +301,39 @@ class SetupParameters(BaseModel):
 
 
 @dataclass
+class ManifestMetadata:
+    """Display metadata from a setup manifest.
+
+    Carries optional human-readable information for GUI consumers
+    (e.g. install preview screens).
+
+    Args:
+        name: Human-readable project/environment name.
+        description: Short description shown in the install preview header.
+        author: Author or organization name.
+        url: Project URL for reference.
+    """
+
+    name: str | None = None
+    description: str | None = None
+    author: str | None = None
+    url: str | None = None
+
+
+@dataclass
 class SetupResults:
     """Results of a setup operation.
 
     Args:
         actions: The list of actions (for preview) or action results (for execute).
         manifest_path: The path to the manifest that was used.
+        metadata: Optional display metadata from the manifest.
     """
 
     actions: list[SetupAction] = field(default_factory=list)
     results: list[SetupActionResult] = field(default_factory=list)
     manifest_path: Path | None = None
+    metadata: ManifestMetadata | None = None
 
 
 @dataclass
