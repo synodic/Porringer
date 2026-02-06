@@ -49,6 +49,69 @@ class ListPluginsParameters(BaseModel):
 # --- Setup Schemas ---
 
 
+class ManifestValidationCode(Enum):
+    """Machine-readable codes for manifest validation diagnostics."""
+
+    SYNTAX_ERROR = 'syntax_error'
+    SCHEMA_INVALID = 'schema_invalid'
+    UNSUPPORTED_VERSION = 'unsupported_version'
+    UNKNOWN_PLUGIN = 'unknown_plugin'
+    INVALID_PACKAGE_NAME = 'invalid_package_name'
+    DUPLICATE_PACKAGE = 'duplicate_package'
+    PATH_NOT_FOUND = 'path_not_found'
+    NO_MANIFEST = 'no_manifest'
+
+
+class ManifestDiagnosticSeverity(Enum):
+    """Severity level for a manifest validation diagnostic."""
+
+    ERROR = auto()
+    WARNING = auto()
+
+
+@dataclass
+class ManifestDiagnostic:
+    """A single diagnostic produced by manifest validation.
+
+    Args:
+        field: Dot-path to the relevant field (e.g. ``"packages.npm"``, ``"prerequisites[0].plugin"``).
+        message: Human-readable description of the problem or concern.
+        code: Machine-readable diagnostic code.
+        severity: Whether this diagnostic is an error or a warning.
+    """
+
+    field: str
+    message: str
+    code: ManifestValidationCode
+    severity: ManifestDiagnosticSeverity
+
+
+@dataclass
+class ManifestValidationResult:
+    """Structured result of manifest validation.
+
+    Args:
+        diagnostics: All validation diagnostics (errors and warnings).
+    """
+
+    diagnostics: list[ManifestDiagnostic] = field(default_factory=list)
+
+    @property
+    def valid(self) -> bool:
+        """A manifest is valid when it has no error-level diagnostics."""
+        return not any(d.severity == ManifestDiagnosticSeverity.ERROR for d in self.diagnostics)
+
+    @property
+    def errors(self) -> list[ManifestDiagnostic]:
+        """All error-level diagnostics."""
+        return [d for d in self.diagnostics if d.severity == ManifestDiagnosticSeverity.ERROR]
+
+    @property
+    def warnings(self) -> list[ManifestDiagnostic]:
+        """All warning-level diagnostics."""
+        return [d for d in self.diagnostics if d.severity == ManifestDiagnosticSeverity.WARNING]
+
+
 class SetupActionType(Enum):
     """The type of action to perform during setup"""
 
