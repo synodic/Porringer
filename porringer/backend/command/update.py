@@ -359,8 +359,8 @@ class UpdateCommands:
             action.cli_command = UpdateCommands._get_cli_command(action, environments)
 
             if parameters.dry_run:
-                # In dry-run mode, just simulate success (but still check plugins)
-                result = self._dry_run_action(action, available_plugins)
+                # In dry-run mode, check actual system state but don't execute
+                result = self._dry_run_action(action, available_plugins, environments)
             else:
                 result = self._execute_action(action, environments, available_plugins, working_dir, parameters.timeout)
             results.append(result)
@@ -373,13 +373,18 @@ class UpdateCommands:
 
         return SetupResults(actions=actions, results=results)
 
-    @staticmethod
-    def _dry_run_action(action: SetupAction, available_plugins: set[str]) -> SetupActionResult:
+    def _dry_run_action(
+        self, action: SetupAction, available_plugins: set[str], environments: dict[str, Environment]
+    ) -> SetupActionResult:
         """Simulates executing an action in dry-run mode.
+
+        For CHECK_PLUGIN and INSTALL_PACKAGE actions, real system state is checked
+        so that the result accurately reflects whether the action would be skipped.
 
         Args:
             action: The action to simulate.
             available_plugins: Set of available plugin names.
+            environments: Dict of instantiated environment plugins.
 
         Returns:
             The simulated result.
@@ -396,7 +401,26 @@ class UpdateCommands:
                         action=action, success=False, message=f"Required plugin '{action.plugin}' is not available"
                     )
             case SetupActionType.INSTALL_PACKAGE:
-                # Simulate success
+                # Check if package is already installed (state-aware dry-run)
+                if action.plugin and action.package and action.plugin in environments:
+                    try:
+                        installed_packages = environments[action.plugin].packages()
+                        is_installed, skip_reason = UpdateCommands._is_package_installed(
+                            action.package, installed_packages
+                        )
+                        if is_installed:
+                            self.logger.info(f"Dry-run: skipping '{action.package}': {skip_reason}")
+                            return SetupActionResult(
+                                action=action,
+                                success=True,
+                                skipped=True,
+                                skip_reason=skip_reason,
+                            )
+                    except PluginError as e:
+                        self.logger.debug(f'Dry-run: plugin error checking packages for {action.plugin}: {e}')
+                    except Exception as e:
+                        self.logger.debug(f'Dry-run: could not check installed packages for {action.plugin}: {e}')
+                # Simulate success when state check is unavailable or package is not installed
                 return SetupActionResult(action=action, success=True)
             case SetupActionType.RUN_COMMAND:
                 # Simulate success
@@ -727,6 +751,7 @@ class UpdateCommands:
         self,
         check_actions: list[SetupAction],
         available_plugins: set[str],
+        environments: dict[str, Environment],
         parameters: SetupParameters,
         progress_callback: InstallProgressCallback | None,
     ) -> tuple[list[SetupActionResult], bool]:
@@ -738,7 +763,7 @@ class UpdateCommands:
         results: list[SetupActionResult] = []
         for action in check_actions:
             if parameters.dry_run:
-                result = self._dry_run_action(action, available_plugins)
+                result = self._dry_run_action(action, available_plugins, environments)
             else:
                 result = self._execute_check_plugin(action, available_plugins)
             results.append(result)
@@ -763,7 +788,9 @@ class UpdateCommands:
             Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
         """
         if context.parameters.dry_run:
-            return self._dry_run_install_actions(install_actions, available_plugins, context.progress_callback), True
+            return self._dry_run_install_actions(
+                install_actions, available_plugins, environments, context.progress_callback
+            ), True
 
         parallel_actions, sequential_actions = self._group_actions_by_parallelism(install_actions, environments)
 
@@ -790,12 +817,13 @@ class UpdateCommands:
         self,
         install_actions: list[SetupAction],
         available_plugins: set[str],
+        environments: dict[str, Environment],
         progress_callback: InstallProgressCallback | None,
     ) -> list[SetupActionResult]:
         """Execute dry-run for install actions."""
         results: list[SetupActionResult] = []
         for action in install_actions:
-            result = self._dry_run_action(action, available_plugins)
+            result = self._dry_run_action(action, available_plugins, environments)
             results.append(result)
             if progress_callback:
                 progress_callback(action, result)
@@ -905,6 +933,7 @@ class UpdateCommands:
         self,
         command_actions: list[SetupAction],
         available_plugins: set[str],
+        environments: dict[str, Environment],
         working_dir: Path,
         parameters: SetupParameters,
         progress_callback: InstallProgressCallback | None,
@@ -913,7 +942,7 @@ class UpdateCommands:
         results: list[SetupActionResult] = []
         for action in command_actions:
             if parameters.dry_run:
-                result = self._dry_run_action(action, available_plugins)
+                result = self._dry_run_action(action, available_plugins, environments)
             else:
                 result = self._execute_run_command(action, working_dir, parameters.timeout)
             results.append(result)
@@ -976,7 +1005,7 @@ class UpdateCommands:
 
         # Execute CHECK_PLUGIN actions
         check_results, should_continue = await self._execute_check_actions_async(
-            check_actions, available_plugins, parameters, progress_callback
+            check_actions, available_plugins, environments, parameters, progress_callback
         )
         results.extend(check_results)
         if not should_continue:
@@ -1001,7 +1030,7 @@ class UpdateCommands:
 
         # Execute RUN_COMMAND actions
         command_results = await self._execute_command_actions_async(
-            command_actions, available_plugins, working_dir, parameters, progress_callback
+            command_actions, available_plugins, environments, working_dir, parameters, progress_callback
         )
         results.extend(command_results)
 
