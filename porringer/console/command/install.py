@@ -13,8 +13,7 @@ from porringer.api import API
 from porringer.console.schema import Configuration
 from porringer.schema import (
     BatchSetupResults,
-    SetupAction,
-    SetupActionResult,
+    ProgressEventKind,
     SetupParameters,
 )
 from porringer.utility.exception import ManifestError
@@ -237,6 +236,10 @@ def _execute_with_progress(
 ) -> BatchSetupResults:
     """Execute installation with progress display.
 
+    Uses ``execute_stream`` to receive ``ProgressEvent`` items and updates
+    a Rich progress bar accordingly.  Results are collected from the stream
+    events so no second execution is needed.
+
     Args:
         configuration: CLI configuration with console.
         api: The API instance.
@@ -246,21 +249,17 @@ def _execute_with_progress(
     Returns:
         BatchSetupResults from execution.
     """
-    if setup_params.dry_run:
-        # For dry-run, use sync execution without progress
-        return api.update.execute_batch(preview_results, setup_params)
+    from porringer.schema import SetupActionResult, SetupResults
 
     # Count non-check actions for progress
     total_actions = sum(
         1 for mr in preview_results.manifest_results for a in mr.actions if a.action_type.name != 'CHECK_PLUGIN'
     )
 
-    if total_actions == 0:
-        return api.update.execute_batch(preview_results, setup_params)
-
     # Track progress state
     completed = 0
     active_tasks: dict[str, TaskID] = {}
+    collected_results: list[SetupActionResult] = []
 
     with Progress(
         SpinnerColumn(),
@@ -270,41 +269,82 @@ def _execute_with_progress(
         TextColumn('({task.completed}/{task.total})'),
         console=configuration.console,
         transient=True,
+        disable=total_actions == 0 or setup_params.dry_run,
     ) as progress:
-        overall_task = progress.add_task('Installing packages...', total=total_actions)
+        if total_actions > 0 and not setup_params.dry_run:
+            overall_task = progress.add_task('Installing packages...', total=total_actions)
 
-        def progress_callback(action: SetupAction, result: SetupActionResult | None) -> None:
+        async def run_stream() -> None:
             nonlocal completed
 
-            if action.action_type.name == 'CHECK_PLUGIN':
-                return  # Skip plugin checks in progress
+            async for event in api.update.execute_stream(preview_results, setup_params):
+                if event.action.action_type.name == 'CHECK_PLUGIN':
+                    # Still collect check results for display
+                    if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+                        collected_results.append(event.result)
+                    continue
 
-            action_desc = action.package or action.description[:30]
+                action_desc = event.action.package or event.action.description[:30]
 
-            if result is None:
-                # Action starting
-                task_id = progress.add_task(f'  {action_desc}', total=1)
-                active_tasks[action_desc] = task_id
-            else:
-                # Action completed
-                if action_desc in active_tasks:
-                    task_id = active_tasks.pop(action_desc)
-                    if result.success:
-                        if result.skipped:
-                            progress.update(task_id, description=f'  [dim]{action_desc} (skipped)[/dim]', completed=1)
+                if event.kind == ProgressEventKind.ACTION_STARTED:
+                    if total_actions > 0 and not setup_params.dry_run:
+                        task_id = progress.add_task(f'  {action_desc}', total=1)
+                        active_tasks[action_desc] = task_id
+
+                elif event.kind == ProgressEventKind.ACTION_COMPLETED:
+                    result = event.result
+                    if result:
+                        collected_results.append(result)
+
+                    if action_desc in active_tasks:
+                        task_id = active_tasks.pop(action_desc)
+                        if result and result.success:
+                            if result.skipped:
+                                progress.update(
+                                    task_id, description=f'  [dim]{action_desc} (skipped)[/dim]', completed=1
+                                )
+                            else:
+                                progress.update(task_id, description=f'  [green]{action_desc}[/green]', completed=1)
                         else:
-                            progress.update(task_id, description=f'  [green]{action_desc}[/green]', completed=1)
-                    else:
-                        progress.update(task_id, description=f'  [red]{action_desc}[/red]', completed=1)
+                            progress.update(task_id, description=f'  [red]{action_desc}[/red]', completed=1)
 
-                completed += 1
-                progress.update(overall_task, completed=completed)
+                    completed += 1
+                    if total_actions > 0 and not setup_params.dry_run:
+                        progress.update(overall_task, completed=completed)
 
-        # Run async execution
-        async def run_async() -> BatchSetupResults:
-            return await api.update.execute_batch_async(preview_results, setup_params, progress_callback)
+                elif event.kind == ProgressEventKind.SUB_ACTION_PROGRESS:
+                    sub = event.sub_action
+                    if sub and action_desc in active_tasks:
+                        task_id = active_tasks[action_desc]
+                        phase = sub.phase
 
-        return asyncio.run(run_async())
+                        if sub.message:
+                            desc = f'  {action_desc} [{phase}] {sub.message}'
+                        else:
+                            desc = f'  {action_desc} [{phase}]'
+
+                        max_desc_len = 80
+                        if len(desc) > max_desc_len:
+                            desc = desc[: max_desc_len - 3] + '...'
+
+                        if sub.progress is not None:
+                            progress.update(task_id, description=desc, completed=sub.progress, total=1.0)
+                        else:
+                            progress.update(task_id, description=desc)
+
+        asyncio.run(run_stream())
+
+    # Build BatchSetupResults from collected events
+    manifest_results: list[SetupResults] = []
+    for preview in preview_results.manifest_results:
+        sr = SetupResults(actions=preview.actions, results=list(collected_results))
+        sr.manifest_path = preview.manifest_path
+        manifest_results.append(sr)
+
+    return BatchSetupResults(
+        manifest_results=manifest_results,
+        failed_paths=list(preview_results.failed_paths),
+    )
 
 
 @app.callback(invoke_without_command=True)

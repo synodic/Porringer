@@ -63,6 +63,7 @@ porringer install --all
 ## API Usage
 
 ```python
+import asyncio
 from porringer.api import API
 from porringer.schema import LocalConfiguration, SetupParameters
 
@@ -71,6 +72,10 @@ api = API(LocalConfiguration())
 # Preview (dry run)
 preview = api.update.preview_batch(SetupParameters(paths=project_path))
 
-# Execute
-results = api.update.execute_batch(preview, SetupParameters(paths=project_path))
+# Execute with streaming progress
+async def run():
+    async for event in api.update.execute_stream(preview, SetupParameters(paths=project_path)):
+        print(event.kind, event.action.description)
+
+asyncio.run(run())
 ```

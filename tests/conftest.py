@@ -1,5 +1,6 @@
 """Shared pytest configuration and fixtures."""
 
+import asyncio
 import tempfile
 from pathlib import Path
 
@@ -10,7 +11,43 @@ from porringer.api import API
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.schema import GlobalConfiguration
 from porringer.console.schema import Configuration
-from porringer.schema import LocalConfiguration
+from porringer.schema import (
+    BatchSetupResults,
+    LocalConfiguration,
+    ProgressEventKind,
+    SetupParameters,
+    SetupResults,
+)
+
+
+def execute_via_stream(api: API, preview: BatchSetupResults, params: SetupParameters) -> BatchSetupResults:
+    """Drain ``execute_stream`` and build ``BatchSetupResults`` from emitted events.
+
+    This is a test helper that replaces the removed ``execute_batch`` /
+    ``execute_batch_async`` convenience methods.
+    """
+    from porringer.schema import SetupActionResult
+
+    collected: list[SetupActionResult] = []
+
+    async def _run() -> None:
+        async for event in api.update.execute_stream(preview, params):
+            if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+                collected.append(event.result)
+
+    asyncio.run(_run())
+
+    # Partition collected results by manifest based on action identity
+    manifest_action_sets = [set(id(a) for a in mr.actions) for mr in preview.manifest_results]
+    manifest_results: list[SetupResults] = []
+
+    for mr, action_ids in zip(preview.manifest_results, manifest_action_sets, strict=False):
+        mr_results = [r for r in collected if id(r.action) in action_ids]
+        sr = SetupResults(actions=mr.actions, results=mr_results)
+        sr.manifest_path = mr.manifest_path
+        manifest_results.append(sr)
+
+    return BatchSetupResults(manifest_results=manifest_results, failed_paths=list(preview.failed_paths))
 
 
 @pytest.fixture

@@ -1,0 +1,302 @@
+"""Tests for progress event stream and sub-action progress."""
+
+import asyncio
+from unittest.mock import MagicMock
+
+import pytest
+
+from porringer.core.plugin_schema.environment import InstallParameters
+from porringer.core.schema import PackageName
+from porringer.plugin.pip.plugin import PipEnvironment
+from porringer.schema import (
+    ProgressEvent,
+    ProgressEventKind,
+    SetupAction,
+    SetupActionType,
+    SubActionProgress,
+)
+
+
+def _make_action(package: str = 'requests') -> SetupAction:
+    """Create a test SetupAction."""
+    return SetupAction(
+        action_type=SetupActionType.INSTALL_PACKAGE,
+        description=f'Install {package}',
+        plugin='pip',
+        package=package,
+    )
+
+
+class TestSubActionProgress:
+    """Tests for SubActionProgress dataclass."""
+
+    @staticmethod
+    def test_basic_construction() -> None:
+        action = _make_action()
+        progress = SubActionProgress(action=action, phase='downloading', progress=0.5, message='Downloading ruff')
+        assert progress.action is action
+        assert progress.phase == 'downloading'
+        assert progress.progress == 0.5
+        assert progress.message == 'Downloading ruff'
+
+    @staticmethod
+    def test_defaults() -> None:
+        action = _make_action()
+        progress = SubActionProgress(action=action, phase='resolving')
+        assert progress.progress is None
+        assert progress.message is None
+
+    @staticmethod
+    def test_indeterminate_progress() -> None:
+        action = _make_action()
+        progress = SubActionProgress(action=action, phase='installing', progress=None, message='Installing packages')
+        assert progress.progress is None
+
+
+class TestProgressEvent:
+    """Tests for ProgressEvent dataclass."""
+
+    @staticmethod
+    def test_action_started() -> None:
+        action = _make_action()
+        event = ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action)
+        assert event.kind == ProgressEventKind.ACTION_STARTED
+        assert event.action is action
+        assert event.result is None
+        assert event.sub_action is None
+
+    @staticmethod
+    def test_action_completed() -> None:
+        from porringer.schema import SetupActionResult
+
+        action = _make_action()
+        result = SetupActionResult(action=action, success=True, message='ok')
+        event = ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+        assert event.kind == ProgressEventKind.ACTION_COMPLETED
+        assert event.result is result
+
+    @staticmethod
+    def test_sub_action_progress() -> None:
+        action = _make_action()
+        sub = SubActionProgress(action=action, phase='downloading', progress=0.5, message='pkg')
+        event = ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=action, sub_action=sub)
+        assert event.kind == ProgressEventKind.SUB_ACTION_PROGRESS
+        assert event.sub_action is sub
+
+    @staticmethod
+    def test_event_kind_values() -> None:
+        """All expected enum members exist."""
+        assert ProgressEventKind.ACTION_STARTED is not None
+        assert ProgressEventKind.ACTION_COMPLETED is not None
+        assert ProgressEventKind.SUB_ACTION_PROGRESS is not None
+
+    @staticmethod
+    def test_event_defaults() -> None:
+        action = _make_action()
+        event = ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action)
+        assert event.result is None
+        assert event.sub_action is None
+
+
+class TestInstallParametersProgressCallback:
+    """Tests for progress_callback on InstallParameters."""
+
+    @staticmethod
+    def test_default_is_none() -> None:
+        params = InstallParameters(name=PackageName('requests'))
+        assert params.progress_callback is None
+
+    @staticmethod
+    def test_accepts_callback() -> None:
+        cb = MagicMock()
+        params = InstallParameters(name=PackageName('requests'), progress_callback=cb)
+        assert params.progress_callback is cb
+
+    @staticmethod
+    def test_callback_excluded_from_serialization() -> None:
+        cb = MagicMock()
+        params = InstallParameters(name=PackageName('requests'), progress_callback=cb)
+        data = params.model_dump()
+        assert 'progress_callback' not in data
+
+
+class TestPipProgressLineParsing:
+    """Tests for PipEnvironment._parse_progress_line."""
+
+    @staticmethod
+    def test_downloading_line() -> None:
+        action = _make_action()
+        collected: list[SubActionProgress] = []
+
+        PipEnvironment._parse_progress_line(
+            'Downloading https://files.pythonhosted.org/ruff-0.8.0-py3-none-any.whl (2.1 MB)',
+            action,
+            collected.append,
+        )
+
+        assert len(collected) == 1
+        assert collected[0].phase == 'downloading'
+        assert collected[0].progress == 0.0
+        assert 'ruff-0.8.0' in (collected[0].message or '')
+
+    @staticmethod
+    def test_progress_percentage_line() -> None:
+        action = _make_action()
+        collected: list[SubActionProgress] = []
+
+        PipEnvironment._parse_progress_line(
+            '   1.5 MB 50%',
+            action,
+            collected.append,
+        )
+
+        assert len(collected) == 1
+        assert collected[0].phase == 'downloading'
+        assert collected[0].progress == pytest.approx(0.5)
+
+    @staticmethod
+    def test_installing_line() -> None:
+        action = _make_action()
+        collected: list[SubActionProgress] = []
+
+        PipEnvironment._parse_progress_line(
+            'Installing collected packages: requests, urllib3',
+            action,
+            collected.append,
+        )
+
+        assert len(collected) == 1
+        assert collected[0].phase == 'installing'
+        assert 'requests' in (collected[0].message or '')
+
+    @staticmethod
+    def test_already_satisfied_line() -> None:
+        action = _make_action()
+        collected: list[SubActionProgress] = []
+
+        PipEnvironment._parse_progress_line(
+            'Requirement already satisfied: requests in /usr/lib/python3.12/site-packages',
+            action,
+            collected.append,
+        )
+
+        assert len(collected) == 1
+        assert collected[0].phase == 'verifying'
+        assert collected[0].progress == 1.0
+
+    @staticmethod
+    def test_irrelevant_line_is_ignored() -> None:
+        action = _make_action()
+        collected: list[SubActionProgress] = []
+
+        PipEnvironment._parse_progress_line(
+            'Using cached requests-2.31.0.tar.gz',
+            action,
+            collected.append,
+        )
+
+        assert len(collected) == 0
+
+    @staticmethod
+    def test_full_progress_sequence() -> None:
+        """Simulate a realistic sequence of pip output lines."""
+        action = _make_action('ruff')
+        collected: list[SubActionProgress] = []
+
+        lines = [
+            'Collecting ruff',
+            'Downloading https://files.pythonhosted.org/ruff-0.8.0-py3-none-any.whl (2.1 MB)',
+            '   0.5 MB 25%',
+            '   1.0 MB 50%',
+            '   1.5 MB 75%',
+            '   2.1 MB 100%',
+            'Installing collected packages: ruff',
+            'Successfully installed ruff-0.8.0',
+        ]
+
+        for line in lines:
+            PipEnvironment._parse_progress_line(line, action, collected.append)
+
+        phases = [u.phase for u in collected]
+        assert 'downloading' in phases
+        assert 'installing' in phases
+
+        # Check download progress increases
+        download_updates = [u for u in collected if u.phase == 'downloading']
+        assert len(download_updates) >= 2
+        progresses = [u.progress for u in download_updates if u.progress is not None]
+        assert progresses == sorted(progresses)  # monotonically increasing
+
+
+class TestExecuteStream:
+    """Tests for execute_stream async generator."""
+
+    @staticmethod
+    def test_stream_yields_events() -> None:
+        """execute_stream yields ProgressEvent items via the queue-based bridge."""
+        from porringer.backend.command.update import UpdateCommands
+        from porringer.schema import (
+            BatchSetupResults,
+            SetupParameters,
+            SetupResults,
+        )
+
+        action = _make_action('test-pkg')
+        setup_results = SetupResults(
+            actions=[action],
+            results=[],
+        )
+        setup_results.manifest_path = None  # Will be set below
+
+        from pathlib import Path
+
+        preview = SetupResults(actions=[action], results=[])
+        preview.manifest_path = Path('.')
+        previews = BatchSetupResults(manifest_results=[preview], failed_paths=[])
+        params = SetupParameters(dry_run=True)
+
+        commands = UpdateCommands()
+
+        async def run() -> list[ProgressEvent]:
+            collected: list[ProgressEvent] = []
+            async for event in commands.execute_stream(previews, params):
+                collected.append(event)
+            return collected
+
+        events = asyncio.run(run())
+
+        # Dry-run install actions should produce start+complete event pairs
+        started = [e for e in events if e.kind == ProgressEventKind.ACTION_STARTED]
+        completed = [e for e in events if e.kind == ProgressEventKind.ACTION_COMPLETED]
+        assert len(started) == len(completed)
+
+    @staticmethod
+    def test_stream_cancellation() -> None:
+        """Breaking from the stream cancels the background task."""
+        from pathlib import Path
+
+        from porringer.backend.command.update import UpdateCommands
+        from porringer.schema import (
+            BatchSetupResults,
+            SetupParameters,
+            SetupResults,
+        )
+
+        actions = [_make_action(f'pkg-{i}') for i in range(5)]
+        preview = SetupResults(actions=actions, results=[])
+        preview.manifest_path = Path('.')
+        previews = BatchSetupResults(manifest_results=[preview], failed_paths=[])
+        params = SetupParameters(dry_run=True)
+
+        commands = UpdateCommands()
+
+        async def run() -> list[ProgressEvent]:
+            collected: list[ProgressEvent] = []
+            async for event in commands.execute_stream(previews, params):
+                collected.append(event)
+                if len(collected) >= 2:
+                    break  # early exit
+            return collected
+
+        events = asyncio.run(run())
+        assert len(events) >= 2
