@@ -8,7 +8,7 @@ import logging
 import shlex
 import subprocess
 import tomllib
-from dataclasses import dataclass
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -21,33 +21,25 @@ from porringer.core.plugin_schema.environment import Environment, InstallParamet
 from porringer.core.schema import Package, PackageName
 from porringer.schema import (
     BatchSetupResults,
-    CancellationToken,
     DownloadParameters,
     DownloadResult,
-    InstallProgressCallback,
     ManifestMetadata,
     ProgressCallback,
+    ProgressEvent,
+    ProgressEventKind,
     SetupAction,
     SetupActionResult,
     SetupActionType,
     SetupManifest,
     SetupParameters,
     SetupResults,
+    SubActionProgress,
 )
 from porringer.utility.download import download_file
 from porringer.utility.exception import ManifestError, PluginError
 from porringer.utility.utility import canonicalize_type
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class _InstallContext:
-    """Context for install operations."""
-
-    parameters: SetupParameters
-    progress_callback: InstallProgressCallback | None
-    cancellation_token: CancellationToken | None = None
 
 
 class UpdateCommands:
@@ -342,45 +334,6 @@ class UpdateCommands:
 
         return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
 
-    def execute_single(self, actions: list[SetupAction], path: Path, parameters: SetupParameters) -> SetupResults:
-        """Executes setup actions for a single path.
-
-        Args:
-            actions: The list of actions to execute (from preview).
-            path: The path this execution is for (used for working directory).
-            parameters: The setup parameters.
-
-        Returns:
-            SetupResults containing the results of each action.
-        """
-        logger.info(f'Executing {len(actions)} setup actions (dry_run={parameters.dry_run})')
-
-        # Get fresh plugin state
-        environments = self._get_available_environments()
-        available_plugins = set(environments.keys())
-
-        results: list[SetupActionResult] = []
-        working_dir = path if path.is_dir() else path.parent
-
-        for action in actions:
-            # Populate CLI command for display
-            action.cli_command = UpdateCommands._get_cli_command(action, environments)
-
-            if parameters.dry_run:
-                # In dry-run mode, check actual system state but don't execute
-                result = self._dry_run_action(action, available_plugins, environments)
-            else:
-                result = self._execute_action(action, environments, available_plugins, working_dir, parameters.timeout)
-            results.append(result)
-
-            # Fail fast on error (but not on skipped)
-            if not result.success and not result.skipped:
-                logger.error(f'Action failed: {action.description} - {result.message}')
-                if not parameters.dry_run:
-                    break
-
-        return SetupResults(actions=actions, results=results)
-
     def _dry_run_action(
         self, action: SetupAction, available_plugins: set[str], environments: dict[str, Environment]
     ) -> SetupActionResult:
@@ -399,7 +352,6 @@ class UpdateCommands:
         """
         match action.action_type:
             case SetupActionType.CHECK_PLUGIN:
-                # Still check plugins - they might not be available
                 if action.plugin is None:
                     return SetupActionResult(action=action, success=False, message='No plugin specified')
                 if action.plugin in available_plugins:
@@ -409,7 +361,6 @@ class UpdateCommands:
                         action=action, success=False, message=f"Required plugin '{action.plugin}' is not available"
                     )
             case SetupActionType.INSTALL_PACKAGE:
-                # Check if package is already installed (state-aware dry-run)
                 if action.plugin and action.package and action.plugin in environments:
                     try:
                         installed_packages = environments[action.plugin].packages()
@@ -428,76 +379,13 @@ class UpdateCommands:
                         logger.debug(f'Dry-run: plugin error checking packages for {action.plugin}: {e}')
                     except Exception as e:
                         logger.debug(f'Dry-run: could not check installed packages for {action.plugin}: {e}')
-                # Simulate success when state check is unavailable or package is not installed
                 return SetupActionResult(action=action, success=True)
             case SetupActionType.RUN_COMMAND:
-                # Simulate success
                 return SetupActionResult(action=action, success=True)
             case _:
                 return SetupActionResult(
                     action=action, success=False, message=f'Unknown action type: {action.action_type}'
                 )
-
-    def execute_batch(self, previews: BatchSetupResults, parameters: SetupParameters) -> BatchSetupResults:
-        """Execute setup actions for multiple manifests.
-
-        Args:
-            previews: The batch preview results containing actions per manifest.
-            parameters: The setup parameters.
-
-        Returns:
-            BatchSetupResults containing execution results for each manifest.
-        """
-        logger.info(f'Executing setup for {len(previews.manifest_results)} manifest(s)')
-
-        manifest_results: list[SetupResults] = []
-        failed_paths: list[tuple[Path, str]] = list(previews.failed_paths)
-
-        for preview in previews.manifest_results:
-            if preview.manifest_path is None:
-                continue
-
-            result = self.execute_single(preview.actions, preview.manifest_path, parameters)
-            result.manifest_path = preview.manifest_path
-            manifest_results.append(result)
-
-            # Check for failures
-            has_failure = any(not r.success for r in result.results)
-            if has_failure and parameters.fail_fast:
-                break
-
-        return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
-
-    def _execute_action(
-        self,
-        action: SetupAction,
-        environments: dict[str, Environment],
-        available_plugins: set[str],
-        working_dir: Path,
-        timeout: int,
-    ) -> SetupActionResult:
-        """Executes a single setup action.
-
-        Args:
-            action: The action to execute.
-            environments: Dict of instantiated environment plugins.
-            available_plugins: Set of available plugin names.
-            working_dir: Working directory for commands.
-            timeout: Timeout in seconds for commands.
-
-        Returns:
-            The result of executing the action.
-        """
-        match action.action_type:
-            case SetupActionType.CHECK_PLUGIN:
-                return self._execute_check_plugin(action, available_plugins)
-            case SetupActionType.INSTALL_PACKAGE:
-                return self._execute_install_package(action, environments)
-            case SetupActionType.RUN_COMMAND:
-                return self._execute_run_command(action, working_dir, timeout)
-            case _:
-                msg = f'Unknown action type: {action.action_type}'
-                return SetupActionResult(action=action, success=False, message=msg)
 
     def _execute_check_plugin(self, action: SetupAction, available_plugins: set[str]) -> SetupActionResult:
         """Executes a plugin availability check.
@@ -558,76 +446,6 @@ class UpdateCommands:
                         pass
         return False, None
 
-    def _execute_install_package(self, action: SetupAction, environments: dict[str, Environment]) -> SetupActionResult:
-        """Executes a package installation.
-
-        Args:
-            action: The install action.
-            environments: Dict of instantiated environment plugins.
-
-        Returns:
-            The result of the installation.
-        """
-        if action.plugin is None or action.package is None:
-            return SetupActionResult(action=action, success=False, message='Plugin or package not specified')
-
-        if action.plugin not in environments:
-            return SetupActionResult(action=action, success=False, message=f"Plugin '{action.plugin}' is not available")
-
-        environment = environments[action.plugin]
-
-        # Check if package is already installed
-        try:
-            installed_packages = environment.packages()
-            is_installed, skip_reason = UpdateCommands._is_package_installed(action.package, installed_packages)
-            if is_installed:
-                logger.info(f"Skipping '{action.package}': {skip_reason}")
-                return SetupActionResult(
-                    action=action,
-                    success=True,
-                    skipped=True,
-                    skip_reason=skip_reason,
-                )
-        except PluginError as e:
-            logger.debug(f'Plugin error checking packages for {action.plugin}: {e}')
-        except Exception as e:
-            logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
-
-        logger.info(f"Installing '{action.package}' via {action.plugin}")
-        return self._attempt_package_installation(action, environment)
-
-    def _attempt_package_installation(self, action: SetupAction, environment: Environment) -> SetupActionResult:
-        """Attempt to install a package via the given environment plugin.
-
-        Args:
-            action: The install action.
-            environment: The environment plugin to use for installation.
-
-        Returns:
-            The result of the installation attempt.
-        """
-        success = False
-        message = ''
-
-        try:
-            params = InstallParameters(name=action.package, dry=False)
-            result = environment.install(params)
-            if result is not None:
-                success = True
-                message = f'Installed {result.name}'
-            else:
-                message = f"Failed to install '{action.package}'"
-        except PluginError as e:
-            logger.error(f'Plugin error installing {action.package}: {e}')
-            message = str(e)
-        except subprocess.SubprocessError as e:
-            logger.error(f'Subprocess error installing {action.package}: {e}')
-            message = str(e)
-        except Exception as e:
-            message = str(e)
-
-        return SetupActionResult(action=action, success=success, message=message)
-
     def _execute_run_command(self, action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
         """Executes a post-install command.
 
@@ -671,18 +489,18 @@ class UpdateCommands:
         except Exception as e:
             return SetupActionResult(action=action, success=False, message=str(e))
 
-    # --- Async Execution Methods ---
-
-    async def _async_execute_install_package(
+    async def _execute_install_package(
         self,
         action: SetupAction,
         environments: dict[str, Environment],
+        event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
     ) -> SetupActionResult:
-        """Asynchronously executes a package installation.
+        """Execute a package installation.
 
         Args:
             action: The install action.
             environments: Dict of instantiated environment plugins.
+            event_queue: Optional queue to emit sub-action events into.
 
         Returns:
             The result of the installation.
@@ -715,16 +533,20 @@ class UpdateCommands:
             logger.debug(f'Could not check installed packages for {action.plugin}: {e}')
 
         logger.info(f"Installing '{action.package}' via {action.plugin}")
-        return await self._attempt_async_package_installation(action, environment)
+        return await self._attempt_installation(action, environment, event_queue)
 
-    async def _attempt_async_package_installation(
-        self, action: SetupAction, environment: Environment
+    async def _attempt_installation(
+        self,
+        action: SetupAction,
+        environment: Environment,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
     ) -> SetupActionResult:
-        """Attempt to asynchronously install a package via the given environment plugin.
+        """Attempt to install a package via the given environment plugin.
 
         Args:
             action: The install action.
             environment: The environment plugin to use for installation.
+            event_queue: Optional queue to emit sub-action events into.
 
         Returns:
             The result of the installation attempt.
@@ -732,8 +554,21 @@ class UpdateCommands:
         success = False
         message = ''
 
+        # Build a progress_callback that emits SubActionProgress into the event queue
+        sub_action_cb = None
+        if event_queue is not None:
+
+            def sub_action_cb(update: SubActionProgress) -> None:
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=action, sub_action=update)
+                )
+
         try:
-            params = InstallParameters(name=action.package, dry=False)
+            params = InstallParameters(
+                name=action.package,
+                dry=False,
+                progress_callback=sub_action_cb,
+            )
             result = await environment.async_install(params)
 
             if result is not None:
@@ -755,13 +590,13 @@ class UpdateCommands:
 
         return SetupActionResult(action=action, success=success, message=message)
 
-    async def _execute_check_actions_async(
+    async def _execute_check_actions(
         self,
         check_actions: list[SetupAction],
         available_plugins: set[str],
         environments: dict[str, Environment],
         parameters: SetupParameters,
-        progress_callback: InstallProgressCallback | None,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
     ) -> tuple[list[SetupActionResult], bool]:
         """Execute CHECK_PLUGIN actions sequentially.
 
@@ -775,30 +610,32 @@ class UpdateCommands:
             else:
                 result = self._execute_check_plugin(action, available_plugins)
             results.append(result)
-            if progress_callback:
-                progress_callback(action, result)
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                )
             if not result.success and not result.skipped:
                 logger.error(f'Action failed: {action.description} - {result.message}')
                 if parameters.fail_fast:
                     return results, False
         return results, True
 
-    async def _execute_install_actions_async(
+    async def _execute_install_actions(
         self,
         install_actions: list[SetupAction],
         environments: dict[str, Environment],
         available_plugins: set[str],
-        context: _InstallContext,
+        parameters: SetupParameters,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
     ) -> tuple[list[SetupActionResult], bool]:
         """Execute INSTALL_PACKAGE actions with parallel support.
 
         Returns:
             Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
         """
-        if context.parameters.dry_run:
-            return self._dry_run_install_actions(
-                install_actions, available_plugins, environments, context.progress_callback
-            ), True
+        if parameters.dry_run:
+            return self._dry_run_install_actions(install_actions, available_plugins, environments, event_queue), True
 
         parallel_actions, sequential_actions = self._group_actions_by_parallelism(install_actions, environments)
 
@@ -807,7 +644,7 @@ class UpdateCommands:
         # Execute parallel actions concurrently
         if parallel_actions:
             parallel_results, should_continue = await self._run_parallel_installs(
-                parallel_actions, environments, context
+                parallel_actions, environments, parameters, event_queue
             )
             results.extend(parallel_results)
             if not should_continue:
@@ -815,7 +652,7 @@ class UpdateCommands:
 
         # Execute sequential actions one at a time
         sequential_results, should_continue = await self._run_sequential_installs(
-            sequential_actions, environments, context
+            sequential_actions, environments, parameters, event_queue
         )
         results.extend(sequential_results)
 
@@ -826,15 +663,18 @@ class UpdateCommands:
         install_actions: list[SetupAction],
         available_plugins: set[str],
         environments: dict[str, Environment],
-        progress_callback: InstallProgressCallback | None,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
     ) -> list[SetupActionResult]:
         """Execute dry-run for install actions."""
         results: list[SetupActionResult] = []
         for action in install_actions:
             result = self._dry_run_action(action, available_plugins, environments)
             results.append(result)
-            if progress_callback:
-                progress_callback(action, result)
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                )
         return results
 
     @staticmethod
@@ -858,22 +698,21 @@ class UpdateCommands:
         self,
         sequential_actions: list[SetupAction],
         environments: dict[str, Environment],
-        context: _InstallContext,
+        parameters: SetupParameters,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
     ) -> tuple[list[SetupActionResult], bool]:
-        """Run install actions sequentially with cancellation support."""
+        """Run install actions sequentially."""
         results: list[SetupActionResult] = []
         for action in sequential_actions:
-            # Check for cancellation before each install
-            if context.cancellation_token is not None:
-                context.cancellation_token.raise_if_cancelled()
-
-            if context.progress_callback:
-                context.progress_callback(action, None)
-            result = await self._async_execute_install_package(action, environments)
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            result = await self._execute_install_package(action, environments, event_queue)
             results.append(result)
-            if context.progress_callback:
-                context.progress_callback(action, result)
-            if not result.success and not result.skipped and context.parameters.fail_fast:
+            if event_queue is not None:
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                )
+            if not result.success and not result.skipped and parameters.fail_fast:
                 logger.error(f'Action failed: {action.description} - {result.message}')
                 return results, False
         return results, True
@@ -882,7 +721,8 @@ class UpdateCommands:
         self,
         parallel_actions: list[SetupAction],
         environments: dict[str, Environment],
-        context: _InstallContext,
+        parameters: SetupParameters,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
     ) -> tuple[list[SetupActionResult], bool]:
         """Run install actions in parallel using TaskGroup.
 
@@ -892,31 +732,29 @@ class UpdateCommands:
         Returns:
             Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
         """
-        # Check for cancellation before starting parallel installs
-        if context.cancellation_token is not None:
-            context.cancellation_token.raise_if_cancelled()
-
         results: dict[int, SetupActionResult] = {}
         action_indices = {id(action): i for i, action in enumerate(parallel_actions)}
 
-        async def install_with_callback(action: SetupAction) -> None:
-            if context.progress_callback:
-                context.progress_callback(action, None)
+        async def install_with_event(action: SetupAction) -> None:
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
             try:
-                result = await self._async_execute_install_package(action, environments)
+                result = await self._execute_install_package(action, environments, event_queue)
             except Exception as e:
                 result = SetupActionResult(action=action, success=False, message=str(e))
-            if context.progress_callback:
-                context.progress_callback(action, result)
+            if event_queue is not None:
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                )
             results[action_indices[id(action)]] = result
 
         try:
             async with asyncio.TaskGroup() as tg:
                 for action in parallel_actions:
-                    tg.create_task(install_with_callback(action))
+                    tg.create_task(install_with_event(action))
         except ExceptionGroup as eg:
             # TaskGroup raises ExceptionGroup if any task fails with unhandled exception
-            # Our install_with_callback catches exceptions, so this shouldn't happen normally
+            # Our install_with_event catches exceptions, so this shouldn't happen normally
             logger.error(f'Parallel install failed with exceptions: {eg.exceptions}')
 
         # Convert dict to ordered list
@@ -931,20 +769,20 @@ class UpdateCommands:
             else:
                 action_result = maybe_result
             final_results.append(action_result)
-            if not action_result.success and not action_result.skipped and context.parameters.fail_fast:
+            if not action_result.success and not action_result.skipped and parameters.fail_fast:
                 logger.error(f'Action failed: {action.description} - {action_result.message}')
                 return final_results, False
 
         return final_results, True
 
-    async def _execute_command_actions_async(
+    async def _execute_command_actions(
         self,
         command_actions: list[SetupAction],
         available_plugins: set[str],
         environments: dict[str, Environment],
         working_dir: Path,
         parameters: SetupParameters,
-        progress_callback: InstallProgressCallback | None,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
     ) -> list[SetupActionResult]:
         """Execute RUN_COMMAND actions sequentially."""
         results: list[SetupActionResult] = []
@@ -954,23 +792,25 @@ class UpdateCommands:
             else:
                 result = self._execute_run_command(action, working_dir, parameters.timeout)
             results.append(result)
-            if progress_callback:
-                progress_callback(action, result)
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                )
             if not result.success and not result.skipped:
                 logger.error(f'Action failed: {action.description} - {result.message}')
                 if parameters.fail_fast:
                     break
         return results
 
-    async def execute_single_async(
+    async def _execute_single(
         self,
         actions: list[SetupAction],
         path: Path,
         parameters: SetupParameters,
-        progress_callback: InstallProgressCallback | None = None,
-        cancellation_token: CancellationToken | None = None,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
     ) -> SetupResults:
-        """Asynchronously executes setup actions for a single path with parallel support.
+        """Execute setup actions for a single path with parallel support.
 
         Package installations are executed in parallel when plugins support it.
         CHECK_PLUGIN and RUN_COMMAND actions are executed sequentially.
@@ -981,19 +821,11 @@ class UpdateCommands:
             actions: The list of actions to execute (from preview).
             path: The path this execution is for (used for working directory).
             parameters: The setup parameters.
-            progress_callback: Optional callback for progress updates.
-            cancellation_token: Optional token for cooperative cancellation.
+            event_queue: Optional queue to emit ``ProgressEvent`` items into.
 
         Returns:
             SetupResults containing the results of each action.
-
-        Raises:
-            asyncio.CancelledError: If cancellation_token is cancelled.
         """
-        # Check for cancellation before starting
-        if cancellation_token is not None:
-            cancellation_token.raise_if_cancelled()
-
         logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
         environments = self._get_available_environments()
@@ -1012,8 +844,8 @@ class UpdateCommands:
         results: list[SetupActionResult] = []
 
         # Execute CHECK_PLUGIN actions
-        check_results, should_continue = await self._execute_check_actions_async(
-            check_actions, available_plugins, environments, parameters, progress_callback
+        check_results, should_continue = await self._execute_check_actions(
+            check_actions, available_plugins, environments, parameters, event_queue
         )
         results.extend(check_results)
         if not should_continue:
@@ -1021,78 +853,73 @@ class UpdateCommands:
 
         # Execute INSTALL_PACKAGE actions
         if install_actions:
-            context = _InstallContext(
-                parameters=parameters,
-                progress_callback=progress_callback,
-                cancellation_token=cancellation_token,
-            )
-            install_results, should_continue = await self._execute_install_actions_async(
+            install_results, should_continue = await self._execute_install_actions(
                 install_actions,
                 environments,
                 available_plugins,
-                context,
+                parameters,
+                event_queue,
             )
             results.extend(install_results)
             if not should_continue:
                 return SetupResults(actions=actions, results=results)
 
         # Execute RUN_COMMAND actions
-        command_results = await self._execute_command_actions_async(
-            command_actions, available_plugins, environments, working_dir, parameters, progress_callback
+        command_results = await self._execute_command_actions(
+            command_actions, available_plugins, environments, working_dir, parameters, event_queue
         )
         results.extend(command_results)
 
         return SetupResults(actions=actions, results=results)
 
-    async def execute_batch_async(
+    async def execute_stream(
         self,
         previews: BatchSetupResults,
         parameters: SetupParameters,
-        progress_callback: InstallProgressCallback | None = None,
-        cancellation_token: CancellationToken | None = None,
-    ) -> BatchSetupResults:
-        """Asynchronously execute setup actions for multiple manifests.
+    ) -> AsyncIterator[ProgressEvent]:
+        """Stream progress events while executing setup actions for multiple manifests.
 
-        Uses structured concurrency patterns for clean cancellation.
+        Yields ``ProgressEvent`` items as actions start, complete, and report
+        sub-action detail.  Cancellation is handled via standard
+        ``task.cancel()`` on the consuming task.
 
         Args:
             previews: The batch preview results containing actions per manifest.
             parameters: The setup parameters.
-            progress_callback: Optional callback for progress updates.
-            cancellation_token: Optional token for cooperative cancellation.
 
-        Returns:
-            BatchSetupResults containing execution results for each manifest.
-
-        Raises:
-            asyncio.CancelledError: If cancellation_token is cancelled.
+        Yields:
+            ProgressEvent for each action lifecycle transition and sub-action update.
         """
-        logger.info(f'Executing setup async for {len(previews.manifest_results)} manifest(s)')
+        queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
 
-        manifest_results: list[SetupResults] = []
-        failed_paths: list[tuple[Path, str]] = list(previews.failed_paths)
+        async def _run() -> None:
+            """Execute all manifests, emitting events into *queue*."""
+            try:
+                for preview in previews.manifest_results:
+                    if preview.manifest_path is None:
+                        continue
 
-        for preview in previews.manifest_results:
-            # Check for cancellation before each manifest
-            if cancellation_token is not None:
-                cancellation_token.raise_if_cancelled()
+                    await self._execute_single(
+                        preview.actions,
+                        preview.manifest_path,
+                        parameters,
+                        event_queue=queue,
+                    )
+            finally:
+                # Sentinel signals the generator to stop
+                queue.put_nowait(None)
 
-            if preview.manifest_path is None:
-                continue
-
-            result = await self.execute_single_async(
-                preview.actions,
-                preview.manifest_path,
-                parameters,
-                progress_callback,
-                cancellation_token,
-            )
-            result.manifest_path = preview.manifest_path
-            manifest_results.append(result)
-
-            # Check for failures
-            has_failure = any(not r.success for r in result.results)
-            if has_failure and parameters.fail_fast:
-                break
-
-        return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
+        task = asyncio.ensure_future(_run())
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield event
+        finally:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass

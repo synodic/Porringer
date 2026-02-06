@@ -2,12 +2,11 @@
 
 import asyncio
 import sys
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from importlib.metadata import Distribution
 from pathlib import Path
-from queue import Empty, Queue
 
 from packaging.version import Version
 from platformdirs import user_cache_dir
@@ -100,78 +99,52 @@ class SetupActionResult:
     skip_reason: str | None = None
 
 
-# Type alias for install progress callback: (action, result) -> None
-# Note: Callbacks are invoked from the asyncio event loop thread.
-# GUI applications must marshal updates to their UI thread.
-InstallProgressCallback = Callable[[SetupAction, SetupActionResult | None], None]
+@dataclass
+class SubActionProgress:
+    """Fine-grained progress update from within a plugin operation.
 
-# Async-aware progress callback that can be awaited
-AsyncInstallProgressCallback = Callable[[SetupAction, SetupActionResult | None], Awaitable[None]]
+    Plugins emit these to report phases and percentages during long-running
+    operations (e.g., downloading a wheel, verifying checksums).
+
+    Args:
+        action: The parent setup action this progress belongs to.
+        phase: Current phase (e.g. ``"downloading"``, ``"installing"``, ``"verifying"``).
+        progress: 0.0–1.0 completion fraction, or ``None`` if indeterminate.
+        message: Human-readable status line (e.g. ``"Downloading ruff-0.8.0.whl (2.1 MB)"``).
+    """
+
+    action: SetupAction
+    phase: str
+    progress: float | None = None
+    message: str | None = None
+
+
+class ProgressEventKind(Enum):
+    """The kind of progress event emitted during setup execution."""
+
+    ACTION_STARTED = auto()
+    ACTION_COMPLETED = auto()
+    SUB_ACTION_PROGRESS = auto()
 
 
 @dataclass
-class ThreadSafeProgressAdapter:
-    """Adapter that queues progress updates for thread-safe GUI consumption.
+class ProgressEvent:
+    """A single progress event from the setup execution stream.
 
-    Use this when integrating with GUI frameworks that require UI updates
-    on a specific thread (Qt, Tkinter, GTK, etc.).
+    Consumers iterate over ``AsyncIterator[ProgressEvent]`` to observe
+    action lifecycle and sub-action detail updates.
 
-    The adapter collects updates in a thread-safe queue. The GUI's main
-    thread can poll or be notified to process updates.
-
-    Example (Qt):
-        adapter = ThreadSafeProgressAdapter()
-
-        # In async context:
-        await commands.execute_batch_async(previews, params, adapter.callback)
-
-        # In Qt main thread (e.g., via QTimer):
-        for action, result in adapter.drain():
-            update_progress_bar(action, result)
+    Args:
+        kind: What this event represents.
+        action: The setup action this event relates to.
+        result: Action result (set only for ``ACTION_COMPLETED``).
+        sub_action: Sub-action detail (set only for ``SUB_ACTION_PROGRESS``).
     """
 
-    _queue: Queue[tuple[SetupAction, SetupActionResult | None]] = field(default_factory=Queue, init=False)
-    _on_update: Callable[[], None] | None = None
-
-    def __init__(self, on_update: Callable[[], None] | None = None) -> None:
-        """Initialize the adapter.
-
-        Args:
-            on_update: Optional callback to invoke (thread-safely) when an
-                update is queued. Use this to signal the GUI thread to
-                process updates (e.g., QApplication.postEvent).
-        """
-        self._queue = Queue()
-        self._on_update = on_update
-
-    def callback(self, action: SetupAction, result: SetupActionResult | None) -> None:
-        """Progress callback that queues updates thread-safely.
-
-        This method is safe to call from any thread (including asyncio).
-        """
-        self._queue.put((action, result))
-        if self._on_update:
-            self._on_update()
-
-    def drain(self) -> list[tuple[SetupAction, SetupActionResult | None]]:
-        """Drain all queued updates.
-
-        Call this from the GUI thread to get pending updates.
-
-        Returns:
-            List of (action, result) tuples in order received.
-        """
-        updates: list[tuple[SetupAction, SetupActionResult | None]] = []
-        while True:
-            try:
-                updates.append(self._queue.get_nowait())
-            except Empty:
-                break
-        return updates
-
-    def pending(self) -> int:
-        """Return the number of pending updates."""
-        return self._queue.qsize()
+    kind: ProgressEventKind
+    action: SetupAction
+    result: SetupActionResult | None = None
+    sub_action: SubActionProgress | None = None
 
 
 @dataclass
@@ -209,21 +182,6 @@ class CancellationToken:
         """Raise asyncio.CancelledError if cancellation was requested."""
         if self._cancelled:
             raise asyncio.CancelledError('Operation cancelled by token')
-
-
-@dataclass
-class InstallProgress:
-    """Progress information for installation operations.
-
-    Args:
-        total: Total number of actions.
-        completed: Number of completed actions.
-        current_action: The action currently being executed.
-    """
-
-    total: int
-    completed: int
-    current_action: SetupAction | None = None
 
 
 class Prerequisite(BaseModel):

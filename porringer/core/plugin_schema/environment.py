@@ -2,6 +2,7 @@
 
 import asyncio
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import override
 
 from pydantic import BaseModel, Field
@@ -13,6 +14,7 @@ from porringer.core.schema import (
     Plugin,
     SupportedFeatures,
 )
+from porringer.schema import SubActionProgress
 
 
 class ProviderCapability(BaseModel):
@@ -56,6 +58,13 @@ class InstallParameters(BaseModel):
     dry: bool = Field(
         default=False, description='If True, rehearses an installation without modifying what is actually installed'
     )
+    progress_callback: Callable[[SubActionProgress], None] | None = Field(
+        default=None,
+        exclude=True,
+        description='Optional callback for reporting sub-action progress (download %, install phase, etc.)',
+    )
+
+    model_config = {'arbitrary_types_allowed': True}
 
 
 class UninstallParameters(BaseModel):

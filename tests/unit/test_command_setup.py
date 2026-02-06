@@ -11,6 +11,7 @@ from porringer.api import API
 from porringer.console.entry import app
 from porringer.schema import SetupActionType, SetupParameters
 from porringer.utility.exception import ManifestError
+from tests.conftest import execute_via_stream
 
 # Test constants
 EXPECTED_ACTIONS_JSON_MANIFEST = 2  # 1 install + 1 command
@@ -224,7 +225,7 @@ class TestSetupCLI:
             # Test dry-run via API
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             preview = test_api.update.preview_batch(setup_params)
-            results = test_api.update.execute_batch(preview, setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
 
             # Should have 1 action for pip install
             assert len(results.manifest_results) == 1
@@ -257,7 +258,7 @@ class TestDryRunStateAware:
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             preview = test_api.update.preview_batch(setup_params)
-            results = test_api.update.execute_batch(preview, setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -277,7 +278,7 @@ class TestDryRunStateAware:
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             preview = test_api.update.preview_batch(setup_params)
-            results = test_api.update.execute_batch(preview, setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -296,7 +297,7 @@ class TestDryRunStateAware:
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             preview = test_api.update.preview_batch(setup_params)
-            results = test_api.update.execute_batch(preview, setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -316,7 +317,7 @@ class TestDryRunStateAware:
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             preview = test_api.update.preview_batch(setup_params)
-            results = test_api.update.execute_batch(preview, setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
