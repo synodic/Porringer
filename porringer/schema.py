@@ -1,7 +1,6 @@
 """Schema"""
 
 import asyncio
-import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -10,7 +9,9 @@ from pathlib import Path
 
 from packaging.version import Version
 from platformdirs import user_cache_dir
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, model_validator
+
+from porringer.core.schema import PlatformScoped
 
 # --- Directory Cache Schemas ---
 
@@ -247,27 +248,13 @@ class CancellationToken:
             raise asyncio.CancelledError('Operation cancelled by token')
 
 
-class Prerequisite(BaseModel):
+class Prerequisite(PlatformScoped):
     """A prerequisite plugin that must be available."""
 
     plugin: str = Field(description='The plugin name that must be available')
-    platforms: list[str] = Field(
-        default_factory=list,
-        description='List of platforms where this prerequisite applies (e.g., ["win32"]). Empty means all platforms.',
-    )
-
-    def is_applicable(self) -> bool:
-        """Check if this prerequisite applies to the current platform.
-
-        Returns:
-            True if the prerequisite applies to the current platform
-        """
-        if not self.platforms:
-            return True
-        return sys.platform in self.platforms
 
 
-class PackageSpec(BaseModel):
+class PackageSpec(PlatformScoped):
     """A package entry with optional display metadata.
 
     Supports both string shorthand (just a package name) and object form
@@ -276,6 +263,14 @@ class PackageSpec(BaseModel):
 
     name: str = Field(description='The package name')
     description: str | None = Field(default=None, description='Human-readable description of this package')
+
+    @model_validator(mode='before')
+    @classmethod
+    def _coerce_string(cls, data: str | dict) -> dict:  # type: ignore[override]
+        """Allow plain strings as shorthand for ``{"name": "..."}``."""
+        if isinstance(data, str):
+            return {'name': data}
+        return data  # type: ignore[return-value]
 
 
 class SetupManifest(BaseModel):
@@ -293,21 +288,6 @@ class SetupManifest(BaseModel):
         default_factory=dict, description='Packages to install per plugin (plugin name -> package list)'
     )
     post_install: list[str] = Field(default_factory=list, description='Commands to run after package installation')
-
-    @field_validator('packages', mode='before')
-    @classmethod
-    def _normalize_packages(cls, value: dict[str, list[str | dict]]) -> dict[str, list[dict]]:
-        """Normalize package entries: coerce plain strings into PackageSpec dicts."""
-        normalized: dict[str, list[dict]] = {}
-        for plugin, entries in value.items():
-            normalized_entries: list[dict] = []
-            for entry in entries:
-                if isinstance(entry, str):
-                    normalized_entries.append({'name': entry})
-                else:
-                    normalized_entries.append(entry)
-            normalized[plugin] = normalized_entries
-        return normalized
 
 
 class SetupMode(Enum):

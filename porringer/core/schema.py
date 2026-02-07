@@ -14,28 +14,38 @@ class PorringerModel(BaseModel):
     model_config = {'populate_by_name': False, 'arbitrary_types_allowed': True}
 
 
-PackageName = NewType('PackageName', str)
+class PlatformScoped(BaseModel):
+    """Mixin for models that can be scoped to specific platforms.
 
+    When ``platforms`` is empty the entry applies everywhere.
+    Otherwise, the entry is only applicable when ``sys.platform``
+    appears in the list.
+    """
 
-class PluginDependency(PorringerModel):
-    """Defines a dependency on another plugin"""
-
-    plugin: str = Field(description='The name of the required plugin')
-    required: bool = Field(default=True, description='Whether this dependency is required (True) or optional (False)')
     platforms: list[str] = Field(
         default_factory=list,
-        description='List of platforms where this dependency applies (e.g., ["win32"]). Empty means all platforms.',
+        description='List of platforms where this entry applies (e.g., ["win32"]). Empty means all platforms.',
     )
 
     def is_applicable(self) -> bool:
-        """Check if this dependency applies to the current platform.
+        """Check if this entry applies to the current platform.
 
         Returns:
-            True if the dependency applies to the current platform
+            True if the entry applies to the current platform
         """
         if not self.platforms:
             return True
         return sys.platform in self.platforms
+
+
+PackageName = NewType('PackageName', str)
+
+
+class PluginDependency(PorringerModel, PlatformScoped):
+    """Defines a dependency on another plugin"""
+
+    plugin: str = Field(description='The name of the required plugin')
+    required: bool = Field(default=True, description='Whether this dependency is required (True) or optional (False)')
 
 
 class Package(PorringerModel):

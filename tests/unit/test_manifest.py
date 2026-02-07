@@ -12,6 +12,7 @@ from porringer.api import API
 from porringer.console.entry import app
 from porringer.schema import (
     ManifestValidationCode,
+    PackageSpec,
     Prerequisite,
     SetupActionType,
     SetupManifest,
@@ -155,6 +156,47 @@ class TestSetupPreview:
             assert action_types[THIRD_ACTION_INDEX] == SetupActionType.PACKAGE
             assert action_types[FOURTH_ACTION_INDEX] == SetupActionType.RUN_COMMAND
 
+    @staticmethod
+    def test_preview_excludes_filtered_packages(test_api: API) -> None:
+        """Test that packages with non-matching platforms are excluded from actions"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'packages': {
+                    'pip': [
+                        'requests',
+                        {'name': 'pywin32', 'platforms': ['nonexistent_platform']},
+                        {'name': 'uvloop', 'platforms': [sys.platform]},
+                    ]
+                },
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir))
+
+            # Only 'requests' (no filter) and 'uvloop' (matching) should be included
+            assert len(results.actions) == 2
+            package_names = [a.package for a in results.actions]
+            assert 'requests' in package_names
+            assert 'uvloop' in package_names
+            assert 'pywin32' not in package_names
+
+    @staticmethod
+    def test_preview_includes_all_when_no_platform_filters(test_api: API) -> None:
+        """Test that all packages are included when none have platform filters"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'packages': {'pip': ['requests', 'flask', 'pytest']},
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir))
+
+            assert len(results.actions) == 3
+
 
 class TestSetupBatch:
     """Tests for batch setup operations"""
@@ -296,6 +338,57 @@ class TestPackageSpec:
         assert pkgs[1].description == 'Fast linter'
         assert pkgs[2].name == 'pytest'
         assert pkgs[2].description is None
+
+    @staticmethod
+    def test_is_applicable_no_platforms() -> None:
+        """PackageSpec with no platforms should apply to all platforms"""
+        spec = PackageSpec(name='requests')
+        assert spec.is_applicable() is True
+
+    @staticmethod
+    def test_is_applicable_with_empty_platforms() -> None:
+        """PackageSpec with empty platforms list should apply to all platforms"""
+        spec = PackageSpec(name='requests', platforms=[])
+        assert spec.is_applicable() is True
+
+    @staticmethod
+    def test_is_applicable_matching_platform() -> None:
+        """PackageSpec should apply when current platform is in the list"""
+        spec = PackageSpec(name='pywin32', platforms=[sys.platform])
+        assert spec.is_applicable() is True
+
+    @staticmethod
+    def test_is_applicable_non_matching_platform() -> None:
+        """PackageSpec should not apply when current platform is not in the list"""
+        spec = PackageSpec(name='pywin32', platforms=['nonexistent_platform'])
+        assert spec.is_applicable() is False
+
+    @staticmethod
+    def test_is_applicable_multiple_platforms_matching() -> None:
+        """PackageSpec should apply when current platform is one of multiple"""
+        spec = PackageSpec(name='uvloop', platforms=['win32', 'darwin', 'linux', sys.platform])
+        assert spec.is_applicable() is True
+
+    @staticmethod
+    def test_is_applicable_multiple_platforms_not_matching() -> None:
+        """PackageSpec should not apply when current platform is not in multiple"""
+        spec = PackageSpec(name='uvloop', platforms=['nonexistent1', 'nonexistent2'])
+        assert spec.is_applicable() is False
+
+    @staticmethod
+    def test_string_coercion_has_empty_platforms() -> None:
+        """String package entries should have empty platforms (all platforms)"""
+        manifest = SetupManifest(packages={'pip': ['requests']})
+        assert manifest.packages['pip'][0].platforms == []
+        assert manifest.packages['pip'][0].is_applicable() is True
+
+    @staticmethod
+    def test_object_with_platforms_parsed() -> None:
+        """Object package entries with platforms should be parsed correctly"""
+        manifest = SetupManifest(packages={'pip': [{'name': 'pywin32', 'platforms': ['win32']}]})
+        spec = manifest.packages['pip'][0]
+        assert spec.name == 'pywin32'
+        assert spec.platforms == ['win32']
 
 
 class TestManifestMetadata:

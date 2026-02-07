@@ -41,7 +41,22 @@
                 "description": "Python type checker"
             },
             "pytest",
-            "pytest-cov"
+            "pytest-cov",
+            {
+                "name": "pywin32",
+                "description": "Python for Win32 extensions",
+                "platforms": [
+                    "win32"
+                ]
+            },
+            {
+                "name": "uvloop",
+                "description": "Fast event loop for asyncio",
+                "platforms": [
+                    "linux",
+                    "darwin"
+                ]
+            }
         ],
         "pipx": [
             {
