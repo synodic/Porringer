@@ -28,7 +28,8 @@ class PluginCommands:
         """Initialize the PluginCommands class."""
         pass
 
-    def list(self, parameters: ListPluginsParameters) -> list[ListPluginResults]:
+    @staticmethod
+    def list(parameters: ListPluginsParameters) -> list[ListPluginResults]:
         """Lists the plugins.
 
         Args:
@@ -60,7 +61,8 @@ class PluginCommands:
                 packages.add(entry_point.dist.name)
         return packages
 
-    def install(self, parameters: PluginInstallParameters) -> PluginOperationResult:
+    @staticmethod
+    def install(parameters: PluginInstallParameters) -> PluginOperationResult:
         """Install a plugin package.
 
         Installs the specified PyPI package and validates that it provides
@@ -163,7 +165,8 @@ class PluginCommands:
 
         return subprocess.run(args, capture_output=True, text=True, check=False)
 
-    def uninstall(self, parameters: PluginUninstallParameters) -> builtins.list[PluginOperationResult]:
+    @staticmethod
+    def uninstall(parameters: PluginUninstallParameters) -> builtins.list[PluginOperationResult]:
         """Uninstall plugin packages.
 
         Args:
@@ -236,7 +239,8 @@ class PluginCommands:
 
         return results
 
-    def update(self, parameters: PluginUpdateParameters) -> builtins.list[PluginOperationResult]:
+    @staticmethod
+    def update(parameters: PluginUpdateParameters) -> builtins.list[PluginOperationResult]:
         """Update plugin packages.
 
         Args:

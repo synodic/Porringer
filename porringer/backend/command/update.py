@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import shlex
 import subprocess
 import tomllib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -47,6 +49,17 @@ from porringer.utility.utility import canonicalize_type
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _CommandExecutionContext:
+    """Shared context for command action execution."""
+
+    available_plugins: set[str]
+    environments: dict[str, Environment]
+    working_dir: Path
+    parameters: SetupParameters
+    event_queue: asyncio.Queue[ProgressEvent | None] | None
+
+
 class UpdateCommands:
     """Update commands for downloading updates and setting up from manifests."""
 
@@ -58,8 +71,8 @@ class UpdateCommands:
         """
         self._cache_manager = cache_manager
 
+    @staticmethod
     def download(
-        self,
         parameters: DownloadParameters,
         progress_callback: ProgressCallback | None = None,
     ) -> DownloadResult:
@@ -78,7 +91,8 @@ class UpdateCommands:
 
     # --- Validation Methods ---
 
-    def validate_manifest(self, path: Path) -> ManifestValidationResult:
+    @staticmethod
+    def validate_manifest(path: Path) -> ManifestValidationResult:
         """Validate a manifest for errors without executing any operations.
 
         Checks syntax, schema version, required fields, plugin availability,
@@ -98,42 +112,80 @@ class UpdateCommands:
         def _warning(field: str, message: str, code: ManifestValidationCode) -> None:
             diagnostics.append(ManifestDiagnostic(field, message, code, ManifestDiagnosticSeverity.WARNING))
 
-        # --- File resolution & syntax ---
-        if not path.exists():
-            _error('path', f'Path does not exist: {path}', ManifestValidationCode.PATH_NOT_FOUND)
+        manifest = UpdateCommands._load_manifest_for_validation(path, _error)
+        if manifest is None:
             return ManifestValidationResult(diagnostics=diagnostics)
+
+        UpdateCommands._validate_schema_version(manifest, _error)
+
+        available_plugins = UpdateCommands._safe_available_plugins()
+        UpdateCommands._validate_plugins(manifest, available_plugins, _error)
+        UpdateCommands._validate_package_names(manifest, _warning)
+        UpdateCommands._validate_duplicate_packages(manifest, _warning)
+
+        return ManifestValidationResult(diagnostics=diagnostics)
+
+    @staticmethod
+    def _load_manifest_for_validation(
+        path: Path,
+        error_callback: Callable[[str, str, ManifestValidationCode], None],
+    ) -> SetupManifest | None:
+        """Load a manifest for validation or record diagnostics."""
+        if not path.exists():
+            error_callback('path', f'Path does not exist: {path}', ManifestValidationCode.PATH_NOT_FOUND)
+            return None
 
         try:
             _, manifest = UpdateCommands._find_manifest(path)
         except ManifestError as exc:
             msg = str(exc)
-            if 'No manifest found' in msg or 'No [tool.porringer]' in msg:
-                code = ManifestValidationCode.NO_MANIFEST
-            elif 'Invalid JSON' in msg or 'Invalid TOML' in msg:
-                code = ManifestValidationCode.SYNTAX_ERROR
-            else:
-                code = ManifestValidationCode.SCHEMA_INVALID
-            _error('', msg, code)
-            return ManifestValidationResult(diagnostics=diagnostics)
+            code = UpdateCommands._map_manifest_error_code(msg)
+            error_callback('', msg, code)
+            return None
 
-        # --- Schema version ---
+        return manifest
+
+    @staticmethod
+    def _map_manifest_error_code(message: str) -> ManifestValidationCode:
+        """Map manifest loading errors to validation codes."""
+        if 'No manifest found' in message or 'No [tool.porringer]' in message:
+            return ManifestValidationCode.NO_MANIFEST
+        if 'Invalid JSON' in message or 'Invalid TOML' in message:
+            return ManifestValidationCode.SYNTAX_ERROR
+        return ManifestValidationCode.SCHEMA_INVALID
+
+    @staticmethod
+    def _safe_available_plugins() -> set[str]:
+        """Load available plugins, returning an empty set on failure."""
+        try:
+            return set(UpdateCommands._get_available_environments().keys())
+        except Exception:
+            return set()
+
+    @staticmethod
+    def _validate_schema_version(
+        manifest: SetupManifest,
+        error_callback: Callable[[str, str, ManifestValidationCode], None],
+    ) -> None:
+        """Validate manifest schema version."""
         supported_versions = {'1'}
         if manifest.version not in supported_versions:
-            _error(
+            error_callback(
                 'version',
                 f"Unsupported schema version '{manifest.version}'. Supported: {', '.join(sorted(supported_versions))}",
                 ManifestValidationCode.UNSUPPORTED_VERSION,
             )
 
-        # --- Plugin availability ---
-        try:
-            available_plugins = set(self._get_available_environments().keys())
-        except Exception:
-            available_plugins = set()
-
+    @staticmethod
+    def _validate_plugins(
+        manifest: SetupManifest,
+        available_plugins: set[str],
+        error_callback: Callable[[str, str, ManifestValidationCode], None],
+    ) -> None:
+        """Validate plugin names in prerequisites and packages."""
         for i, prereq in enumerate(manifest.prerequisites):
             if prereq.plugin not in available_plugins:
-                _error(
+                error_callback(
                     f'prerequisites[{i}].plugin',
                     f"Plugin '{prereq.plugin}' is not installed or recognized",
                     ManifestValidationCode.UNKNOWN_PLUGIN,
@@ -141,28 +193,35 @@ class UpdateCommands:
 
         for plugin_name in manifest.packages:
             if plugin_name not in available_plugins:
-                _error(
+                error_callback(
                     f'packages.{plugin_name}',
                     f"Plugin '{plugin_name}' is not installed or recognized",
                     ManifestValidationCode.UNKNOWN_PLUGIN,
                 )
 
-        # --- Package name validity ---
-        # Note: PackageRef validates during construction, so invalid package
-        # specifiers are caught at schema-load time above. This loop catches
-        # edge cases that pass PackageRef validation but fail Requirement parsing.
+    @staticmethod
+    def _validate_package_names(
+        manifest: SetupManifest,
+        warning_callback: Callable[[str, str, ManifestValidationCode], None],
+    ) -> None:
+        """Validate package specifiers in a manifest."""
         for plugin_name, packages in manifest.packages.items():
             for j, spec in enumerate(packages):
                 try:
                     Requirement(str(spec.name))
                 except InvalidRequirement as exc:
-                    _warning(
+                    warning_callback(
                         f'packages.{plugin_name}[{j}].name',
                         f"Invalid package specifier '{spec.name}': {exc}",
                         ManifestValidationCode.INVALID_PACKAGE_NAME,
                     )
 
-        # --- Duplicate packages across plugins ---
+    @staticmethod
+    def _validate_duplicate_packages(
+        manifest: SetupManifest,
+        warning_callback: Callable[[str, str, ManifestValidationCode], None],
+    ) -> None:
+        """Warn when packages appear under multiple plugins."""
         seen: dict[str, list[str]] = {}
         for plugin_name, packages in manifest.packages.items():
             for spec in packages:
@@ -171,13 +230,11 @@ class UpdateCommands:
 
         for pkg_name, plugins in seen.items():
             if len(plugins) > 1:
-                _warning(
+                warning_callback(
                     'packages',
                     f"Package '{pkg_name}' is listed under multiple plugins: {', '.join(plugins)}",
                     ManifestValidationCode.DUPLICATE_PACKAGE,
                 )
-
-        return ManifestValidationResult(diagnostics=diagnostics)
 
     @staticmethod
     def manifest_schema() -> dict:
@@ -308,7 +365,8 @@ class UpdateCommands:
         except Exception as e:
             raise ManifestError(f'Failed to load pyproject.toml manifest {path}: {e}') from e
 
-    def _get_available_environments(self) -> dict[str, Environment]:
+    @staticmethod
+    def _get_available_environments() -> dict[str, Environment]:
         """Gets all available environment plugins as a dict.
 
         Returns:
@@ -417,7 +475,8 @@ class UpdateCommands:
 
         return actions
 
-    def preview_single(self, path: Path, mode: SetupMode = SetupMode.INSTALL) -> SetupResults:
+    @staticmethod
+    def preview_single(path: Path, mode: SetupMode = SetupMode.INSTALL) -> SetupResults:
         """Previews the setup actions for a single path without executing them.
 
         Args:
@@ -469,8 +528,8 @@ class UpdateCommands:
 
         return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
 
+    @staticmethod
     def _dry_run_action(
-        self,
         action: SetupAction,
         available_plugins: set[str],
         environments: dict[str, Environment],
@@ -490,52 +549,67 @@ class UpdateCommands:
         Returns:
             The simulated result.
         """
-        match action.action_type:
-            case SetupActionType.CHECK_PLUGIN:
-                if action.plugin is None:
-                    return SetupActionResult(action=action, success=False, message='No plugin specified')
-                if action.plugin in available_plugins:
-                    return SetupActionResult(action=action, success=True, skipped=True)
-                else:
-                    return SetupActionResult(
-                        action=action, success=False, message=f"Required plugin '{action.plugin}' is not available"
-                    )
-            case SetupActionType.PACKAGE:
-                if action.plugin and action.package and action.plugin in environments:
-                    try:
-                        installed_packages = environments[action.plugin].packages()
-                        is_installed, skip_reason = UpdateCommands._is_package_installed(
-                            action.package, installed_packages
-                        )
-                        if mode == SetupMode.INSTALL:
-                            # In install mode, skip already-installed packages
-                            if is_installed:
-                                logger.info(f"Dry-run: skipping '{action.package}': {skip_reason}")
-                                return SetupActionResult(
-                                    action=action,
-                                    success=True,
-                                    skipped=True,
-                                    skip_reason=skip_reason,
-                                )
-                        elif not is_installed:
-                            return SetupActionResult(
-                                action=action,
-                                success=True,
-                                skip_reason='not installed, will install instead',
-                            )
-                    except PluginError as e:
-                        logger.debug(f'Dry-run: plugin error checking packages for {action.plugin}: {e}')
-                    except Exception as e:
-                        logger.debug(f'Dry-run: could not check installed packages for {action.plugin}: {e}')
-                return SetupActionResult(action=action, success=True)
-            case SetupActionType.RUN_COMMAND:
-                return SetupActionResult(action=action, success=True)
-            case _:
-                return SetupActionResult(
-                    action=action, success=False, message=f'Unknown action type: {action.action_type}'
-                )
+        if action.action_type == SetupActionType.CHECK_PLUGIN:
+            return UpdateCommands._dry_run_check_plugin(action, available_plugins)
+        if action.action_type == SetupActionType.PACKAGE:
+            return UpdateCommands._dry_run_package_action(action, environments, mode)
+        if action.action_type == SetupActionType.RUN_COMMAND:
+            return SetupActionResult(action=action, success=True)
+        return SetupActionResult(action=action, success=False, message=f'Unknown action type: {action.action_type}')
 
-    def _execute_check_plugin(self, action: SetupAction, available_plugins: set[str]) -> SetupActionResult:
+    @staticmethod
+    def _dry_run_check_plugin(action: SetupAction, available_plugins: set[str]) -> SetupActionResult:
+        """Simulate a plugin availability check."""
+        if action.plugin is None:
+            return SetupActionResult(action=action, success=False, message='No plugin specified')
+        if action.plugin in available_plugins:
+            return SetupActionResult(action=action, success=True, skipped=True)
+        return SetupActionResult(
+            action=action,
+            success=False,
+            message=f"Required plugin '{action.plugin}' is not available",
+        )
+
+    @staticmethod
+    def _dry_run_package_action(
+        action: SetupAction,
+        environments: dict[str, Environment],
+        mode: SetupMode,
+    ) -> SetupActionResult:
+        """Simulate a package action in dry-run mode."""
+        if action.plugin is None or action.package is None or action.plugin not in environments:
+            return SetupActionResult(action=action, success=True)
+
+        try:
+            installed_packages = environments[action.plugin].packages()
+            is_installed, skip_reason = UpdateCommands._is_package_installed(action.package, installed_packages)
+        except PluginError as e:
+            logger.debug(f'Dry-run: plugin error checking packages for {action.plugin}: {e}')
+            return SetupActionResult(action=action, success=True)
+        except Exception as e:
+            logger.debug(f'Dry-run: could not check installed packages for {action.plugin}: {e}')
+            return SetupActionResult(action=action, success=True)
+
+        if mode == SetupMode.INSTALL:
+            if is_installed:
+                logger.info(f"Dry-run: skipping '{action.package}': {skip_reason}")
+                return SetupActionResult(
+                    action=action,
+                    success=True,
+                    skipped=True,
+                    skip_reason=skip_reason,
+                )
+        elif not is_installed:
+            return SetupActionResult(
+                action=action,
+                success=True,
+                skip_reason='not installed, will install instead',
+            )
+
+        return SetupActionResult(action=action, success=True)
+
+    @staticmethod
+    def _execute_check_plugin(action: SetupAction, available_plugins: set[str]) -> SetupActionResult:
         """Executes a plugin availability check.
 
         Args:
@@ -585,7 +659,8 @@ class UpdateCommands:
                         pass
         return False, None
 
-    def _execute_run_command(self, action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
+    @staticmethod
+    def _execute_run_command(action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
         """Executes a post-install command.
 
         Args:
@@ -689,8 +764,8 @@ class UpdateCommands:
             logger.info(f"Upgrading '{action.package}' via {action.plugin}")
             return await self._attempt_package_operation(action, environment, mode, event_queue)
 
+    @staticmethod
     async def _attempt_package_operation(
-        self,
         action: SetupAction,
         environment: Environment,
         mode: SetupMode,
@@ -950,28 +1025,29 @@ class UpdateCommands:
     async def _execute_command_actions(
         self,
         command_actions: list[SetupAction],
-        available_plugins: set[str],
-        environments: dict[str, Environment],
-        working_dir: Path,
-        parameters: SetupParameters,
-        event_queue: asyncio.Queue[ProgressEvent | None] | None,
+        context: _CommandExecutionContext,
     ) -> list[SetupActionResult]:
         """Execute RUN_COMMAND actions sequentially."""
         results: list[SetupActionResult] = []
         for action in command_actions:
-            if parameters.dry_run:
-                result = self._dry_run_action(action, available_plugins, environments, parameters.mode)
+            if context.parameters.dry_run:
+                result = self._dry_run_action(
+                    action,
+                    context.available_plugins,
+                    context.environments,
+                    context.parameters.mode,
+                )
             else:
-                result = self._execute_run_command(action, working_dir, parameters.timeout)
+                result = self._execute_run_command(action, context.working_dir, context.parameters.timeout)
             results.append(result)
-            if event_queue is not None:
-                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
-                event_queue.put_nowait(
+            if context.event_queue is not None:
+                context.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+                context.event_queue.put_nowait(
                     ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
                 )
             if not result.success and not result.skipped:
                 logger.error(f'Action failed: {action.description} - {result.message}')
-                if parameters.fail_fast:
+                if context.parameters.fail_fast:
                     break
         return results
 
@@ -1037,9 +1113,14 @@ class UpdateCommands:
                 return SetupResults(actions=actions, results=results)
 
         # Execute RUN_COMMAND actions
-        command_results = await self._execute_command_actions(
-            command_actions, available_plugins, environments, working_dir, parameters, event_queue
+        command_context = _CommandExecutionContext(
+            available_plugins=available_plugins,
+            environments=environments,
+            working_dir=working_dir,
+            parameters=parameters,
+            event_queue=event_queue,
         )
+        command_results = await self._execute_command_actions(command_actions, command_context)
         results.extend(command_results)
 
         return SetupResults(actions=actions, results=results)
@@ -1091,7 +1172,5 @@ class UpdateCommands:
         finally:
             if not task.done():
                 task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await task
-                except asyncio.CancelledError:
-                    pass
