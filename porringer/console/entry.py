@@ -10,9 +10,9 @@ from rich.console import Console
 from porringer.console.command.cache import app as cache_app
 from porringer.console.command.check import app as check_app
 from porringer.console.command.download import app as download_app
-from porringer.console.command.install import app as install_app
 from porringer.console.command.plugin import app as plugin_app
 from porringer.console.command.self import app as self_app
+from porringer.console.command.sync import app as sync_app
 from porringer.console.schema import LOG_LEVELS, MAX_VERBOSITY_LEVEL, Configuration
 
 __version__ = version('porringer')
@@ -21,7 +21,7 @@ app = typer.Typer()
 app.add_typer(cache_app, name='cache')
 app.add_typer(check_app, name='check')
 app.add_typer(download_app, name='download')
-app.add_typer(install_app, name='install')
+app.add_typer(sync_app, name='sync')
 app.add_typer(plugin_app, name='plugin')
 app.add_typer(self_app, name='self')
 

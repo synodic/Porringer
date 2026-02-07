@@ -7,7 +7,7 @@ from porringer.test.pytest.tests import EnvironmentIntegrationTests
 
 
 class TestEnvironment(EnvironmentIntegrationTests[PipEnvironment]):
-    """The tests for the vcpkg provider"""
+    """The tests for the pip environment plugin"""
 
     @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')

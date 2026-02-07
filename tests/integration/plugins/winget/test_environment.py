@@ -10,7 +10,7 @@ from porringer.test.pytest.tests import EnvironmentIntegrationTests
 
 
 class TestEnvironment(EnvironmentIntegrationTests[WingetEnvironment]):
-    """The tests for the winget provider"""
+    """The tests for the winget environment plugin"""
 
     @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')

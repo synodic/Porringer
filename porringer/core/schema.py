@@ -1,7 +1,6 @@
 """Schema for Porringer"""
 
 import sys
-from abc import abstractmethod
 from typing import Protocol, TypeVar
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -105,10 +104,6 @@ class Package(PorringerModel):
     version: str | None = None
 
 
-class SupportedFeatures(PorringerModel):
-    """Plugin feature support"""
-
-
 class Distribution(PorringerModel):
     """Data that describes the distribution of the plugin"""
 
@@ -121,10 +116,6 @@ class PluginParameters(PorringerModel):
     distribution: Distribution
 
 
-class Information(PorringerModel):
-    """Plugin information that complements the packaged project metadata"""
-
-
 class Plugin(Protocol):
     """Porringer plugin"""
 
@@ -133,26 +124,6 @@ class Plugin(Protocol):
     def __init__(self, parameters: PluginParameters) -> None:
         """Initializes the plugin"""
         self._distribution = parameters.distribution
-
-    @staticmethod
-    @abstractmethod
-    def features() -> SupportedFeatures:
-        """Broadcasts the shared features of the plugin to Porringer
-
-        Returns:
-            The supported features
-        """
-        raise NotImplementedError
-
-    @staticmethod
-    @abstractmethod
-    def information() -> Information:
-        """Retrieves plugin information that complements the packaged project metadata
-
-        Returns:
-            The plugin's information
-        """
-        raise NotImplementedError
 
     @staticmethod
     def dependencies() -> list[PluginDependency]:

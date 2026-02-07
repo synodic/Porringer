@@ -1,4 +1,4 @@
-"""Test the update command"""
+"""Test the check and download functionality"""
 
 import tempfile
 from pathlib import Path
@@ -72,24 +72,6 @@ class TestCheckResult:
         result = CheckResult(plugin='pip', error='Connection failed')
         assert result.success is False
         assert result.updates_available == 0
-
-
-class TestPackageUpdateInfo:
-    """Tests for PackageUpdateInfo dataclass"""
-
-    @staticmethod
-    def test_package_update_info() -> None:
-        """Test PackageUpdateInfo fields"""
-        info = PackageUpdateInfo(
-            name='requests',
-            current_version=Version('2.28.0'),
-            latest_version=Version('2.31.0'),
-            update_available=True,
-        )
-        assert info.name == 'requests'
-        assert info.current_version == Version('2.28.0')
-        assert info.latest_version == Version('2.31.0')
-        assert info.update_available is True
 
 
 class TestDownloadParameters:

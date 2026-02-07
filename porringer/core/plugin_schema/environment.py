@@ -3,53 +3,16 @@
 import asyncio
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import override
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from porringer.core.schema import (
-    Information,
     Package,
     PackageRef,
     Plugin,
     PorringerModel,
-    SupportedFeatures,
 )
 from porringer.schema import SubActionProgress
-
-
-class ProviderCapability(BaseModel):
-    """Describes what a plugin can provide to other plugins.
-
-    Provider plugins offer runtime environments or capabilities that other plugins
-    depend on. For example, the pim plugin provides Python runtimes that pip/pipx need.
-    """
-
-    capability: str = Field(description='The capability identifier (e.g., "python-runtime")')
-    description: str = Field(default='', description='Human-readable description of the capability')
-
-
-class ProviderRequirement(BaseModel):
-    """Describes a provider requirement for a plugin.
-
-    Plugins can declare that they require a provider capability. When a provider
-    is available, it enables additional functionality. For example, pip requires
-    a Python runtime, which can be provided by the pim plugin.
-
-    NOTE: Currently defaults to using the latest available instance from the provider.
-    Future versions may support configuration for selecting specific instances.
-    """
-
-    capability: str = Field(description='The required capability identifier (e.g., "python-runtime")')
-    required: bool = Field(
-        default=False,
-        description='Whether this provider is required (True) or optional (False). '
-        'Most providers should be optional to allow fallback to system-installed instances.',
-    )
-    provider_plugin: str = Field(
-        default='',
-        description='Preferred plugin that provides this capability. Empty means any provider.',
-    )
 
 
 class PackageParameters(PorringerModel):
@@ -90,57 +53,29 @@ class Environment(Plugin):
     """Plugin definition for package environments"""
 
     @staticmethod
-    @override
-    def features() -> SupportedFeatures:
-        """Broadcasts the shared features of the plugin to Porringer
+    def package_backend() -> str | None:
+        """Declares which package backend (store) this plugin manages.
+
+        Plugins that manage the same backend are interchangeable installers.
+        For example, ``pip`` and ``uv`` both return ``"python"`` because they
+        manage the same Python package store.  The ``BackendResolver`` picks
+        the best available installer for each backend.
+
+        Well-known backends:
+
+        - ``"python"``        — Python packages (pip, uv)
+        - ``"python-tool"``   — CLI tools installed as Python packages (pipx)
+        - ``"system"``        — OS-level packages (apt, brew, winget)
+        - ``"node"``          — Node.js packages (npm)
+        - ``"python-runtime"``— Python runtimes themselves (pim)
+
+        Returns ``None`` for plugins that don't participate in backend
+        resolution (e.g. pure provider plugins).
 
         Returns:
-            The supported features
+            The backend identifier, or ``None``.
         """
-        return SupportedFeatures()
-
-    @staticmethod
-    @override
-    def information() -> Information:
-        """Retrieves plugin information that complements the packaged project metadata
-
-        Returns:
-            The plugin's information
-        """
-        return Information()
-
-    @staticmethod
-    def provides() -> list[ProviderCapability]:
-        """Declares capabilities that this plugin provides to other plugins.
-
-        Provider plugins can offer runtime environments or other capabilities
-        that consumer plugins depend on. Override this method to declare
-        what your plugin provides.
-
-        Example: The pim plugin provides "python-runtime" capability.
-
-        Returns:
-            A list of provider capabilities
-        """
-        return []
-
-    @staticmethod
-    def requires_providers() -> list[ProviderRequirement]:
-        """Declares provider requirements for this plugin.
-
-        Consumer plugins can declare that they need certain capabilities
-        provided by other plugins. Override this method to declare
-        what your plugin requires.
-
-        Example: pip/pipx require "python-runtime" capability (optionally from pim).
-
-        NOTE: Currently defaults to using the latest available instance from the provider.
-        Future versions may support configuration for selecting specific instances.
-
-        Returns:
-            A list of provider requirements
-        """
-        return []
+        return None
 
     @staticmethod
     def install_command(package: PackageRef) -> list[str]:

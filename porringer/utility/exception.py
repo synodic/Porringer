@@ -60,14 +60,6 @@ class CommandTimeoutError(SetupError):
     """
 
 
-class PrerequisiteError(SetupError):
-    """Raised when a prerequisite plugin is not available.
-
-    This exception indicates that a required package manager or plugin
-    is missing or not installed on the system.
-    """
-
-
 class PluginDependencyError(PluginError):
     """Raised when a required plugin dependency is not available"""
 

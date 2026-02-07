@@ -1,4 +1,4 @@
-"""Porringer CLI install command module"""
+"""Porringer CLI sync command module."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -17,11 +17,10 @@ from porringer.schema import (
     ProgressEventKind,
     SetupAction,
     SetupActionResult,
-    SetupActionType,
-    SetupMode,
     SetupParameters,
     SetupResults,
     SubActionProgress,
+    SyncStrategy,
 )
 from porringer.utility.exception import ManifestError
 
@@ -38,7 +37,7 @@ ARROW = '→'
 
 @dataclass
 class ManifestOptions:
-    """Options for manifest install operations.
+    """Options for manifest sync operations.
 
     Attributes:
         path: Path to manifest file or directory.
@@ -46,7 +45,7 @@ class ManifestOptions:
         dry_run: Preview without executing.
         timeout: Timeout in seconds for commands.
         fail_fast: Stop on first error.
-        mode: Execution mode (install, upgrade, or ensure).
+        strategy: Sync strategy (minimal, latest, or exact).
     """
 
     path: Path | None = None
@@ -54,7 +53,7 @@ class ManifestOptions:
     dry_run: bool = False
     timeout: int = DEFAULT_TIMEOUT
     fail_fast: bool = True
-    mode: SetupMode = SetupMode.INSTALL
+    strategy: SyncStrategy = SyncStrategy.MINIMAL
 
 
 @dataclass
@@ -78,23 +77,18 @@ def _create_api(configuration: Configuration) -> API:
     return API(configuration.local_configuration)
 
 
-def _count_non_check_actions(preview_results: BatchSetupResults) -> int:
-    """Count actions excluding plugin availability checks."""
-    return sum(
-        1
-        for mr in preview_results.manifest_results
-        for action in mr.actions
-        if action.action_type != SetupActionType.CHECK_PLUGIN
-    )
+def _count_actions(preview_results: BatchSetupResults) -> int:
+    """Count total actions in preview results."""
+    return sum(len(mr.actions) for mr in preview_results.manifest_results)
 
 
-def _progress_label(mode: SetupMode) -> str:
-    """Get the progress label based on setup mode."""
-    if mode == SetupMode.UPGRADE:
+def _progress_label(strategy: SyncStrategy) -> str:
+    """Get the progress label based on sync strategy."""
+    if strategy == SyncStrategy.LATEST:
         return 'Upgrading packages...'
-    if mode == SetupMode.ENSURE:
+    if strategy == SyncStrategy.EXACT:
         return 'Ensuring packages...'
-    return 'Installing packages...'
+    return 'Syncing packages...'
 
 
 def _action_description(action: SetupAction) -> str:
@@ -173,11 +167,6 @@ def _handle_progress_event(
     overall_task: TaskID | None,
     state: _ProgressState,
 ) -> None:
-    if event.action.action_type == SetupActionType.CHECK_PLUGIN:
-        if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
-            state.collected_results.append(event.result)
-        return
-
     action_desc = _action_description(event.action)
 
     if event.kind == ProgressEventKind.ACTION_STARTED:
@@ -207,7 +196,7 @@ async def _run_stream_with_progress(
     overall_task: TaskID | None,
     state: _ProgressState,
 ) -> None:
-    async for event in api.update.execute_stream(preview_results, setup_params):
+    async for event in api.sync.execute_stream(preview_results, setup_params):
         _handle_progress_event(event, progress, setup_params, total_actions, overall_task, state)
 
 
@@ -228,7 +217,10 @@ def _format_cli_command(result: SetupActionResult) -> str:
 
 
 def _display_summary(
-    configuration: Configuration, results: BatchSetupResults, dry_run: bool, mode: SetupMode = SetupMode.INSTALL
+    configuration: Configuration,
+    results: BatchSetupResults,
+    dry_run: bool,
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
 ) -> None:
     """Display summary panel.
 
@@ -236,14 +228,12 @@ def _display_summary(
         configuration: CLI configuration with console.
         results: Batch execution results.
         dry_run: Whether this was a dry run.
-        mode: The execution mode.
+        strategy: The sync strategy.
     """
     configuration.console.print()
 
-    # Count results by category (exclude plugin checks)
-    package_results = [
-        r for mr in results.manifest_results for r in mr.results if r.action.action_type != SetupActionType.CHECK_PLUGIN
-    ]
+    # Count results by category
+    package_results = [r for mr in results.manifest_results for r in mr.results]
 
     succeeded = sum(1 for r in package_results if r.success and not r.skipped)
     skipped = sum(1 for r in package_results if r.success and r.skipped)
@@ -259,8 +249,10 @@ def _display_summary(
         )
     elif results.success:
         skip_msg = f', {skipped} skipped' if skipped else ''
-        # Use mode to determine the verb
-        detail = f'{succeeded} upgraded' if mode in {SetupMode.UPGRADE, SetupMode.ENSURE} else f'{succeeded} installed'
+        # Use strategy to determine the verb
+        detail = (
+            f'{succeeded} upgraded' if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT} else f'{succeeded} synced'
+        )
         configuration.console.print(
             Panel(
                 f'[green]Complete![/green] {detail}{skip_msg}.',
@@ -278,7 +270,10 @@ def _display_summary(
 
 
 def _display_results(
-    configuration: Configuration, results: BatchSetupResults, dry_run: bool, mode: SetupMode = SetupMode.INSTALL
+    configuration: Configuration,
+    results: BatchSetupResults,
+    dry_run: bool,
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
 ) -> None:
     """Display execution results with arrow-prefixed commands.
 
@@ -286,17 +281,13 @@ def _display_results(
         configuration: CLI configuration with console.
         results: Batch execution results.
         dry_run: Whether this was a dry run.
-        mode: The execution mode.
+        strategy: The sync strategy.
     """
     for manifest_result in results.manifest_results:
         configuration.console.print(f'\n[bold]Manifest:[/bold] {manifest_result.manifest_path}')
 
         displayed_count = 0
         for result in manifest_result.results:
-            # Skip plugin checks that passed (internal detail)
-            if result.skipped and result.action.action_type == SetupActionType.CHECK_PLUGIN:
-                continue
-
             displayed_count += 1
             command_str = _format_cli_command(result)
 
@@ -321,7 +312,7 @@ def _display_results(
         configuration.console.print(f'\n[red]Failed:[/red] {path}')
         configuration.console.print(f'  [dim]{error}[/dim]')
 
-    _display_summary(configuration, results, dry_run, mode)
+    _display_summary(configuration, results, dry_run, strategy)
 
 
 def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> None:
@@ -343,7 +334,7 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
             timeout=options.timeout,
             fail_fast=options.fail_fast,
             dry_run=options.dry_run,
-            mode=options.mode,
+            strategy=options.strategy,
         )
     elif options.path:
         if not options.path.exists():
@@ -354,7 +345,7 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
             timeout=options.timeout,
             fail_fast=options.fail_fast,
             dry_run=options.dry_run,
-            mode=options.mode,
+            strategy=options.strategy,
         )
     else:
         # Default to current directory
@@ -363,12 +354,12 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
             timeout=options.timeout,
             fail_fast=options.fail_fast,
             dry_run=options.dry_run,
-            mode=options.mode,
+            strategy=options.strategy,
         )
 
     # Preview to get actions
     try:
-        preview_results = api.update.preview_batch(setup_params)
+        preview_results = api.sync.preview_batch(setup_params)
     except (ManifestError, ValueError) as e:
         error_msg = e.error if isinstance(e, ManifestError) else str(e)
         configuration.console.print(f'[red]Error:[/red] {error_msg}')
@@ -387,7 +378,7 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
     # Execute with async progress
     execute_results = _execute_with_progress(configuration, api, preview_results, setup_params)
 
-    _display_results(configuration, execute_results, options.dry_run, options.mode)
+    _display_results(configuration, execute_results, options.dry_run, options.strategy)
 
     if not options.dry_run and not execute_results.success:
         raise typer.Exit(EXIT_FAILURE)
@@ -414,7 +405,7 @@ def _execute_with_progress(
     Returns:
         BatchSetupResults from execution.
     """
-    total_actions = _count_non_check_actions(preview_results)
+    total_actions = _count_actions(preview_results)
     state = _ProgressState()
 
     with Progress(
@@ -429,7 +420,7 @@ def _execute_with_progress(
     ) as progress:
         overall_task = None
         if total_actions > 0 and not setup_params.dry_run:
-            overall_task = progress.add_task(_progress_label(setup_params.mode), total=total_actions)
+            overall_task = progress.add_task(_progress_label(setup_params.strategy), total=total_actions)
 
         asyncio.run(
             _run_stream_with_progress(
@@ -457,7 +448,7 @@ def _execute_with_progress(
 
 
 @app.callback(invoke_without_command=True)
-def install_default(
+def sync_default(
     context: typer.Context,
     *,
     path: Annotated[
@@ -478,47 +469,47 @@ def install_default(
     ] = False,
     timeout: Annotated[
         int,
-        typer.Option('--timeout', '-t', help='Timeout in seconds for post-install commands'),
+        typer.Option('--timeout', '-t', help='Timeout in seconds for post-sync commands'),
     ] = DEFAULT_TIMEOUT,
     fail_fast: Annotated[
         bool,
         typer.Option('--fail-fast/--no-fail-fast', help='Stop on first error'),
     ] = True,
-    mode: Annotated[
+    strategy: Annotated[
         str,
         typer.Option(
-            '--mode',
-            '-m',
-            help='Execution mode: install (default), upgrade, or ensure',
+            '--strategy',
+            '-s',
+            help='Sync strategy: minimal (default), latest, or exact',
         ),
-    ] = 'install',
+    ] = 'minimal',
 ) -> None:
-    """Install or upgrade packages from a manifest file.
+    """Synchronise the local environment with a manifest.
 
     Reads the manifest from the specified path (or current directory) and
-    installs or upgrades packages according to the chosen mode.
+    installs or upgrades packages according to the chosen strategy.
 
-    Modes:
-      install  — Install packages that aren't already present (default).
-      upgrade  — Upgrade all packages; fall back to install if not present.
-      ensure   — Check each package; upgrade if installed, install if not.
+    Strategies:
+      minimal — Install packages that aren't already present (default).
+      latest  — Upgrade all packages; fall back to install if not present.
+      exact   — Check each package; upgrade if installed, install if not.
 
     Use --dry-run to preview what would be executed without making changes.
     Use --all to run on all cached directories at once.
 
     Examples:
-        porringer install                            # Install in current directory
-        porringer install --mode upgrade --all       # Upgrade all cached manifests
-        porringer install --mode ensure --path ./x   # Ensure latest in directory
-        porringer install --dry-run                  # Preview without executing
+        porringer sync                                  # Sync current directory
+        porringer sync --strategy latest --all          # Upgrade all cached manifests
+        porringer sync --strategy exact --path ./x      # Ensure exact in directory
+        porringer sync --dry-run                        # Preview without executing
     """
     configuration = context.ensure_object(Configuration)
 
-    # Parse mode string to enum
-    mode_map = {'install': SetupMode.INSTALL, 'upgrade': SetupMode.UPGRADE, 'ensure': SetupMode.ENSURE}
-    setup_mode = mode_map.get(mode.lower())
-    if setup_mode is None:
-        configuration.console.print(f"[red]Error:[/red] Invalid mode '{mode}'. Use: install, upgrade, or ensure")
+    # Parse strategy string to enum
+    strategy_map = {'minimal': SyncStrategy.MINIMAL, 'latest': SyncStrategy.LATEST, 'exact': SyncStrategy.EXACT}
+    sync_strategy = strategy_map.get(strategy.lower())
+    if sync_strategy is None:
+        configuration.console.print(f"[red]Error:[/red] Invalid strategy '{strategy}'. Use: minimal, latest, or exact")
         raise typer.Exit(EXIT_FAILURE)
 
     options = ManifestOptions(
@@ -527,7 +518,7 @@ def install_default(
         dry_run=dry_run,
         timeout=timeout,
         fail_fast=fail_fast,
-        mode=setup_mode,
+        strategy=sync_strategy,
     )
 
     _handle_manifest(configuration, options)

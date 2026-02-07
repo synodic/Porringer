@@ -13,7 +13,6 @@ from porringer.backend.command.self import (
     get_latest_pypi_version,
 )
 from porringer.schema import (
-    CheckPorringerParameters,
     LocalConfiguration,
     PackageUpdateInfo,
 )
@@ -28,8 +27,6 @@ class TestCommandSelf:
         """Test that check() returns PackageUpdateInfo"""
         config = LocalConfiguration()
         api = API(config)
-
-        CheckPorringerParameters()
 
         result = await api.porringer.check()
 

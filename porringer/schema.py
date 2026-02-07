@@ -33,18 +33,8 @@ class DirectoryCache(BaseModel):
 # --- Command Parameter Schemas ---
 
 
-class UpdatePorringerParameters(BaseModel):
-    """Parameters for updating the Porringer application."""
-
-
-class CheckPorringerParameters(BaseModel):
-    """Parameters for checking the Porringer application status."""
-
-
 class ListPluginsParameters(BaseModel):
     """Parameters for listing available plugins."""
-
-    pattern: str = Field(default='*', description='The pattern to match against')
 
 
 # --- Setup Schemas ---
@@ -75,7 +65,7 @@ class ManifestDiagnostic:
     """A single diagnostic produced by manifest validation.
 
     Args:
-        field: Dot-path to the relevant field (e.g. ``"packages.npm"``, ``"prerequisites[0].plugin"``).
+        field: Dot-path to the relevant field (e.g. ``"state.python"``, ``"preferences.python"``).
         message: Human-readable description of the problem or concern.
         code: Machine-readable diagnostic code.
         severity: Whether this diagnostic is an error or a warning.
@@ -114,9 +104,8 @@ class ManifestValidationResult:
 
 
 class SetupActionType(Enum):
-    """The type of action to perform during setup"""
+    """The type of action to perform during setup."""
 
-    CHECK_PLUGIN = auto()
     PACKAGE = auto()
     RUN_COMMAND = auto()
 
@@ -127,7 +116,7 @@ class SetupAction:
 
     Args:
         action_type: The type of action.
-        plugin: The plugin name (for CHECK_PLUGIN and PACKAGE).
+        plugin: The plugin name (for PACKAGE).
         package: The package name (for PACKAGE).
         command: The command to run (for RUN_COMMAND).
         description: Human-readable description of the action.
@@ -137,7 +126,8 @@ class SetupAction:
 
     action_type: SetupActionType
     description: str
-    plugin: str | None = None
+    backend: str | None = None
+    installer: str | None = None
     package: PackageRef | None = None
     command: list[str] | None = None
     cli_command: list[str] | None = None
@@ -248,12 +238,6 @@ class CancellationToken:
             raise asyncio.CancelledError('Operation cancelled by token')
 
 
-class Prerequisite(PlatformScoped):
-    """A prerequisite plugin that must be available."""
-
-    plugin: str = Field(description='The plugin name that must be available')
-
-
 class PackageSpec(PlatformScoped):
     """A package entry with optional display metadata.
 
@@ -274,33 +258,47 @@ class PackageSpec(PlatformScoped):
 
 
 class SetupManifest(BaseModel):
-    """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer]."""
+    """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer].
+
+    Manifest keys under ``state`` are **backend** identifiers (e.g.
+    ``"python"``, ``"system"``, ``"node"``) rather than specific tool
+    names.  The ``BackendResolver`` maps each backend to the best
+    available installer plugin at runtime.
+    """
 
     version: str = Field(default='1', description='Manifest schema version')
     name: str | None = Field(default=None, description='Human-readable project/environment name')
     description: str | None = Field(default=None, description='Short description shown in the install preview header')
     author: str | None = Field(default=None, description='Author or organization name')
     url: HttpUrl | None = Field(default=None, description='Project URL for reference')
-    prerequisites: list[Prerequisite] = Field(
-        default_factory=list, description='Plugins that must be available before setup'
+    state: dict[str, list[PackageSpec]] = Field(
+        default_factory=dict, description='Desired package state per backend (backend name -> package list)'
     )
-    packages: dict[str, list[PackageSpec]] = Field(
-        default_factory=dict, description='Packages to install per plugin (plugin name -> package list)'
+    preferences: dict[str, str] = Field(
+        default_factory=dict,
+        description='Preferred installer for each backend (e.g. {"python": "uv"})',
     )
-    post_install: list[str] = Field(default_factory=list, description='Commands to run after package installation')
+    extends: list[str] = Field(
+        default_factory=list,
+        description='Paths to other manifests whose state is merged (base layers)',
+    )
+    post_sync: list[str] = Field(default_factory=list, description='Commands to run after state synchronisation')
 
 
-class SetupMode(Enum):
-    """The mode controlling how manifest packages are processed.
+class SyncStrategy(Enum):
+    """Strategy controlling how the sync engine reconciles manifest state.
 
-    INSTALL: Default. Install packages that aren't already present.
-    UPGRADE: Upgrade all packages. Falls back to install if a package isn't installed.
-    ENSURE: Check each package; upgrade if installed, install if not.
+    MINIMAL: Default.  Install packages that aren't already present.
+             Already-installed packages are left untouched.
+    LATEST:  Upgrade every package to its latest allowed version.
+             Falls back to install if a package isn't installed.
+    EXACT:   Ensure each package satisfies the declared constraint.
+             Upgrade if installed, install if not.
     """
 
-    INSTALL = auto()
-    UPGRADE = auto()
-    ENSURE = auto()
+    MINIMAL = auto()
+    LATEST = auto()
+    EXACT = auto()
 
 
 class SetupParameters(BaseModel):
@@ -309,10 +307,10 @@ class SetupParameters(BaseModel):
     paths: Path | Sequence[Path] | None = Field(
         default=None, description='Path(s) to manifest file(s) or directories. None uses all cached directories.'
     )
-    timeout: int = Field(default=300, description='Timeout in seconds for post-install commands')
+    timeout: int = Field(default=300, description='Timeout in seconds for post-sync commands')
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
     dry_run: bool = Field(default=False, description='Preview actions without executing them')
-    mode: SetupMode = Field(default=SetupMode.INSTALL, description='Execution mode: install, upgrade, or ensure')
+    strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal, latest, or exact')
 
 
 @dataclass
@@ -386,10 +384,6 @@ class BatchSetupResults:
         return sum(sum(1 for r in m.results if not r.success) for m in self.manifest_results)
 
 
-class UpdatePluginsParameters(BaseModel):
-    """Parameters for updating plugins."""
-
-
 @dataclass
 class ListPluginResults:
     """Results of listing plugins.
@@ -403,13 +397,6 @@ class ListPluginResults:
     name: str
     version: Version
     installed: bool
-
-
-@dataclass
-class APIParameters:
-    """Resolved configuration"""
-
-    pass
 
 
 @dataclass

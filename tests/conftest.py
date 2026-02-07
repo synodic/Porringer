@@ -30,7 +30,7 @@ def execute_via_stream(api: API, preview: BatchSetupResults, params: SetupParame
     collected: list[SetupActionResult] = []
 
     async def _run() -> None:
-        async for event in api.update.execute_stream(preview, params):
+        async for event in api.sync.execute_stream(preview, params):
             if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
                 collected.append(event.result)
 

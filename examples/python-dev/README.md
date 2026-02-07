@@ -4,19 +4,14 @@ This example demonstrates using Porringer to set up a Python development environ
 
 ## Manifest Overview
 
-The `porringer.json` manifest defines:
+The `porringer.json` manifest declares the desired **state** using backend identifiers. Porringer resolves each backend to the best available installer at runtime.
 
-- **Prerequisites**: Ensures essential plugins are available
-  - `pip` and `pipx` - Always required for Python package management
-  - `winget` - Required on Windows to support native tool discovery
-  - `apt` - Required on Linux for native package management
-  - `brew` - Required on macOS for native package management
-- **pip packages**: Development tools installed in the current environment
+- **`python` backend** (resolved to `uv` or `pip`): Development tools installed in the current environment
   - `ruff` - Fast Python linter and formatter
-  - `pyrefly` - Static type checker
+  - `pyrefly` - Python type checker
   - `pytest` - Testing framework
   - `pytest-cov` - Coverage plugin for pytest
-- **pipx packages**: CLI tools installed in isolated environments
+- **`python-tool` backend** (resolved to `pipx`): CLI tools installed in isolated environments
   - `pdm` - Python project manager
 
 ## Usage
@@ -24,30 +19,26 @@ The `porringer.json` manifest defines:
 ### Preview what will happen
 
 ```shell
-porringer install --path examples/python-dev --dry-run
+porringer sync --path examples/python-dev --dry-run
 ```
 
 ### Execute with confirmation
 
 ```shell
-porringer install --path examples/python-dev
+porringer sync --path examples/python-dev
 ```
 
 ### Execute without confirmation (non-interactive)
 
 ```shell
-porringer install --path examples/python-dev --yes
+porringer sync --path examples/python-dev --yes
 ```
 
-## Platform-Specific Prerequisites
+### Upgrade all packages to latest
 
-The manifest automatically filters prerequisites based on your platform:
-
-| Platform   | Checked Prerequisites |
-|------------|----------------------|
-| Windows    | pip, pipx, winget    |
-| Linux      | pip, pipx, apt       |
-| macOS      | pip, pipx, brew      |
+```shell
+porringer sync --path examples/python-dev --strategy latest
+```
 
 ## Alternative: pyproject.toml
 
@@ -57,25 +48,11 @@ You can also embed this manifest in a `pyproject.toml` file:
 [tool.porringer]
 version = "1"
 
-[[tool.porringer.prerequisites]]
-plugin = "pip"
+[tool.porringer.state]
+python = ["ruff", "pyrefly", "pytest", "pytest-cov"]
+python-tool = ["pdm"]
 
-[[tool.porringer.prerequisites]]
-plugin = "pipx"
-
-[[tool.porringer.prerequisites]]
-plugin = "winget"
-platforms = ["win32"]
-
-[[tool.porringer.prerequisites]]
-plugin = "apt"
-platforms = ["linux"]
-
-[[tool.porringer.prerequisites]]
-plugin = "brew"
-platforms = ["darwin"]
-
-[tool.porringer.packages]
-pip = ["ruff", "pyrefly", "pytest", "pytest-cov"]
-pipx = ["pdm"]
+[tool.porringer.preferences]
+python = "uv"  # optional: prefer uv over pip
+```
 ```

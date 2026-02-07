@@ -7,13 +7,9 @@ from typing import override
 from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
-    ProviderCapability,
     UninstallParameters,
 )
 from porringer.core.schema import Package, PackageRef
-
-# Capability identifier for Python runtime providers
-PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
 
 
 class AptEnvironment(Environment):
@@ -43,20 +39,9 @@ class AptEnvironment(Environment):
 
     @staticmethod
     @override
-    def provides() -> list[ProviderCapability]:
-        """Declares that this plugin provides Python runtime management.
-
-        APT can install versioned Python packages like python3.12.
-
-        Returns:
-            A list containing the python-runtime capability
-        """
-        return [
-            ProviderCapability(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                description='Manages Python runtime versions via APT packages',
-            ),
-        ]
+    def package_backend() -> str:
+        """APT manages the ``system`` package backend."""
+        return 'system'
 
     @staticmethod
     @override

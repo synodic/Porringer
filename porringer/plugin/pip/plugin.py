@@ -1,25 +1,21 @@
 """Plugin implementation"""
 
 import asyncio
+import json
 import logging
 import re
 import subprocess
 from collections.abc import Callable
-from importlib.metadata import distributions
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
-    ProviderRequirement,
     UninstallParameters,
 )
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Package, PackageRef, PluginParameters
 from porringer.schema import SetupAction, SetupActionType, SubActionProgress
 from porringer.utility.utility import async_run_command
-
-# Capability identifier for Python runtime providers
-PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
 
 # Regex patterns for parsing pip output
 _DOWNLOADING_PATTERN = re.compile(
@@ -46,43 +42,42 @@ class PipEnvironment(Environment):
     the underlying Python installation.
     """
 
+    def __init__(self, parameters: PluginParameters) -> None:
+        """Initializes the pip environment plugin.
+
+        Args:
+            parameters: Plugin parameters including distribution info
+        """
+        super().__init__(parameters)
+        self._cached_packages: list[Package] | None = None
+
     @staticmethod
     @override
-    def requires_providers() -> list[ProviderRequirement]:
-        """Declares that pip can optionally use a Python runtime provider.
+    def package_backend() -> str:
+        """Pip manages the ``python`` package backend."""
+        return 'python'
 
-        The provider is optional - pip can also work with system-installed Python.
-        Returns a list of platform-specific providers that the builder can select from:
-        - pim: Python Install Manager (Windows)
-        - brew: Homebrew (macOS)
-        - apt: APT package manager (Linux)
+    @staticmethod
+    @override
+    def is_available() -> bool:
+        """Checks if pip is available on the system PATH.
 
-        NOTE: Currently defaults to using the latest available Python from the provider.
-        Future versions may support configuration for selecting specific versions.
+        Runs ``python -m pip --version`` to verify that both Python and pip
+        are accessible from the current environment.
 
         Returns:
-            A list of provider requirements for each supported platform
+            True if pip is available, False otherwise.
         """
-        return [
-            # Windows: Python Install Manager
-            ProviderRequirement(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                required=False,
-                provider_plugin='pim',
-            ),
-            # macOS: Homebrew
-            ProviderRequirement(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                required=False,
-                provider_plugin='brew',
-            ),
-            # Linux: APT
-            ProviderRequirement(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                required=False,
-                provider_plugin='apt',
-            ),
-        ]
+        try:
+            result = subprocess.run(
+                ['python', '-m', 'pip', '--version'],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode == 0
+        except FileNotFoundError, subprocess.SubprocessError:
+            return False
 
     @staticmethod
     @override
@@ -174,7 +169,7 @@ class PipEnvironment(Environment):
         action = SetupAction(
             action_type=SetupActionType.PACKAGE,
             description=f'Install {params.package.specifier}',
-            plugin='pip',
+            installer='pip',
             package=params.package,
         )
 
@@ -372,13 +367,44 @@ class PipEnvironment(Environment):
 
     @override
     def packages(self) -> list[Package]:
-        """Gathers installed packages in the given environment
+        """Gathers installed packages visible to the active Python on PATH.
+
+        Uses ``python -m pip list --format=json`` via subprocess so that the
+        result reflects the *user's* active environment (e.g. a project venv)
+        rather than the interpreter that porringer itself runs under.
+
+        The result is cached for the lifetime of this plugin instance to avoid
+        repeated subprocess invocations (``packages()`` is called once per
+        package action).
 
         Returns:
             A list of packages
         """
-        return [
-            Package(name=dist.metadata['Name'], version=dist.version)
-            for dist in distributions()
-            if dist.metadata['Name'] is not None
-        ]
+        if self._cached_packages is not None:
+            return self._cached_packages
+
+        logger = logging.getLogger('porringer.pip.packages')
+        try:
+            result = subprocess.run(
+                ['python', '-m', 'pip', 'list', '--format=json'],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            entries: list[dict[str, str]] = json.loads(result.stdout)
+            self._cached_packages = [
+                Package(name=entry['name'], version=entry.get('version'))
+                for entry in entries
+                if entry.get('name') is not None
+            ]
+        except subprocess.CalledProcessError as e:
+            logger.warning(f'Failed to list pip packages: {e}')
+            self._cached_packages = []
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f'Failed to parse pip package list: {e}')
+            self._cached_packages = []
+        except FileNotFoundError:
+            logger.warning('Python not found on PATH; cannot list pip packages')
+            self._cached_packages = []
+
+        return self._cached_packages

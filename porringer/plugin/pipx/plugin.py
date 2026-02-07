@@ -10,14 +10,10 @@ from typing import override
 from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
-    ProviderRequirement,
     UninstallParameters,
 )
 from porringer.core.schema import Package, PackageRef
 from porringer.utility.utility import async_run_command
-
-# Capability identifier for Python runtime providers
-PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
 
 
 def _get_pipx_venvs_dir() -> Path:
@@ -53,41 +49,9 @@ class PipxEnvironment(Environment):
 
     @staticmethod
     @override
-    def requires_providers() -> list[ProviderRequirement]:
-        """Declares that pipx can optionally use a Python runtime provider.
-
-        The provider is optional - pipx can also work with system-installed Python.
-        Returns a list of platform-specific providers that the builder can select from:
-        - pim: Python Install Manager (Windows)
-        - brew: Homebrew (macOS)
-        - apt: APT package manager (Linux)
-
-        NOTE: Currently defaults to using the latest available Python from the provider.
-        Future versions may support configuration for selecting specific versions.
-
-        Returns:
-            A list of provider requirements for each supported platform
-        """
-        return [
-            # Windows: Python Install Manager
-            ProviderRequirement(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                required=False,
-                provider_plugin='pim',
-            ),
-            # macOS: Homebrew
-            ProviderRequirement(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                required=False,
-                provider_plugin='brew',
-            ),
-            # Linux: APT
-            ProviderRequirement(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                required=False,
-                provider_plugin='apt',
-            ),
-        ]
+    def package_backend() -> str:
+        """Pipx manages the ``python-tool`` package backend."""
+        return 'python-tool'
 
     @staticmethod
     @override

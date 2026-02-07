@@ -22,6 +22,12 @@ class WingetEnvironment(Environment):
 
     @staticmethod
     @override
+    def package_backend() -> str:
+        """Winget manages the ``system`` package backend."""
+        return 'system'
+
+    @staticmethod
+    @override
     def is_available() -> bool:
         """Checks if winget is available on the system.
 
