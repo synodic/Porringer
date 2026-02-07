@@ -41,17 +41,6 @@ class TestCommandPlugin:
             assert isinstance(result.installed, bool)
 
     @staticmethod
-    def test_plugin_update() -> None:
-        """Test the plugin update"""
-        config = LocalConfiguration()
-        api = API(config)
-
-        params = ListPluginsParameters()
-        results = api.plugin.list(params)
-
-        assert results
-
-    @staticmethod
     def test_plugin_list_with_missing_module() -> None:
         """Test that plugin listing handles ModuleNotFoundError gracefully.
 

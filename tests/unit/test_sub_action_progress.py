@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from porringer.backend.command.update import UpdateCommands
+from porringer.backend.command.sync import SyncCommands
 from porringer.core.plugin_schema.environment import PackageParameters
 from porringer.core.schema import PackageRef
 from porringer.plugin.pip.plugin import PipEnvironment
@@ -32,7 +32,8 @@ def _make_action(package: str = 'requests') -> SetupAction:
     return SetupAction(
         action_type=SetupActionType.PACKAGE,
         description=f'Install {package}',
-        plugin='pip',
+        backend='python',
+        installer='pip',
         package=PackageRef(name=package),
     )
 
@@ -274,7 +275,7 @@ class TestExecuteStream:
         previews = BatchSetupResults(manifest_results=[preview], failed_paths=[])
         params = SetupParameters(dry_run=True)
 
-        commands = UpdateCommands()
+        commands = SyncCommands()
 
         async def run() -> list[ProgressEvent]:
             collected: list[ProgressEvent] = []
@@ -298,7 +299,7 @@ class TestExecuteStream:
         previews = BatchSetupResults(manifest_results=[preview], failed_paths=[])
         params = SetupParameters(dry_run=True)
 
-        commands = UpdateCommands()
+        commands = SyncCommands()
 
         async def run() -> list[ProgressEvent]:
             collected: list[ProgressEvent] = []

@@ -8,13 +8,9 @@ from typing import override
 from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
-    ProviderCapability,
     UninstallParameters,
 )
 from porringer.core.schema import Package, PackageRef, PluginDependency
-
-# Capability identifier for Python runtime providers
-PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
 
 
 class PimEnvironment(Environment):
@@ -38,6 +34,12 @@ class PimEnvironment(Environment):
 
     @staticmethod
     @override
+    def package_backend() -> str:
+        """PIM manages the ``python-runtime`` package backend."""
+        return 'python-runtime'
+
+    @staticmethod
+    @override
     def dependencies() -> list[PluginDependency]:
         """Declares plugin dependencies.
 
@@ -52,21 +54,6 @@ class PimEnvironment(Environment):
                 plugin='winget',
                 required=True,
                 platforms=['win32'],
-            ),
-        ]
-
-    @staticmethod
-    @override
-    def provides() -> list[ProviderCapability]:
-        """Declares that this plugin provides Python runtime management.
-
-        Returns:
-            A list containing the python-runtime capability
-        """
-        return [
-            ProviderCapability(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                description='Manages Python runtime versions via the official Python Install Manager',
             ),
         ]
 

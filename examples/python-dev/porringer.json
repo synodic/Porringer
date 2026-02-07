@@ -4,34 +4,8 @@
     "description": "Common linting, formatting, and testing tools for Python development",
     "author": "Synodic Software",
     "url": "https://github.com/synodic/porringer",
-    "prerequisites": [
-        {
-            "plugin": "pip"
-        },
-        {
-            "plugin": "pipx"
-        },
-        {
-            "plugin": "winget",
-            "platforms": [
-                "win32"
-            ]
-        },
-        {
-            "plugin": "apt",
-            "platforms": [
-                "linux"
-            ]
-        },
-        {
-            "plugin": "brew",
-            "platforms": [
-                "darwin"
-            ]
-        }
-    ],
-    "packages": {
-        "pip": [
+    "state": {
+        "python": [
             {
                 "name": "ruff",
                 "description": "Fast Python linter and formatter"
@@ -41,24 +15,9 @@
                 "description": "Python type checker"
             },
             "pytest",
-            "pytest-cov",
-            {
-                "name": "pywin32",
-                "description": "Python for Win32 extensions",
-                "platforms": [
-                    "win32"
-                ]
-            },
-            {
-                "name": "uvloop",
-                "description": "Fast event loop for asyncio",
-                "platforms": [
-                    "linux",
-                    "darwin"
-                ]
-            }
+            "pytest-cov"
         ],
-        "pipx": [
+        "python-tool": [
             {
                 "name": "pdm",
                 "description": "Python package and dependency manager"

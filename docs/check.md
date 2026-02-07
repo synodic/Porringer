@@ -37,20 +37,18 @@ porringer check --prereleases
 ```python
 from porringer.backend.builder import Builder
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters
-from porringer.schema import CheckParameters, CheckResult
-import logging
 
-logger = logging.getLogger('porringer')
-builder = Builder(logger)
+builder = Builder()
 
 # Build plugin environments
-environments = builder.build_environments(builder.find_environments())
+plugin_infos = builder.find_environments()
+environments = builder.build_environments(plugin_infos)
 
 # Check each plugin
 for env in environments:
     params = CheckUpdatesParameters(packages=[], include_prereleases=False)
     updates = env.check_updates(params)
-    
+
     for pkg in updates:
         print(f"{pkg.name}: update available to {pkg.version}")
 ```

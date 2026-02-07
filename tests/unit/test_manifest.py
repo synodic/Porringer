@@ -1,4 +1,4 @@
-"""Test the setup/manifest functionality in install command"""
+"""Test the setup/manifest functionality in sync command"""
 
 import json
 import sys
@@ -9,22 +9,21 @@ import pytest
 from typer.testing import CliRunner
 
 from porringer.api import API
-from porringer.backend.command.update import UpdateCommands
+from porringer.backend.command.sync import SyncCommands
 from porringer.console.entry import app
 from porringer.schema import (
     ManifestValidationCode,
     PackageSpec,
-    Prerequisite,
     SetupActionType,
     SetupManifest,
     SetupParameters,
+    SyncStrategy,
 )
 from porringer.utility.exception import ManifestError
 from tests.conftest import execute_via_stream
 
 # Test constants
 EXPECTED_ACTIONS_JSON_MANIFEST = 2  # 1 install + 1 command
-EXPECTED_ACTIONS_WITH_PREREQUISITES = 4  # 1 check + 2 installs + 1 command
 
 # Action indices
 FIRST_ACTION_INDEX = 0
@@ -47,46 +46,6 @@ SINGLE_FAILED_PATH = 1
 NO_FAILED_PATHS = 0
 
 
-class TestPrerequisite:
-    """Tests for Prerequisite platform filtering"""
-
-    @staticmethod
-    def test_is_applicable_no_platforms() -> None:
-        """Prerequisite with no platforms should apply to all platforms"""
-        prereq = Prerequisite(plugin='pip')
-        assert prereq.is_applicable() is True
-
-    @staticmethod
-    def test_is_applicable_with_empty_platforms() -> None:
-        """Prerequisite with empty platforms list should apply to all platforms"""
-        prereq = Prerequisite(plugin='pip', platforms=[])
-        assert prereq.is_applicable() is True
-
-    @staticmethod
-    def test_is_applicable_matching_platform() -> None:
-        """Prerequisite should apply when current platform is in the list"""
-        prereq = Prerequisite(plugin='test', platforms=[sys.platform])
-        assert prereq.is_applicable() is True
-
-    @staticmethod
-    def test_is_applicable_non_matching_platform() -> None:
-        """Prerequisite should not apply when current platform is not in the list"""
-        prereq = Prerequisite(plugin='test', platforms=['nonexistent_platform'])
-        assert prereq.is_applicable() is False
-
-    @staticmethod
-    def test_is_applicable_multiple_platforms_matching() -> None:
-        """Prerequisite should apply when current platform is one of multiple"""
-        prereq = Prerequisite(plugin='test', platforms=['win32', 'darwin', 'linux', sys.platform])
-        assert prereq.is_applicable() is True
-
-    @staticmethod
-    def test_is_applicable_multiple_platforms_not_matching() -> None:
-        """Prerequisite should not apply when current platform is not in multiple"""
-        prereq = Prerequisite(plugin='test', platforms=['nonexistent1', 'nonexistent2'])
-        assert prereq.is_applicable() is False
-
-
 class TestSetupManifest:
     """Tests for manifest loading"""
 
@@ -97,12 +56,12 @@ class TestSetupManifest:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'packages': {'pip': ['requests']},
-                'post_install': ['echo hello'],
+                'state': {'python': ['requests']},
+                'post_sync': ['echo hello'],
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.update.preview_single(Path(tmpdir))
+            results = test_api.sync.preview_single(Path(tmpdir))
 
             assert results.manifest_path == manifest_path
             # 1 install + 1 command = 2 actions
@@ -116,11 +75,11 @@ class TestSetupManifest:
             pyproject_content = """
 [tool.porringer]
 version = "1"
-packages.pip = ["requests"]
+state.python = ["requests"]
 """
             pyproject_path.write_text(pyproject_content)
 
-            results = test_api.update.preview_single(Path(tmpdir))
+            results = test_api.sync.preview_single(Path(tmpdir))
 
             assert results.manifest_path == pyproject_path
             assert len(results.actions) == 1  # 1 install
@@ -129,7 +88,7 @@ packages.pip = ["requests"]
     def test_missing_manifest_raises_error(test_api: API) -> None:
         """Test that missing manifest raises ManifestError"""
         with tempfile.TemporaryDirectory() as tmpdir, pytest.raises(ManifestError):
-            test_api.update.preview_single(Path(tmpdir))
+            test_api.sync.preview_single(Path(tmpdir))
 
 
 class TestSetupPreview:
@@ -142,22 +101,20 @@ class TestSetupPreview:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'prerequisites': [{'plugin': 'pip'}],
-                'packages': {'pip': ['requests', 'pydantic']},
-                'post_install': ['pdm install'],
+                'state': {'python': ['requests', 'pydantic']},
+                'post_sync': ['pdm install'],
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.update.preview_single(Path(tmpdir))
+            results = test_api.sync.preview_single(Path(tmpdir))
 
-            # 1 check + 2 installs + 1 command = 4 actions
-            assert len(results.actions) == EXPECTED_ACTIONS_WITH_PREREQUISITES
+            # 2 packages + 1 command = 3 actions
+            assert len(results.actions) == THREE_ACTIONS
 
             action_types = [a.action_type for a in results.actions]
-            assert action_types[FIRST_ACTION_INDEX] == SetupActionType.CHECK_PLUGIN
+            assert action_types[FIRST_ACTION_INDEX] == SetupActionType.PACKAGE
             assert action_types[SECOND_ACTION_INDEX] == SetupActionType.PACKAGE
-            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.PACKAGE
-            assert action_types[FOURTH_ACTION_INDEX] == SetupActionType.RUN_COMMAND
+            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.RUN_COMMAND
 
     @staticmethod
     def test_preview_excludes_filtered_packages(test_api: API) -> None:
@@ -166,8 +123,8 @@ class TestSetupPreview:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'packages': {
-                    'pip': [
+                'state': {
+                    'python': [
                         'requests',
                         {'name': 'pywin32', 'platforms': ['nonexistent_platform']},
                         {'name': 'uvloop', 'platforms': [sys.platform]},
@@ -176,7 +133,7 @@ class TestSetupPreview:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.update.preview_single(Path(tmpdir))
+            results = test_api.sync.preview_single(Path(tmpdir))
 
             # Only 'requests' (no filter) and 'uvloop' (matching) should be included
             assert len(results.actions) == TWO_ACTIONS
@@ -192,11 +149,11 @@ class TestSetupPreview:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'packages': {'pip': ['requests', 'flask', 'pytest']},
+                'state': {'python': ['requests', 'flask', 'pytest']},
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.update.preview_single(Path(tmpdir))
+            results = test_api.sync.preview_single(Path(tmpdir))
 
             assert len(results.actions) == THREE_ACTIONS
 
@@ -209,11 +166,11 @@ class TestSetupBatch:
         """Test batch preview with a single path"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
+            manifest_data = {'version': '1', 'state': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir))
-            results = test_api.update.preview_batch(params)
+            results = test_api.sync.preview_batch(params)
 
             assert len(results.manifest_results) == 1
             assert results.total_actions == 1
@@ -229,13 +186,13 @@ class TestSetupBatch:
             project1.mkdir()
             project2.mkdir()
 
-            (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
+            (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'state': {'python': ['requests']}}))
             (project2 / 'porringer.json').write_text(
-                json.dumps({'version': '1', 'packages': {'pip': ['flask', 'pytest']}})
+                json.dumps({'version': '1', 'state': {'python': ['flask', 'pytest']}})
             )
 
             params = SetupParameters(paths=[project1, project2])
-            results = test_api.update.preview_batch(params)
+            results = test_api.sync.preview_batch(params)
 
             assert len(results.manifest_results) == DUAL_MANIFESTS
             assert results.total_actions == THREE_ACTIONS  # 1 + 2
@@ -251,10 +208,10 @@ class TestSetupBatch:
             project2.mkdir()
 
             # Only project1 has a manifest
-            (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
+            (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'state': {'python': ['requests']}}))
 
             params = SetupParameters(paths=[project1, project2], fail_fast=False)
-            results = test_api.update.preview_batch(params)
+            results = test_api.sync.preview_batch(params)
 
             assert len(results.manifest_results) == SINGLE_MANIFEST
             assert len(results.failed_paths) == SINGLE_FAILED_PATH
@@ -267,14 +224,14 @@ class TestSetupBatch:
         project1 = tmp_path / 'project1'
         project1.mkdir()
 
-        (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
+        (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'state': {'python': ['requests']}}))
 
         # Add to cache
         test_api.cache.add_directory(project1)
 
         # Preview from cache (paths=None)
         params = SetupParameters(paths=None)
-        results = test_api.update.preview_batch(params)
+        results = test_api.sync.preview_batch(params)
 
         assert len(results.manifest_results) == SINGLE_MANIFEST
         assert results.total_actions == SINGLE_MANIFEST
@@ -288,8 +245,8 @@ class TestSetupBatch:
         project1.mkdir()
         project2.mkdir()
 
-        (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['requests']}}))
-        (project2 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'pip': ['flask']}}))
+        (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'state': {'python': ['requests']}}))
+        (project2 / 'porringer.json').write_text(json.dumps({'version': '1', 'state': {'python': ['flask']}}))
 
         # Add directories to cache
         test_api.cache.add_directory(project1)
@@ -297,7 +254,7 @@ class TestSetupBatch:
 
         # Preview from all cached
         params = SetupParameters(paths=None)
-        results = test_api.update.preview_batch(params)
+        results = test_api.sync.preview_batch(params)
 
         assert len(results.manifest_results) == DUAL_MANIFESTS
         assert results.total_actions == TWO_ACTIONS
@@ -309,31 +266,31 @@ class TestPackageSpec:
     @staticmethod
     def test_manifest_coerces_string_packages() -> None:
         """String package entries are coerced to PackageSpec objects"""
-        manifest = SetupManifest(packages={'pip': ['requests', 'flask']})
-        assert len(manifest.packages['pip']) == TWO_PACKAGES
-        assert str(manifest.packages['pip'][0].name) == 'requests'
-        assert manifest.packages['pip'][0].description is None
+        manifest = SetupManifest(state={'python': ['requests', 'flask']})
+        assert len(manifest.state['python']) == TWO_PACKAGES
+        assert str(manifest.state['python'][0].name) == 'requests'
+        assert manifest.state['python'][0].description is None
 
     @staticmethod
     def test_manifest_accepts_object_packages() -> None:
         """Object package entries are parsed as PackageSpec"""
-        manifest = SetupManifest(packages={'pip': [{'name': 'ruff', 'description': 'Fast linter'}]})
-        assert str(manifest.packages['pip'][0].name) == 'ruff'
-        assert manifest.packages['pip'][0].description == 'Fast linter'
+        manifest = SetupManifest(state={'python': [{'name': 'ruff', 'description': 'Fast linter'}]})
+        assert str(manifest.state['python'][0].name) == 'ruff'
+        assert manifest.state['python'][0].description == 'Fast linter'
 
     @staticmethod
     def test_manifest_mixed_string_and_object_packages() -> None:
         """Manifest accepts a mix of string and object package entries"""
         manifest = SetupManifest(
-            packages={
-                'pip': [
+            state={
+                'python': [
                     'requests',
                     {'name': 'ruff', 'description': 'Fast linter'},
                     'pytest',
                 ]
             }
         )
-        pkgs = manifest.packages['pip']
+        pkgs = manifest.state['python']
         assert len(pkgs) == THREE_PACKAGES
         assert str(pkgs[0].name) == 'requests'
         assert pkgs[0].description is None
@@ -381,15 +338,15 @@ class TestPackageSpec:
     @staticmethod
     def test_string_coercion_has_empty_platforms() -> None:
         """String package entries should have empty platforms (all platforms)"""
-        manifest = SetupManifest(packages={'pip': ['requests']})
-        assert manifest.packages['pip'][0].platforms == []
-        assert manifest.packages['pip'][0].is_applicable() is True
+        manifest = SetupManifest(state={'python': ['requests']})
+        assert manifest.state['python'][0].platforms == []
+        assert manifest.state['python'][0].is_applicable() is True
 
     @staticmethod
     def test_object_with_platforms_parsed() -> None:
         """Object package entries with platforms should be parsed correctly"""
-        manifest = SetupManifest(packages={'pip': [{'name': 'pywin32', 'platforms': ['win32']}]})
-        spec = manifest.packages['pip'][0]
+        manifest = SetupManifest(state={'python': [{'name': 'pywin32', 'platforms': ['win32']}]})
+        spec = manifest.state['python'][0]
         assert str(spec.name) == 'pywin32'
         assert spec.platforms == ['win32']
 
@@ -408,11 +365,11 @@ class TestManifestMetadata:
                 'description': 'Tools for development',
                 'author': 'Synodic',
                 'url': 'https://example.com',
-                'packages': {'pip': ['requests']},
+                'state': {'python': ['requests']},
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.update.preview_single(Path(tmpdir))
+            results = test_api.sync.preview_single(Path(tmpdir))
 
             assert results.metadata is not None
             assert results.metadata.name == 'Dev Environment'
@@ -425,10 +382,10 @@ class TestManifestMetadata:
         """Test that metadata fields are None when not in manifest"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
+            manifest_data = {'version': '1', 'state': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.update.preview_single(Path(tmpdir))
+            results = test_api.sync.preview_single(Path(tmpdir))
 
             assert results.metadata is not None
             assert results.metadata.name is None
@@ -443,8 +400,8 @@ class TestManifestMetadata:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'packages': {
-                    'pip': [
+                'state': {
+                    'python': [
                         {'name': 'ruff', 'description': 'Fast linter'},
                         'pytest',
                     ]
@@ -452,7 +409,7 @@ class TestManifestMetadata:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.update.preview_single(Path(tmpdir))
+            results = test_api.sync.preview_single(Path(tmpdir))
 
             assert len(results.actions) == TWO_ACTIONS
             assert str(results.actions[0].package) == 'ruff'
@@ -462,19 +419,19 @@ class TestManifestMetadata:
 
 
 class TestSetupCLI:
-    """Tests for setup CLI commands (now via install)"""
+    """Tests for setup CLI commands (now via sync)"""
 
     @staticmethod
-    def test_install_dry_run_api(test_api: API) -> None:
-        """Test the install dry-run functionality via API"""
+    def test_sync_dry_run_api(test_api: API) -> None:
+        """Test the sync dry-run functionality via API"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
+            manifest_data = {'version': '1', 'state': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
             # Test dry-run via API
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            preview = test_api.update.preview_batch(setup_params)
+            preview = test_api.sync.preview_batch(setup_params)
             results = execute_via_stream(test_api, preview, setup_params)
 
             # Should have 1 action for pip install
@@ -484,14 +441,14 @@ class TestSetupCLI:
             assert results.manifest_results[0].results[0].success
 
     @staticmethod
-    def test_install_missing_manifest_error() -> None:
+    def test_sync_missing_manifest_error() -> None:
         """Test that missing manifest shows error in CLI"""
         runner = CliRunner()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = runner.invoke(
                 app,
-                ['install', '--dry-run', '--path', tmpdir],
+                ['sync', '--dry-run', '--path', tmpdir],
             )
 
             assert result.exit_code == EXIT_CODE_FAILURE
@@ -507,16 +464,16 @@ class TestManifestValidation:
 
     @staticmethod
     def test_valid_manifest(test_api: API) -> None:
-        """A well-formed manifest with recognized plugins returns valid=True"""
+        """A well-formed manifest with recognized backends returns valid=True"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'packages': {'pip': ['requests']},
+                'state': {'python': ['requests']},
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is True
             assert len(result.errors) == 0
@@ -524,7 +481,7 @@ class TestManifestValidation:
     @staticmethod
     def test_path_not_found(test_api: API) -> None:
         """Non-existent path produces PATH_NOT_FOUND error"""
-        result = test_api.update.validate_manifest(Path('/nonexistent/path'))
+        result = test_api.sync.validate_manifest(Path('/nonexistent/path'))
 
         assert result.valid is False
         assert len(result.errors) == 1
@@ -534,7 +491,7 @@ class TestManifestValidation:
     def test_no_manifest_in_directory(test_api: API) -> None:
         """Empty directory produces NO_MANIFEST error"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
             assert len(result.errors) == 1
@@ -547,7 +504,7 @@ class TestManifestValidation:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_path.write_text('{bad json!!!}')
 
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
             assert result.errors[0].code == ManifestValidationCode.SYNTAX_ERROR
@@ -559,7 +516,7 @@ class TestManifestValidation:
             toml_path = Path(tmpdir) / 'pyproject.toml'
             toml_path.write_text('[[[invalid toml')
 
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
             assert result.errors[0].code == ManifestValidationCode.SYNTAX_ERROR
@@ -569,10 +526,10 @@ class TestManifestValidation:
         """Unrecognized schema version produces UNSUPPORTED_VERSION error"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '99', 'packages': {'pip': ['requests']}}
+            manifest_data = {'version': '99', 'state': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
             version_errors = [e for e in result.errors if e.code == ManifestValidationCode.UNSUPPORTED_VERSION]
@@ -580,40 +537,19 @@ class TestManifestValidation:
             assert version_errors[0].field == 'version'
 
     @staticmethod
-    def test_unknown_plugin_in_packages(test_api: API) -> None:
-        """Unrecognized plugin name in packages produces UNKNOWN_PLUGIN error"""
+    def test_unknown_backend_in_state(test_api: API) -> None:
+        """Unrecognized backend name in state produces UNKNOWN_PLUGIN error"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '1', 'packages': {'nonexistent_manager': ['foo']}}
+            manifest_data = {'version': '1', 'state': {'nonexistent_backend': ['foo']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
             plugin_errors = [e for e in result.errors if e.code == ManifestValidationCode.UNKNOWN_PLUGIN]
             assert len(plugin_errors) == 1
-            assert plugin_errors[0].field == 'packages.nonexistent_manager'
-
-    @staticmethod
-    def test_unknown_plugin_in_prerequisites(test_api: API) -> None:
-        """Unrecognized plugin in prerequisites produces UNKNOWN_PLUGIN error"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {
-                'version': '1',
-                'prerequisites': [{'plugin': 'nonexistent'}],
-                'packages': {'pip': ['requests']},
-            }
-            manifest_path.write_text(json.dumps(manifest_data))
-
-            result = test_api.update.validate_manifest(Path(tmpdir))
-
-            assert result.valid is False
-            plugin_errors = [e for e in result.errors if e.code == ManifestValidationCode.UNKNOWN_PLUGIN]
-            assert len(plugin_errors) >= 1
-            prereq_error = [e for e in plugin_errors if 'prerequisites' in e.field]
-            assert len(prereq_error) == 1
-            assert prereq_error[0].field == 'prerequisites[0].plugin'
+            assert plugin_errors[0].field == 'state.nonexistent_backend'
 
     @staticmethod
     def test_invalid_package_name_warning(test_api: API) -> None:
@@ -625,10 +561,10 @@ class TestManifestValidation:
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '1', 'packages': {'pip': ['valid-package', '!!!invalid!!!']}}
+            manifest_data = {'version': '1', 'state': {'python': ['valid-package', '!!!invalid!!!']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
             schema_errors = [e for e in result.errors if e.code == ManifestValidationCode.SCHEMA_INVALID]
@@ -637,57 +573,38 @@ class TestManifestValidation:
 
     @staticmethod
     def test_duplicate_packages_warning(test_api: API) -> None:
-        """Same package under multiple plugins produces DUPLICATE_PACKAGE warning"""
+        """Same package under multiple backends produces DUPLICATE_PACKAGE warning"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'packages': {
-                    'pip': ['requests'],
-                    'pipx': ['requests'],
+                'state': {
+                    'python': ['requests'],
+                    'python-tool': ['requests'],
                 },
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             dup_warnings = [w for w in result.warnings if w.code == ManifestValidationCode.DUPLICATE_PACKAGE]
             assert len(dup_warnings) == 1
             assert 'requests' in dup_warnings[0].message
 
     @staticmethod
-    def test_field_paths_are_specific(test_api: API) -> None:
-        """Error field paths point to precise locations"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {
-                'version': '1',
-                'prerequisites': [{'plugin': 'nonexistent_a'}, {'plugin': 'nonexistent_b'}],
-                'packages': {'pip': ['requests']},
-            }
-            manifest_path.write_text(json.dumps(manifest_data))
-
-            result = test_api.update.validate_manifest(Path(tmpdir))
-
-            prereq_errors = [e for e in result.errors if 'prerequisites' in e.field]
-            assert len(prereq_errors) == TWO_ERRORS
-            assert prereq_errors[0].field == 'prerequisites[0].plugin'
-            assert prereq_errors[1].field == 'prerequisites[1].plugin'
-
-    @staticmethod
     def test_validation_does_not_execute(test_api: API) -> None:
-        """Validation does not trigger any install operations"""
+        """Validation does not trigger any sync operations"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'packages': {'pip': ['requests']},
-                'post_install': ['echo should-not-run'],
+                'state': {'python': ['requests']},
+                'post_sync': ['echo should-not-run'],
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
             # This should return quickly without executing anything
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is True
 
@@ -697,18 +614,17 @@ class TestManifestValidation:
 
         Invalid package specifiers now fail at schema load time, so the
         manifest with '!!!bad!!!' will produce a SCHEMA_INVALID error
-        before version/plugin checks run.
+        before version/backend checks run.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '99',
-                'prerequisites': [{'plugin': 'nonexistent'}],
-                'packages': {'fake_plugin': ['!!!bad!!!', 'also-bad[>=']},
+                'state': {'fake_backend': ['!!!bad!!!', 'also-bad[>=']},
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            result = test_api.update.validate_manifest(Path(tmpdir))
+            result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
             # Invalid packages now cause schema-load failure, so we get at least 1 error
@@ -722,7 +638,7 @@ class TestManifestSchema:
     @staticmethod
     def test_manifest_schema_returns_dict() -> None:
         """manifest_schema() returns a valid JSON Schema dict"""
-        schema = UpdateCommands.manifest_schema()
+        schema = SyncCommands.manifest_schema()
 
         assert isinstance(schema, dict)
         assert 'properties' in schema
@@ -730,10 +646,205 @@ class TestManifestSchema:
     @staticmethod
     def test_manifest_schema_contains_expected_fields() -> None:
         """Exported schema contains the main manifest fields"""
-        schema = UpdateCommands.manifest_schema()
+        schema = SyncCommands.manifest_schema()
         props = schema['properties']
 
         assert 'version' in props
-        assert 'packages' in props
-        assert 'prerequisites' in props
-        assert 'post_install' in props
+        assert 'state' in props
+        assert 'preferences' in props
+        assert 'post_sync' in props
+
+
+class TestDryRunStateAware:
+    """Tests for state-aware dry-run (skipping already-installed packages)"""
+
+    @staticmethod
+    def test_dry_run_skips_installed_package(test_api: API) -> None:
+        """Test that dry-run detects an already-installed package and marks it skipped."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 'packaging' is always installed (it's a dependency of porringer itself)
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'state': {'python': ['packaging']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            preview = test_api.sync.preview_batch(setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skipped is True
+            assert action_result.skip_reason is not None
+            assert 'packaging' in action_result.skip_reason
+
+    @staticmethod
+    def test_dry_run_does_not_skip_missing_package(test_api: API) -> None:
+        """Test that dry-run reports success without skip for a package that is not installed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            # Use a package name that should never be installed
+            manifest_data = {'version': '1', 'state': {'python': ['zzz-nonexistent-package-xyz']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            preview = test_api.sync.preview_batch(setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skipped is False
+            assert action_result.skip_reason is None
+
+    @staticmethod
+    def test_dry_run_version_satisfied(test_api: API) -> None:
+        """Test that dry-run reports skipped when a version specifier is satisfied."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            # packaging>=1.0 should always be satisfied
+            manifest_data = {'version': '1', 'state': {'python': ['packaging>=1.0']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            preview = test_api.sync.preview_batch(setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skipped is True
+            assert action_result.skip_reason is not None
+            assert 'satisfies' in action_result.skip_reason
+
+    @staticmethod
+    def test_dry_run_version_not_satisfied(test_api: API) -> None:
+        """Test that dry-run does not skip when a version specifier is not satisfied."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            # packaging>=99999 should never be satisfied
+            manifest_data = {'version': '1', 'state': {'python': ['packaging>=99999']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            preview = test_api.sync.preview_batch(setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skipped is False
+
+
+class TestSyncStrategyUpgrade:
+    """Tests for LATEST and EXACT sync strategies."""
+
+    @staticmethod
+    def test_preview_latest_strategy_produces_upgrade_actions(test_api: API) -> None:
+        """Test that preview with LATEST strategy produces PACKAGE actions with Upgrade description."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'state': {'python': ['requests', 'pydantic']},
+                'post_sync': ['echo done'],
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.sync.preview_single(Path(tmpdir), strategy=SyncStrategy.LATEST)
+
+            # 2 packages + 1 command = 3 actions
+            assert len(results.actions) == THREE_ACTIONS
+
+            action_types = [a.action_type for a in results.actions]
+            assert action_types[FIRST_ACTION_INDEX] == SetupActionType.PACKAGE
+            assert action_types[SECOND_ACTION_INDEX] == SetupActionType.PACKAGE
+            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.RUN_COMMAND
+
+    @staticmethod
+    def test_preview_exact_strategy_produces_package_actions(test_api: API) -> None:
+        """Test that preview with EXACT strategy produces PACKAGE actions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'state': {'python': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.sync.preview_single(Path(tmpdir), strategy=SyncStrategy.EXACT)
+
+            assert len(results.actions) == 1
+            assert results.actions[0].action_type == SetupActionType.PACKAGE
+
+    @staticmethod
+    def test_preview_batch_latest_strategy(test_api: API) -> None:
+        """Test that batch preview with LATEST strategy threads strategy through."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'state': {'python': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            params = SetupParameters(paths=Path(tmpdir), strategy=SyncStrategy.LATEST)
+            results = test_api.sync.preview_batch(params)
+
+            assert len(results.manifest_results) == 1
+            assert results.manifest_results[0].actions[0].action_type == SetupActionType.PACKAGE
+
+    @staticmethod
+    def test_default_strategy_is_minimal(test_api: API) -> None:
+        """Test that default strategy produces PACKAGE actions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'state': {'python': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.sync.preview_single(Path(tmpdir))
+
+            assert results.actions[0].action_type == SetupActionType.PACKAGE
+
+    @staticmethod
+    def test_upgrade_action_description(test_api: API) -> None:
+        """Test that upgrade actions have 'Upgrade' in their description."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'state': {'python': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.sync.preview_single(Path(tmpdir), strategy=SyncStrategy.LATEST)
+
+            assert 'Upgrade' in results.actions[0].description
+
+    @staticmethod
+    def test_dry_run_upgrade_installed_package(test_api: API) -> None:
+        """Test that dry-run upgrade of an installed package succeeds without skip."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 'packaging' is always installed
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'state': {'python': ['packaging']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True, strategy=SyncStrategy.LATEST)
+            preview = test_api.sync.preview_batch(setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            # Upgrade of an installed package should NOT be skipped
+            assert action_result.skipped is False
+
+    @staticmethod
+    def test_dry_run_upgrade_missing_package(test_api: API) -> None:
+        """Test dry-run upgrade of a missing package reports install fallback."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'state': {'python': ['zzz-nonexistent-package-xyz']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True, strategy=SyncStrategy.LATEST)
+            preview = test_api.sync.preview_batch(setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skip_reason is not None
+            assert 'install' in action_result.skip_reason.lower()

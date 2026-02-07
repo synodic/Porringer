@@ -21,6 +21,12 @@ class NpmEnvironment(Environment):
 
     @staticmethod
     @override
+    def package_backend() -> str:
+        """Npm manages the ``node`` package backend."""
+        return 'node'
+
+    @staticmethod
+    @override
     def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via npm."""
         # npm uses name@constraint syntax for version pinning

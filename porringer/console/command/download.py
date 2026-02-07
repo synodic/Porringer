@@ -82,7 +82,7 @@ def download_default(
         timeout=timeout,
     )
 
-    result = api.update.download(params, _create_progress_callback(configuration))
+    result = api.sync.download(params, _create_progress_callback(configuration))
     configuration.console.print()  # Newline after progress
 
     if result.success:

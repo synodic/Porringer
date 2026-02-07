@@ -8,13 +8,9 @@ from typing import override
 from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
-    ProviderCapability,
     UninstallParameters,
 )
 from porringer.core.schema import Package, PackageRef
-
-# Capability identifier for Python runtime providers
-PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
 
 
 class BrewEnvironment(Environment):
@@ -39,20 +35,9 @@ class BrewEnvironment(Environment):
 
     @staticmethod
     @override
-    def provides() -> list[ProviderCapability]:
-        """Declares that this plugin provides Python runtime management.
-
-        Homebrew can install versioned Python formulas like python@3.12.
-
-        Returns:
-            A list containing the python-runtime capability
-        """
-        return [
-            ProviderCapability(
-                capability=PYTHON_RUNTIME_CAPABILITY,
-                description='Manages Python runtime versions via Homebrew formulas',
-            ),
-        ]
+    def package_backend() -> str:
+        """Homebrew manages the ``system`` package backend."""
+        return 'system'
 
     @staticmethod
     @override

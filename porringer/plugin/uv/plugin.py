@@ -1,5 +1,6 @@
 """Plugin implementation"""
 
+import json
 import logging
 import subprocess
 from typing import override
@@ -9,7 +10,7 @@ from porringer.core.plugin_schema.environment import (
     PackageParameters,
     UninstallParameters,
 )
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Package, PackageRef, PluginParameters
 
 
 class UvEnvironment(Environment):
@@ -18,6 +19,32 @@ class UvEnvironment(Environment):
     Provides methods to install, search, uninstall, upgrade, and list Python packages using uv
     as the backend package manager.
     """
+
+    def __init__(self, parameters: PluginParameters) -> None:
+        """Initializes the uv environment plugin."""
+        super().__init__(parameters)
+        self._cached_packages: list[Package] | None = None
+
+    @staticmethod
+    @override
+    def package_backend() -> str:
+        """UV manages the ``python`` package backend."""
+        return 'python'
+
+    @staticmethod
+    @override
+    def is_available() -> bool:
+        """Checks if uv is available on the system PATH."""
+        try:
+            result = subprocess.run(
+                ['uv', '--version'],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode == 0
+        except FileNotFoundError, subprocess.SubprocessError:
+            return False
 
     @staticmethod
     @override
@@ -122,9 +149,37 @@ class UvEnvironment(Environment):
 
     @override
     def packages(self) -> list[Package]:
-        """Gathers installed packages in the given environment
+        """Gathers installed packages using ``uv pip list --format=json``.
+
+        Results are cached per-instance so multiple calls within a single
+        sync run don't shell out repeatedly.
 
         Returns:
-            A list of packages
+            A list of installed packages.
         """
-        return []
+        if self._cached_packages is not None:
+            return self._cached_packages
+
+        logger = logging.getLogger('porringer.uv.packages')
+        try:
+            result = subprocess.run(
+                ['uv', 'pip', 'list', '--format=json'],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                logger.error('uv pip list failed: %s', result.stderr)
+                self._cached_packages = []
+                return self._cached_packages
+
+            entries: list[dict[str, str]] = json.loads(result.stdout)
+            self._cached_packages = [Package(name=entry['name'], version=entry.get('version')) for entry in entries]
+        except FileNotFoundError:
+            logger.error('uv not found on PATH')
+            self._cached_packages = []
+        except (json.JSONDecodeError, subprocess.SubprocessError) as e:
+            logger.error('Failed to list uv packages: %s', e)
+            self._cached_packages = []
+
+        return self._cached_packages
