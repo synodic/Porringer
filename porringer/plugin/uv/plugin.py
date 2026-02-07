@@ -31,20 +31,11 @@ class UvEnvironment(Environment):
         """UV manages the ``python`` package backend."""
         return 'python'
 
-    @staticmethod
+    @classmethod
     @override
-    def is_available() -> bool:
-        """Checks if uv is available on the system PATH."""
-        try:
-            result = subprocess.run(
-                ['uv', '--version'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            return result.returncode == 0
-        except FileNotFoundError, subprocess.SubprocessError:
-            return False
+    def tool_name(cls) -> str:
+        """UV wraps the ``uv`` CLI."""
+        return 'uv'
 
     @staticmethod
     @override

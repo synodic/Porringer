@@ -57,27 +57,11 @@ class PipEnvironment(Environment):
         """Pip manages the ``python`` package backend."""
         return 'python'
 
-    @staticmethod
+    @classmethod
     @override
-    def is_available() -> bool:
-        """Checks if pip is available on the system PATH.
-
-        Runs ``python -m pip --version`` to verify that both Python and pip
-        are accessible from the current environment.
-
-        Returns:
-            True if pip is available, False otherwise.
-        """
-        try:
-            result = subprocess.run(
-                ['python', '-m', 'pip', '--version'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            return result.returncode == 0
-        except FileNotFoundError, subprocess.SubprocessError:
-            return False
+    def tool_name(cls) -> str:
+        """Pip wraps the ``pip`` CLI."""
+        return 'pip'
 
     @staticmethod
     @override
