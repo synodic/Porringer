@@ -392,6 +392,8 @@ class UpdateCommands:
         # Add package actions
         for plugin_name, packages in manifest.packages.items():
             for package in packages:
+                if not package.is_applicable():
+                    continue
                 actions.append(
                     SetupAction(
                         action_type=SetupActionType.PACKAGE,
