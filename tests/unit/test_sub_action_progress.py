@@ -1,20 +1,30 @@
 """Tests for progress event stream and sub-action progress."""
 
 import asyncio
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from porringer.backend.command.update import UpdateCommands
 from porringer.core.plugin_schema.environment import PackageParameters
 from porringer.core.schema import PackageRef
 from porringer.plugin.pip.plugin import PipEnvironment
 from porringer.schema import (
+    BatchSetupResults,
     ProgressEvent,
     ProgressEventKind,
     SetupAction,
+    SetupActionResult,
     SetupActionType,
+    SetupParameters,
+    SetupResults,
     SubActionProgress,
 )
+
+HALF_PROGRESS = 0.5
+MIN_DOWNLOAD_UPDATES = 2
+MIN_STREAM_EVENTS = 2
 
 
 def _make_action(package: str = 'requests') -> SetupAction:
@@ -32,15 +42,22 @@ class TestSubActionProgress:
 
     @staticmethod
     def test_basic_construction() -> None:
+        """SubActionProgress stores provided fields."""
         action = _make_action()
-        progress = SubActionProgress(action=action, phase='downloading', progress=0.5, message='Downloading ruff')
+        progress = SubActionProgress(
+            action=action,
+            phase='downloading',
+            progress=HALF_PROGRESS,
+            message='Downloading ruff',
+        )
         assert progress.action is action
         assert progress.phase == 'downloading'
-        assert progress.progress == 0.5
+        assert progress.progress == HALF_PROGRESS
         assert progress.message == 'Downloading ruff'
 
     @staticmethod
     def test_defaults() -> None:
+        """SubActionProgress defaults optional fields."""
         action = _make_action()
         progress = SubActionProgress(action=action, phase='resolving')
         assert progress.progress is None
@@ -48,6 +65,7 @@ class TestSubActionProgress:
 
     @staticmethod
     def test_indeterminate_progress() -> None:
+        """SubActionProgress accepts None progress."""
         action = _make_action()
         progress = SubActionProgress(action=action, phase='installing', progress=None, message='Installing packages')
         assert progress.progress is None
@@ -58,6 +76,7 @@ class TestProgressEvent:
 
     @staticmethod
     def test_action_started() -> None:
+        """ACTION_STARTED event populates expected fields."""
         action = _make_action()
         event = ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action)
         assert event.kind == ProgressEventKind.ACTION_STARTED
@@ -67,8 +86,7 @@ class TestProgressEvent:
 
     @staticmethod
     def test_action_completed() -> None:
-        from porringer.schema import SetupActionResult
-
+        """ACTION_COMPLETED event includes result."""
         action = _make_action()
         result = SetupActionResult(action=action, success=True, message='ok')
         event = ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
@@ -77,8 +95,9 @@ class TestProgressEvent:
 
     @staticmethod
     def test_sub_action_progress() -> None:
+        """SUB_ACTION_PROGRESS event includes sub-action."""
         action = _make_action()
-        sub = SubActionProgress(action=action, phase='downloading', progress=0.5, message='pkg')
+        sub = SubActionProgress(action=action, phase='downloading', progress=HALF_PROGRESS, message='pkg')
         event = ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=action, sub_action=sub)
         assert event.kind == ProgressEventKind.SUB_ACTION_PROGRESS
         assert event.sub_action is sub
@@ -86,12 +105,13 @@ class TestProgressEvent:
     @staticmethod
     def test_event_kind_values() -> None:
         """All expected enum members exist."""
-        assert ProgressEventKind.ACTION_STARTED is not None
-        assert ProgressEventKind.ACTION_COMPLETED is not None
-        assert ProgressEventKind.SUB_ACTION_PROGRESS is not None
+        assert ProgressEventKind.ACTION_STARTED
+        assert ProgressEventKind.ACTION_COMPLETED
+        assert ProgressEventKind.SUB_ACTION_PROGRESS
 
     @staticmethod
     def test_event_defaults() -> None:
+        """ProgressEvent defaults optional fields to None."""
         action = _make_action()
         event = ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action)
         assert event.result is None
@@ -103,17 +123,20 @@ class TestPackageParametersProgressCallback:
 
     @staticmethod
     def test_default_is_none() -> None:
+        """PackageParameters default progress_callback is None."""
         params = PackageParameters(package=PackageRef(name='requests'))
         assert params.progress_callback is None
 
     @staticmethod
     def test_accepts_callback() -> None:
+        """PackageParameters accepts a progress callback."""
         cb = MagicMock()
         params = PackageParameters(package=PackageRef(name='requests'), progress_callback=cb)
         assert params.progress_callback is cb
 
     @staticmethod
     def test_callback_excluded_from_serialization() -> None:
+        """Progress callback is excluded from serialization."""
         cb = MagicMock()
         params = PackageParameters(package=PackageRef(name='requests'), progress_callback=cb)
         data = params.model_dump()
@@ -125,6 +148,7 @@ class TestPipProgressLineParsing:
 
     @staticmethod
     def test_downloading_line() -> None:
+        """Pip parser captures download start lines."""
         action = _make_action()
         collected: list[SubActionProgress] = []
 
@@ -141,6 +165,7 @@ class TestPipProgressLineParsing:
 
     @staticmethod
     def test_progress_percentage_line() -> None:
+        """Pip parser captures download percentages."""
         action = _make_action()
         collected: list[SubActionProgress] = []
 
@@ -152,10 +177,11 @@ class TestPipProgressLineParsing:
 
         assert len(collected) == 1
         assert collected[0].phase == 'downloading'
-        assert collected[0].progress == pytest.approx(0.5)
+        assert collected[0].progress == pytest.approx(HALF_PROGRESS)
 
     @staticmethod
     def test_installing_line() -> None:
+        """Pip parser captures installing lines."""
         action = _make_action()
         collected: list[SubActionProgress] = []
 
@@ -171,6 +197,7 @@ class TestPipProgressLineParsing:
 
     @staticmethod
     def test_already_satisfied_line() -> None:
+        """Pip parser captures already satisfied lines."""
         action = _make_action()
         collected: list[SubActionProgress] = []
 
@@ -186,6 +213,7 @@ class TestPipProgressLineParsing:
 
     @staticmethod
     def test_irrelevant_line_is_ignored() -> None:
+        """Pip parser ignores unrelated lines."""
         action = _make_action()
         collected: list[SubActionProgress] = []
 
@@ -223,7 +251,7 @@ class TestPipProgressLineParsing:
 
         # Check download progress increases
         download_updates = [u for u in collected if u.phase == 'downloading']
-        assert len(download_updates) >= 2
+        assert len(download_updates) >= MIN_DOWNLOAD_UPDATES
         progresses = [u.progress for u in download_updates if u.progress is not None]
         assert progresses == sorted(progresses)  # monotonically increasing
 
@@ -234,21 +262,12 @@ class TestExecuteStream:
     @staticmethod
     def test_stream_yields_events() -> None:
         """execute_stream yields ProgressEvent items via the queue-based bridge."""
-        from porringer.backend.command.update import UpdateCommands
-        from porringer.schema import (
-            BatchSetupResults,
-            SetupParameters,
-            SetupResults,
-        )
-
         action = _make_action('test-pkg')
         setup_results = SetupResults(
             actions=[action],
             results=[],
         )
         setup_results.manifest_path = None  # Will be set below
-
-        from pathlib import Path
 
         preview = SetupResults(actions=[action], results=[])
         preview.manifest_path = Path('.')
@@ -273,15 +292,6 @@ class TestExecuteStream:
     @staticmethod
     def test_stream_cancellation() -> None:
         """Breaking from the stream cancels the background task."""
-        from pathlib import Path
-
-        from porringer.backend.command.update import UpdateCommands
-        from porringer.schema import (
-            BatchSetupResults,
-            SetupParameters,
-            SetupResults,
-        )
-
         actions = [_make_action(f'pkg-{i}') for i in range(5)]
         preview = SetupResults(actions=actions, results=[])
         preview.manifest_path = Path('.')
@@ -294,9 +304,9 @@ class TestExecuteStream:
             collected: list[ProgressEvent] = []
             async for event in commands.execute_stream(previews, params):
                 collected.append(event)
-                if len(collected) >= 2:
+                if len(collected) >= MIN_STREAM_EVENTS:
                     break  # early exit
             return collected
 
         events = asyncio.run(run())
-        assert len(events) >= 2
+        assert len(events) >= MIN_STREAM_EVENTS

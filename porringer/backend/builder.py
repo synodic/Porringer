@@ -67,9 +67,8 @@ class Builder:
 
         return plugin_types
 
-    def _resolve_dependencies(
-        self, plugins: list[PluginInformation[Environment]]
-    ) -> list[PluginInformation[Environment]]:
+    @staticmethod
+    def _resolve_dependencies(plugins: list[PluginInformation[Environment]]) -> list[PluginInformation[Environment]]:
         """Resolves plugin dependencies, filtering out plugins with unmet dependencies.
 
         Args:

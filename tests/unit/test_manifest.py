@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from porringer.api import API
+from porringer.backend.command.update import UpdateCommands
 from porringer.console.entry import app
 from porringer.schema import (
     ManifestValidationCode,
@@ -40,6 +41,8 @@ SINGLE_MANIFEST = 1
 DUAL_MANIFESTS = 2
 THREE_ACTIONS = 3
 TWO_ACTIONS = 2
+TWO_PACKAGES = 2
+THREE_PACKAGES = 3
 SINGLE_FAILED_PATH = 1
 NO_FAILED_PATHS = 0
 
@@ -176,7 +179,7 @@ class TestSetupPreview:
             results = test_api.update.preview_single(Path(tmpdir))
 
             # Only 'requests' (no filter) and 'uvloop' (matching) should be included
-            assert len(results.actions) == 2
+            assert len(results.actions) == TWO_ACTIONS
             package_names = [str(a.package) for a in results.actions]
             assert 'requests' in package_names
             assert 'uvloop' in package_names
@@ -195,7 +198,7 @@ class TestSetupPreview:
 
             results = test_api.update.preview_single(Path(tmpdir))
 
-            assert len(results.actions) == 3
+            assert len(results.actions) == THREE_ACTIONS
 
 
 class TestSetupBatch:
@@ -307,7 +310,7 @@ class TestPackageSpec:
     def test_manifest_coerces_string_packages() -> None:
         """String package entries are coerced to PackageSpec objects"""
         manifest = SetupManifest(packages={'pip': ['requests', 'flask']})
-        assert len(manifest.packages['pip']) == 2
+        assert len(manifest.packages['pip']) == TWO_PACKAGES
         assert str(manifest.packages['pip'][0].name) == 'requests'
         assert manifest.packages['pip'][0].description is None
 
@@ -331,7 +334,7 @@ class TestPackageSpec:
             }
         )
         pkgs = manifest.packages['pip']
-        assert len(pkgs) == 3
+        assert len(pkgs) == THREE_PACKAGES
         assert str(pkgs[0].name) == 'requests'
         assert pkgs[0].description is None
         assert str(pkgs[1].name) == 'ruff'
@@ -451,7 +454,7 @@ class TestManifestMetadata:
 
             results = test_api.update.preview_single(Path(tmpdir))
 
-            assert len(results.actions) == 2
+            assert len(results.actions) == TWO_ACTIONS
             assert str(results.actions[0].package) == 'ruff'
             assert results.actions[0].package_description == 'Fast linter'
             assert str(results.actions[1].package) == 'pytest'
@@ -719,8 +722,6 @@ class TestManifestSchema:
     @staticmethod
     def test_manifest_schema_returns_dict() -> None:
         """manifest_schema() returns a valid JSON Schema dict"""
-        from porringer.backend.command.update import UpdateCommands
-
         schema = UpdateCommands.manifest_schema()
 
         assert isinstance(schema, dict)
@@ -729,8 +730,6 @@ class TestManifestSchema:
     @staticmethod
     def test_manifest_schema_contains_expected_fields() -> None:
         """Exported schema contains the main manifest fields"""
-        from porringer.backend.command.update import UpdateCommands
-
         schema = UpdateCommands.manifest_schema()
         props = schema['properties']
 

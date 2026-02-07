@@ -52,7 +52,8 @@ class SelfCommands:
         """Initialize the SelfCommands class."""
         pass
 
-    async def check(self) -> PackageUpdateInfo:
+    @staticmethod
+    async def check() -> PackageUpdateInfo:
         """Check for updates to the Porringer package by querying PyPI.
 
         Returns:

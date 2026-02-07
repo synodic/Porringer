@@ -15,6 +15,7 @@ from porringer.schema import (
     BatchSetupResults,
     LocalConfiguration,
     ProgressEventKind,
+    SetupActionResult,
     SetupParameters,
     SetupResults,
 )
@@ -26,8 +27,6 @@ def execute_via_stream(api: API, preview: BatchSetupResults, params: SetupParame
     This is a test helper that replaces the removed ``execute_batch`` /
     ``execute_batch_async`` convenience methods.
     """
-    from porringer.schema import SetupActionResult
-
     collected: list[SetupActionResult] = []
 
     async def _run() -> None:

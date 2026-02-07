@@ -4,9 +4,9 @@ import asyncio
 import contextlib
 import hashlib
 import http.client
+import logging
 import tempfile
 from dataclasses import dataclass
-import logging
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
@@ -21,7 +21,6 @@ from porringer.schema import (
     HashAlgorithm,
     ProgressCallback,
 )
-
 
 logger = logging.getLogger(__name__)
 
