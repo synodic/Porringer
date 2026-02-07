@@ -20,7 +20,7 @@ from porringer.schema import (
 def _make_action(package: str = 'requests') -> SetupAction:
     """Create a test SetupAction."""
     return SetupAction(
-        action_type=SetupActionType.INSTALL_PACKAGE,
+        action_type=SetupActionType.PACKAGE,
         description=f'Install {package}',
         plugin='pip',
         package=package,

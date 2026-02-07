@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from porringer.api import API
 from porringer.console.entry import app
-from porringer.schema import SetupActionType, SetupParameters
+from porringer.schema import SetupActionType, SetupMode, SetupParameters
 from porringer.utility.exception import ManifestError
 from tests.conftest import execute_via_stream
 
@@ -104,8 +104,8 @@ class TestSetupPreview:
 
             action_types = [a.action_type for a in results.actions]
             assert action_types[FIRST_ACTION_INDEX] == SetupActionType.CHECK_PLUGIN
-            assert action_types[SECOND_ACTION_INDEX] == SetupActionType.INSTALL_PACKAGE
-            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.INSTALL_PACKAGE
+            assert action_types[SECOND_ACTION_INDEX] == SetupActionType.PACKAGE
+            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.PACKAGE
             assert action_types[FOURTH_ACTION_INDEX] == SetupActionType.RUN_COMMAND
 
 
@@ -323,3 +323,119 @@ class TestDryRunStateAware:
             action_result = results.manifest_results[0].results[0]
             assert action_result.success is True
             assert action_result.skipped is False
+
+
+class TestSetupModeUpgrade:
+    """Tests for upgrade and ensure execution modes."""
+
+    @staticmethod
+    def test_preview_upgrade_mode_produces_upgrade_actions(test_api: API) -> None:
+        """Test that preview with UPGRADE mode produces PACKAGE actions with Upgrade description."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'prerequisites': [{'plugin': 'pip'}],
+                'packages': {'pip': ['requests', 'pydantic']},
+                'post_install': ['echo done'],
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir), mode=SetupMode.UPGRADE)
+
+            # 1 check + 2 packages + 1 command = 4 actions
+            assert len(results.actions) == EXPECTED_ACTIONS_WITH_PREREQUISITES
+
+            action_types = [a.action_type for a in results.actions]
+            assert action_types[FIRST_ACTION_INDEX] == SetupActionType.CHECK_PLUGIN
+            assert action_types[SECOND_ACTION_INDEX] == SetupActionType.PACKAGE
+            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.PACKAGE
+            assert action_types[FOURTH_ACTION_INDEX] == SetupActionType.RUN_COMMAND
+
+    @staticmethod
+    def test_preview_ensure_mode_produces_package_actions(test_api: API) -> None:
+        """Test that preview with ENSURE mode produces PACKAGE actions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir), mode=SetupMode.ENSURE)
+
+            assert len(results.actions) == 1
+            assert results.actions[0].action_type == SetupActionType.PACKAGE
+
+    @staticmethod
+    def test_preview_batch_upgrade_mode(test_api: API) -> None:
+        """Test that batch preview with UPGRADE mode threads mode through."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            params = SetupParameters(paths=Path(tmpdir), mode=SetupMode.UPGRADE)
+            results = test_api.update.preview_batch(params)
+
+            assert len(results.manifest_results) == 1
+            assert results.manifest_results[0].actions[0].action_type == SetupActionType.PACKAGE
+
+    @staticmethod
+    def test_default_mode_is_install(test_api: API) -> None:
+        """Test that default mode produces PACKAGE actions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir))
+
+            assert results.actions[0].action_type == SetupActionType.PACKAGE
+
+    @staticmethod
+    def test_upgrade_action_description(test_api: API) -> None:
+        """Test that upgrade actions have 'Upgrade' in their description."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.update.preview_single(Path(tmpdir), mode=SetupMode.UPGRADE)
+
+            assert 'Upgrade' in results.actions[0].description
+
+    @staticmethod
+    def test_dry_run_upgrade_installed_package(test_api: API) -> None:
+        """Test that dry-run upgrade of an installed package succeeds without skip."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 'packaging' is always installed
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['packaging']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True, mode=SetupMode.UPGRADE)
+            preview = test_api.update.preview_batch(setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            # Upgrade of an installed package should NOT be skipped
+            assert action_result.skipped is False
+
+    @staticmethod
+    def test_dry_run_upgrade_missing_package(test_api: API) -> None:
+        """Test dry-run upgrade of a missing package reports install fallback."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'pip': ['zzz-nonexistent-package-xyz']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True, mode=SetupMode.UPGRADE)
+            preview = test_api.update.preview_batch(setup_params)
+            results = execute_via_stream(test_api, preview, setup_params)
+
+            assert len(results.manifest_results) == 1
+            action_result = results.manifest_results[0].results[0]
+            assert action_result.success is True
+            assert action_result.skip_reason is not None
+            assert 'install' in action_result.skip_reason.lower()

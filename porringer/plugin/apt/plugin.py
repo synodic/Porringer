@@ -65,6 +65,12 @@ class AptEnvironment(Environment):
         """Returns the CLI command to install a package via apt."""
         return ['apt', 'install', str(package)]
 
+    @staticmethod
+    @override
+    def upgrade_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to upgrade a package via apt."""
+        return ['apt', 'install', '--only-upgrade', str(package)]
+
     @override
     def install(self, params: InstallParameters) -> Package | None:
         """Installs a package using APT.
@@ -211,56 +217,51 @@ class AptEnvironment(Environment):
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> list[Package | None]:
-        """Upgrades packages using APT.
+    def upgrade(self, params: UpgradeParameters) -> Package | None:
+        """Upgrades a package using APT.
 
         Note: Requires root privileges. Run with sudo.
 
         Args:
-            params: Upgrade parameters containing the list of package names
+            params: Upgrade parameters containing the package name
 
         Returns:
-            A list of upgraded packages, with None for any that failed
+            The upgraded package, or None if the upgrade failed
         """
         logger = logging.getLogger('porringer.apt.upgrade')
-        results: list[Package | None] = []
+        name = params.name
+        package = str(name)
 
-        for name in params.names:
-            package = str(name)
-
-            if params.dry:
-                args = ['apt', 'install', '--simulate', '--only-upgrade', package]
-                logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                try:
-                    result = subprocess.run(args, capture_output=True, text=True, check=False)
-                    logger.info(result.stdout)
-                except Exception:
-                    pass
-                results.append(Package(name=name, version=None))
-                continue
-
-            # Use install --only-upgrade to upgrade a specific package
-            args = ['apt', 'install', '-y', '--only-upgrade', package]
-
+        if params.dry:
+            args = ['apt', 'install', '--simulate', '--only-upgrade', package]
+            logger.info(f'[dry-run] Would run: {" ".join(args)}')
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
-                if result.returncode == 0:
-                    version = self.__class__._get_package_version(package)
-                    results.append(Package(name=name, version=version))
-                else:
-                    logger.error(result.stderr)
-                    if 'Permission denied' in result.stderr or 'are you root?' in result.stderr:
-                        logger.error('APT requires root privileges. Run with sudo.')
-                    results.append(None)
-            except FileNotFoundError:
-                logger.error('APT not found')
-                results.append(None)
-            except Exception as e:
-                logger.error(f'Failed to upgrade {package}: {e}')
-                results.append(None)
+            except Exception:
+                pass
+            return Package(name=name, version=None)
 
-        return results
+        # Use install --only-upgrade to upgrade a specific package
+        args = ['apt', 'install', '-y', '--only-upgrade', package]
+
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, check=False)
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                if 'Permission denied' in result.stderr or 'are you root?' in result.stderr:
+                    logger.error('APT requires root privileges. Run with sudo.')
+                return None
+        except FileNotFoundError:
+            logger.error('APT not found')
+            return None
+        except Exception as e:
+            logger.error(f'Failed to upgrade {package}: {e}')
+            return None
+
+        version = self.__class__._get_package_version(package)
+        return Package(name=name, version=version)
 
     @override
     def packages(self) -> list[Package]:

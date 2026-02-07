@@ -93,6 +93,12 @@ class PipEnvironment(Environment):
 
     @staticmethod
     @override
+    def upgrade_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to upgrade a package via pip."""
+        return ['pip', 'install', '--upgrade', str(package)]
+
+    @staticmethod
+    @override
     def supports_parallel() -> bool:
         """Pip does not support parallel installs safely due to potential conflicts."""
         return False
@@ -167,7 +173,7 @@ class PipEnvironment(Environment):
         assert params.progress_callback is not None  # guaranteed by caller
 
         action = SetupAction(
-            action_type=SetupActionType.INSTALL_PACKAGE,
+            action_type=SetupActionType.PACKAGE,
             description=f'Install {params.name}',
             plugin='pip',
             package=str(params.name),
@@ -341,32 +347,29 @@ class PipEnvironment(Environment):
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> list[Package | None]:
-        """Upgrades the given list of packages using pip."""
+    def upgrade(self, params: UpgradeParameters) -> Package | None:
+        """Upgrades the given package using pip."""
         logger = logging.getLogger('porringer.pip.upgrade')
-        results: list[Package | None] = []
-        for name in params.names:
-            args = ['python', '-m', 'pip', 'install', '--upgrade', str(name)]
-            if params.dry:
-                args.append('--dry-run')
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                logger.info(result.stdout)
-                if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
-                else:
-                    logger.error(result.stderr)
-                    results.append(None)
-            except FileNotFoundError:
-                logger.error('Python not found')
-                results.append(None)
-            except subprocess.SubprocessError as e:
-                logger.error(f'Failed to upgrade {name}: {e}')
-                results.append(None)
-            except Exception as e:
-                logger.error(f'Failed to upgrade {name}: {e}')
-                results.append(None)
-        return results
+        name = params.name
+        args = ['python', '-m', 'pip', 'install', '--upgrade', str(name)]
+        if params.dry:
+            args.append('--dry-run')
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, check=False)
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                return None
+        except FileNotFoundError:
+            logger.error('Python not found')
+            return None
+        except subprocess.SubprocessError as e:
+            logger.error(f'Failed to upgrade {name}: {e}')
+            return None
+        except Exception as e:
+            logger.error(f'Failed to upgrade {name}: {e}')
+            return None
+        return Package(name=name, version=None)
 
     @override
     def packages(self) -> list[Package]:

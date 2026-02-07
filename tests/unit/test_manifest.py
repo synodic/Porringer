@@ -11,7 +11,6 @@ from typer.testing import CliRunner
 from porringer.api import API
 from porringer.console.entry import app
 from porringer.schema import (
-    ManifestDiagnosticSeverity,
     ManifestValidationCode,
     Prerequisite,
     SetupActionType,
@@ -152,8 +151,8 @@ class TestSetupPreview:
 
             action_types = [a.action_type for a in results.actions]
             assert action_types[FIRST_ACTION_INDEX] == SetupActionType.CHECK_PLUGIN
-            assert action_types[SECOND_ACTION_INDEX] == SetupActionType.INSTALL_PACKAGE
-            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.INSTALL_PACKAGE
+            assert action_types[SECOND_ACTION_INDEX] == SetupActionType.PACKAGE
+            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.PACKAGE
             assert action_types[FOURTH_ACTION_INDEX] == SetupActionType.RUN_COMMAND
 
 
