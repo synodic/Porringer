@@ -177,7 +177,7 @@ class TestSetupPreview:
 
             # Only 'requests' (no filter) and 'uvloop' (matching) should be included
             assert len(results.actions) == 2
-            package_names = [a.package for a in results.actions]
+            package_names = [str(a.package) for a in results.actions]
             assert 'requests' in package_names
             assert 'uvloop' in package_names
             assert 'pywin32' not in package_names
@@ -308,14 +308,14 @@ class TestPackageSpec:
         """String package entries are coerced to PackageSpec objects"""
         manifest = SetupManifest(packages={'pip': ['requests', 'flask']})
         assert len(manifest.packages['pip']) == 2
-        assert manifest.packages['pip'][0].name == 'requests'
+        assert str(manifest.packages['pip'][0].name) == 'requests'
         assert manifest.packages['pip'][0].description is None
 
     @staticmethod
     def test_manifest_accepts_object_packages() -> None:
         """Object package entries are parsed as PackageSpec"""
         manifest = SetupManifest(packages={'pip': [{'name': 'ruff', 'description': 'Fast linter'}]})
-        assert manifest.packages['pip'][0].name == 'ruff'
+        assert str(manifest.packages['pip'][0].name) == 'ruff'
         assert manifest.packages['pip'][0].description == 'Fast linter'
 
     @staticmethod
@@ -332,11 +332,11 @@ class TestPackageSpec:
         )
         pkgs = manifest.packages['pip']
         assert len(pkgs) == 3
-        assert pkgs[0].name == 'requests'
+        assert str(pkgs[0].name) == 'requests'
         assert pkgs[0].description is None
-        assert pkgs[1].name == 'ruff'
+        assert str(pkgs[1].name) == 'ruff'
         assert pkgs[1].description == 'Fast linter'
-        assert pkgs[2].name == 'pytest'
+        assert str(pkgs[2].name) == 'pytest'
         assert pkgs[2].description is None
 
     @staticmethod
@@ -387,7 +387,7 @@ class TestPackageSpec:
         """Object package entries with platforms should be parsed correctly"""
         manifest = SetupManifest(packages={'pip': [{'name': 'pywin32', 'platforms': ['win32']}]})
         spec = manifest.packages['pip'][0]
-        assert spec.name == 'pywin32'
+        assert str(spec.name) == 'pywin32'
         assert spec.platforms == ['win32']
 
 
@@ -452,9 +452,9 @@ class TestManifestMetadata:
             results = test_api.update.preview_single(Path(tmpdir))
 
             assert len(results.actions) == 2
-            assert results.actions[0].package == 'ruff'
+            assert str(results.actions[0].package) == 'ruff'
             assert results.actions[0].package_description == 'Fast linter'
-            assert results.actions[1].package == 'pytest'
+            assert str(results.actions[1].package) == 'pytest'
             assert results.actions[1].package_description is None
 
 
@@ -614,7 +614,12 @@ class TestManifestValidation:
 
     @staticmethod
     def test_invalid_package_name_warning(test_api: API) -> None:
-        """Invalid package specifier produces INVALID_PACKAGE_NAME warning"""
+        """Invalid package specifier is caught at schema validation time.
+
+        Since PackageRef validates names on construction, invalid package
+        specifiers now fail during manifest loading (SCHEMA_INVALID) rather
+        than during the later package-name validity check.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {'version': '1', 'packages': {'pip': ['valid-package', '!!!invalid!!!']}}
@@ -622,9 +627,10 @@ class TestManifestValidation:
 
             result = test_api.update.validate_manifest(Path(tmpdir))
 
-            pkg_warnings = [w for w in result.warnings if w.code == ManifestValidationCode.INVALID_PACKAGE_NAME]
-            assert len(pkg_warnings) == 1
-            assert pkg_warnings[0].field == 'packages.pip[1].name'
+            assert result.valid is False
+            schema_errors = [e for e in result.errors if e.code == ManifestValidationCode.SCHEMA_INVALID]
+            assert len(schema_errors) == 1
+            assert '!!!invalid!!!' in schema_errors[0].message
 
     @staticmethod
     def test_duplicate_packages_warning(test_api: API) -> None:
@@ -684,7 +690,12 @@ class TestManifestValidation:
 
     @staticmethod
     def test_multiple_errors_and_warnings(test_api: API) -> None:
-        """Multiple issues are all reported in a single result"""
+        """Multiple issues are all reported in a single result.
+
+        Invalid package specifiers now fail at schema load time, so the
+        manifest with '!!!bad!!!' will produce a SCHEMA_INVALID error
+        before version/plugin checks run.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
@@ -697,8 +708,9 @@ class TestManifestValidation:
             result = test_api.update.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
-            # At least: unsupported_version + unknown prereq plugin + unknown packages plugin
-            assert len(result.errors) >= THREE_WARNINGS
+            # Invalid packages now cause schema-load failure, so we get at least 1 error
+            assert len(result.errors) >= 1
+            assert any(e.code == ManifestValidationCode.SCHEMA_INVALID for e in result.errors)
 
 
 class TestManifestSchema:

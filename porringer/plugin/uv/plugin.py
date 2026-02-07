@@ -6,11 +6,10 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageRef
 
 
 class UvEnvironment(Environment):
@@ -22,21 +21,21 @@ class UvEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via uv."""
-        return ['uv', 'pip', 'install', str(package)]
+        return ['uv', 'pip', 'install', package.specifier]
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via uv."""
-        return ['uv', 'pip', 'install', '--upgrade', str(package)]
+        return ['uv', 'pip', 'install', '--upgrade', package.specifier]
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using uv."""
         logger = logging.getLogger('porringer.uv.install')
-        args = ['uv', 'pip', 'install', str(params.name)]
+        args = ['uv', 'pip', 'install', params.package.specifier]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -49,19 +48,19 @@ class UvEnvironment(Environment):
             logger.error('uv not found. Install it from https://docs.astral.sh/uv')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
-        return Package(name=params.name, version=None)
+        return Package(name=params.package.name, version=None)
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches the environment's sources for a package
 
         Args:
-            name: The package name to search for
+            package: The package reference to search for
 
         Returns:
             The package, or None if it doesn't exist
@@ -73,15 +72,15 @@ class UvEnvironment(Environment):
         """Uninstalls the given list of packages using uv."""
         logger = logging.getLogger('porringer.uv.uninstall')
         results: list[Package | None] = []
-        for name in params.names:
-            args = ['uv', 'pip', 'uninstall', str(name)]
+        for pkg in params.packages:
+            args = ['uv', 'pip', 'uninstall', pkg.name]
             if params.dry:
                 args.append('--dry-run')
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
+                    results.append(Package(name=pkg.name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -89,19 +88,19 @@ class UvEnvironment(Environment):
                 logger.error('uv not found')
                 results.append(None)
             except subprocess.SubprocessError as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
             except Exception as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades the given package using uv."""
         logger = logging.getLogger('porringer.uv.upgrade')
-        name = params.name
-        args = ['uv', 'pip', 'install', '--upgrade', str(name)]
+        pkg = params.package
+        args = ['uv', 'pip', 'install', '--upgrade', pkg.specifier]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -114,12 +113,12 @@ class UvEnvironment(Environment):
             logger.error('uv not found')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
-        return Package(name=name, version=None)
+        return Package(name=pkg.name, version=None)
 
     @override
     def packages(self) -> list[Package]:

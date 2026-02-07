@@ -10,12 +10,11 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     ProviderRequirement,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageRef
 from porringer.schema import SetupAction, SetupActionType, SubActionProgress
 from porringer.utility.utility import async_run_command
 
@@ -87,15 +86,15 @@ class PipEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via pip."""
-        return ['pip', 'install', str(package)]
+        return ['pip', 'install', package.specifier]
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via pip."""
-        return ['pip', 'install', '--upgrade', str(package)]
+        return ['pip', 'install', '--upgrade', package.specifier]
 
     @staticmethod
     @override
@@ -104,10 +103,10 @@ class PipEnvironment(Environment):
         return False
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using pip."""
         logger = logging.getLogger('porringer.pip.install')
-        args = ['python', '-m', 'pip', 'install', str(params.name)]
+        args = ['python', '-m', 'pip', 'install', params.package.specifier]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -120,15 +119,15 @@ class PipEnvironment(Environment):
             logger.error('Python not found. Install Python from https://python.org')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
-        return Package(name=params.name, version=None)
+        return Package(name=params.package.name, version=None)
 
     @override
-    async def async_install(self, params: InstallParameters) -> Package | None:
+    async def async_install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package using pip.
 
         When a progress_callback is provided, streams stderr line-by-line to
@@ -136,18 +135,18 @@ class PipEnvironment(Environment):
         ``async_run_command`` path for zero overhead.
         """
         logger = logging.getLogger('porringer.pip.install')
-        args = ['python', '-m', 'pip', 'install', str(params.name)]
+        args = ['python', '-m', 'pip', 'install', params.package.specifier]
         if params.dry:
             args.append('--dry-run')
 
         if params.progress_callback is None:
             # Fast path — no streaming needed
-            return await self._async_install_simple(args, params.name, logger)
+            return await self._async_install_simple(args, params.package, logger)
 
         return await self._async_install_with_progress(args, params, logger)
 
     @staticmethod
-    async def _async_install_simple(args: list[str], name: PackageName, logger: logging.Logger) -> Package | None:
+    async def _async_install_simple(args: list[str], package: PackageRef, logger: logging.Logger) -> Package | None:
         """Install without progress streaming."""
         try:
             result = await async_run_command(args)
@@ -156,17 +155,17 @@ class PipEnvironment(Environment):
                 logger.error(result.stderr)
                 return None
         except TimeoutError:
-            logger.error(f'Timeout installing {name}')
+            logger.error(f'Timeout installing {package.name}')
             return None
         except Exception as e:
-            logger.error(f'Failed to install {name}: {e}')
+            logger.error(f'Failed to install {package.name}: {e}')
             return None
-        return Package(name=name, version=None)
+        return Package(name=package.name, version=None)
 
     @staticmethod
     async def _async_install_with_progress(
         args: list[str],
-        params: InstallParameters,
+        params: PackageParameters,
         logger: logging.Logger,
     ) -> Package | None:
         """Install with line-by-line stderr streaming for progress reporting."""
@@ -174,9 +173,9 @@ class PipEnvironment(Environment):
 
         action = SetupAction(
             action_type=SetupActionType.PACKAGE,
-            description=f'Install {params.name}',
+            description=f'Install {params.package.specifier}',
             plugin='pip',
-            package=str(params.name),
+            package=params.package,
         )
 
         try:
@@ -186,7 +185,7 @@ class PipEnvironment(Environment):
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError:
-            logger.error(f'Python not found while installing {params.name}')
+            logger.error(f'Python not found while installing {params.package.name}')
             return None
 
         # Report initial phase
@@ -195,7 +194,7 @@ class PipEnvironment(Environment):
                 action=action,
                 phase='resolving',
                 progress=None,
-                message=f'Resolving {params.name}...',
+                message=f'Resolving {params.package.specifier}...',
             )
         )
 
@@ -219,7 +218,7 @@ class PipEnvironment(Environment):
             await asyncio.gather(read_stdout(), read_stderr_lines())
             await process.wait()
         except Exception as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
 
         logger.info(stdout_data.decode('utf-8', errors='replace'))
@@ -234,11 +233,11 @@ class PipEnvironment(Environment):
                 action=action,
                 phase='done',
                 progress=1.0,
-                message=f'Installed {params.name}',
+                message=f'Installed {params.package.name}',
             )
         )
 
-        return Package(name=params.name, version=None)
+        return Package(name=params.package.name, version=None)
 
     @staticmethod
     def _parse_progress_line(
@@ -307,11 +306,11 @@ class PipEnvironment(Environment):
             return
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches the environment's sources for a package
 
         Args:
-            name: The package name to search for
+            package: The package reference to search for
 
         Returns:
             The package, or None if it doesn't exist
@@ -323,15 +322,15 @@ class PipEnvironment(Environment):
         """Uninstalls the given list of packages using pip."""
         logger = logging.getLogger('porringer.pip.uninstall')
         results: list[Package | None] = []
-        for name in params.names:
-            args = ['python', '-m', 'pip', 'uninstall', '-y', str(name)]
+        for pkg in params.packages:
+            args = ['python', '-m', 'pip', 'uninstall', '-y', pkg.name]
             if params.dry:
                 args.append('--dry-run')
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
+                    results.append(Package(name=pkg.name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -339,19 +338,19 @@ class PipEnvironment(Environment):
                 logger.error('Python not found')
                 results.append(None)
             except subprocess.SubprocessError as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
             except Exception as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades the given package using pip."""
         logger = logging.getLogger('porringer.pip.upgrade')
-        name = params.name
-        args = ['python', '-m', 'pip', 'install', '--upgrade', str(name)]
+        pkg = params.package
+        args = ['python', '-m', 'pip', 'install', '--upgrade', pkg.specifier]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -364,12 +363,12 @@ class PipEnvironment(Environment):
             logger.error('Python not found')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
-        return Package(name=name, version=None)
+        return Package(name=pkg.name, version=None)
 
     @override
     def packages(self) -> list[Package]:
@@ -379,7 +378,7 @@ class PipEnvironment(Environment):
             A list of packages
         """
         return [
-            Package(name=PackageName(dist.metadata['Name']), version=dist.version)
+            Package(name=dist.metadata['Name'], version=dist.version)
             for dist in distributions()
             if dist.metadata['Name'] is not None
         ]

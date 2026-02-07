@@ -6,12 +6,11 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     ProviderCapability,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageRef
 
 # Capability identifier for Python runtime providers
 PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
@@ -61,18 +60,23 @@ class AptEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via apt."""
-        return ['apt', 'install', str(package)]
+        # apt uses name=version for exact pinning
+        if package.constraint:
+            return ['apt', 'install', f'{package.name}={package.constraint}']
+        return ['apt', 'install', package.name]
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via apt."""
-        return ['apt', 'install', '--only-upgrade', str(package)]
+        if package.constraint:
+            return ['apt', 'install', '--only-upgrade', f'{package.name}={package.constraint}']
+        return ['apt', 'install', '--only-upgrade', package.name]
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs a package using APT.
 
         Note: Requires root privileges. Run with sudo.
@@ -85,7 +89,7 @@ class AptEnvironment(Environment):
         """
         logger = logging.getLogger('porringer.apt.install')
 
-        package = str(params.name)
+        package = params.package.name
 
         if params.dry:
             # Use --simulate for dry run
@@ -96,7 +100,7 @@ class AptEnvironment(Environment):
                 logger.info(result.stdout)
             except Exception:
                 pass
-            return Package(name=params.name, version=None)
+            return Package(name=params.package.name, version=None)
 
         # Use -y to auto-confirm
         args = ['apt', 'install', '-y', package]
@@ -118,32 +122,32 @@ class AptEnvironment(Environment):
 
         # Try to get the installed version
         version = self.__class__._get_package_version(package)
-        return Package(name=params.name, version=version)
+        return Package(name=params.package.name, version=version)
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches for a package in APT repositories.
 
         Args:
-            name: The package name to search for
+            package: The package reference to search for
 
         Returns:
             The package if found, or None if it doesn't exist
         """
         logger = logging.getLogger('porringer.apt.search')
-        package = str(name)
+        pkg_name = package.name
 
         try:
             # Use apt-cache policy to check if package exists and get version info
             result = subprocess.run(
-                ['apt-cache', 'policy', package],
+                ['apt-cache', 'policy', pkg_name],
                 capture_output=True,
                 text=True,
                 check=False,
             )
 
             if result.returncode != 0:
-                logger.warning(f'Package {package} not found')
+                logger.warning(f'Package {pkg_name} not found')
                 return None
 
             # Parse the output to get the candidate version
@@ -154,14 +158,14 @@ class AptEnvironment(Environment):
                     if 'Candidate:' in line:
                         version = line.split('Candidate:')[1].strip()
                         if version and version != '(none)':
-                            return Package(name=name, version=version)
+                            return Package(name=package.name, version=version)
 
-            logger.warning(f'No candidate version found for {package}')
+            logger.warning(f'No candidate version found for {pkg_name}')
 
         except FileNotFoundError:
             logger.error('apt-cache not found')
         except Exception as e:
-            logger.error(f'Failed to search for {package}: {e}')
+            logger.error(f'Failed to search for {pkg_name}: {e}')
 
         return None
 
@@ -180,8 +184,8 @@ class AptEnvironment(Environment):
         logger = logging.getLogger('porringer.apt.uninstall')
         results: list[Package | None] = []
 
-        for name in params.names:
-            package = str(name)
+        for pkg in params.packages:
+            package = pkg.name
 
             if params.dry:
                 args = ['apt', 'remove', '--simulate', package]
@@ -191,7 +195,7 @@ class AptEnvironment(Environment):
                     logger.info(result.stdout)
                 except Exception:
                     pass
-                results.append(Package(name=name, version=None))
+                results.append(Package(name=pkg.name, version=None))
                 continue
 
             # Use -y to auto-confirm
@@ -201,7 +205,7 @@ class AptEnvironment(Environment):
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
+                    results.append(Package(name=pkg.name, version=None))
                 else:
                     logger.error(result.stderr)
                     if 'Permission denied' in result.stderr or 'are you root?' in result.stderr:
@@ -217,7 +221,7 @@ class AptEnvironment(Environment):
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades a package using APT.
 
         Note: Requires root privileges. Run with sudo.
@@ -229,8 +233,8 @@ class AptEnvironment(Environment):
             The upgraded package, or None if the upgrade failed
         """
         logger = logging.getLogger('porringer.apt.upgrade')
-        name = params.name
-        package = str(name)
+        pkg = params.package
+        package = pkg.name
 
         if params.dry:
             args = ['apt', 'install', '--simulate', '--only-upgrade', package]
@@ -240,7 +244,7 @@ class AptEnvironment(Environment):
                 logger.info(result.stdout)
             except Exception:
                 pass
-            return Package(name=name, version=None)
+            return Package(name=pkg.name, version=None)
 
         # Use install --only-upgrade to upgrade a specific package
         args = ['apt', 'install', '-y', '--only-upgrade', package]
@@ -261,7 +265,7 @@ class AptEnvironment(Environment):
             return None
 
         version = self.__class__._get_package_version(package)
-        return Package(name=name, version=version)
+        return Package(name=pkg.name, version=version)
 
     @override
     def packages(self) -> list[Package]:
@@ -296,7 +300,7 @@ class AptEnvironment(Environment):
                     if name:
                         packages.append(
                             Package(
-                                name=PackageName(name),
+                                name=name,
                                 version=version,
                             )
                         )

@@ -9,12 +9,11 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     ProviderRequirement,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageRef
 from porringer.utility.utility import async_run_command
 
 # Capability identifier for Python runtime providers
@@ -92,24 +91,24 @@ class PipxEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via pipx."""
-        return ['pipx', 'install', str(package)]
+        return ['pipx', 'install', package.specifier]
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via pipx."""
-        return ['pipx', 'upgrade', str(package)]
+        return ['pipx', 'upgrade', package.specifier]
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using pipx."""
         logger = logging.getLogger('porringer.pipx.install')
-        args = ['pipx', 'install', str(params.name)]
+        args = ['pipx', 'install', params.package.specifier]
         if params.dry:
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.name, version=None)
+            return Package(name=params.package.name, version=None)
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
             logger.info(result.stdout)
@@ -120,21 +119,21 @@ class PipxEnvironment(Environment):
             logger.error('pipx not found. Install it from https://pipx.pypa.io')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
-        return Package(name=params.name, version=None)
+        return Package(name=params.package.name, version=None)
 
     @override
-    async def async_install(self, params: InstallParameters) -> Package | None:
+    async def async_install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package using pipx."""
         logger = logging.getLogger('porringer.pipx.install')
-        args = ['pipx', 'install', str(params.name)]
+        args = ['pipx', 'install', params.package.specifier]
         if params.dry:
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.name, version=None)
+            return Package(name=params.package.name, version=None)
         try:
             result = await async_run_command(args)
             logger.info(result.stdout)
@@ -142,19 +141,19 @@ class PipxEnvironment(Environment):
                 logger.error(result.stderr)
                 return None
         except TimeoutError:
-            logger.error(f'Timeout installing {params.name}')
+            logger.error(f'Timeout installing {params.package.name}')
             return None
         except Exception as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
-        return Package(name=params.name, version=None)
+        return Package(name=params.package.name, version=None)
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches the environment's sources for a package
 
         Args:
-            name: The package name to search for
+            package: The package reference to search for
 
         Returns:
             The package, or None if it doesn't exist
@@ -166,17 +165,17 @@ class PipxEnvironment(Environment):
         """Uninstalls the given list of packages using pipx."""
         logger = logging.getLogger('porringer.pipx.uninstall')
         results: list[Package | None] = []
-        for name in params.names:
-            args = ['pipx', 'uninstall', str(name)]
+        for pkg in params.packages:
+            args = ['pipx', 'uninstall', pkg.name]
             if params.dry:
                 logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version=None))
+                results.append(Package(name=pkg.name, version=None))
                 continue
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
+                    results.append(Package(name=pkg.name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -184,22 +183,22 @@ class PipxEnvironment(Environment):
                 logger.error('pipx not found')
                 results.append(None)
             except subprocess.SubprocessError as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
             except Exception as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades the given package using pipx."""
         logger = logging.getLogger('porringer.pipx.upgrade')
-        name = params.name
-        args = ['pipx', 'upgrade', str(name)]
+        pkg = params.package
+        args = ['pipx', 'upgrade', pkg.specifier]
         if params.dry:
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=name, version=None)
+            return Package(name=pkg.name, version=None)
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
             logger.info(result.stdout)
@@ -210,12 +209,12 @@ class PipxEnvironment(Environment):
             logger.error('pipx not found')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
-        return Package(name=name, version=None)
+        return Package(name=pkg.name, version=None)
 
     @override
     def packages(self) -> list[Package]:
@@ -239,7 +238,7 @@ class PipxEnvironment(Environment):
                     name = main_package.get('package')
                     version = main_package.get('package_version')
                     if name:
-                        packages.append(Package(name=PackageName(name), version=version))
+                        packages.append(Package(name=name, version=version))
                 except json.JSONDecodeError, KeyError:
                     continue
 

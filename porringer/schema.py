@@ -11,7 +11,7 @@ from packaging.version import Version
 from platformdirs import user_cache_dir
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
-from porringer.core.schema import PlatformScoped
+from porringer.core.schema import PackageRef, PlatformScoped
 
 # --- Directory Cache Schemas ---
 
@@ -138,7 +138,7 @@ class SetupAction:
     action_type: SetupActionType
     description: str
     plugin: str | None = None
-    package: str | None = None
+    package: PackageRef | None = None
     command: list[str] | None = None
     cli_command: list[str] | None = None
     package_description: str | None = None
@@ -257,11 +257,11 @@ class Prerequisite(PlatformScoped):
 class PackageSpec(PlatformScoped):
     """A package entry with optional display metadata.
 
-    Supports both string shorthand (just a package name) and object form
+    Supports both string shorthand (just a package specifier) and object form
     with additional metadata for GUI consumers.
     """
 
-    name: str = Field(description='The package name')
+    name: PackageRef = Field(description='The package reference (name with optional version constraint)')
     description: str | None = Field(default=None, description='Human-readable description of this package')
 
     @model_validator(mode='before')

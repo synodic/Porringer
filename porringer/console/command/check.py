@@ -51,7 +51,7 @@ def _check_plugin_updates(
 
         try:
             check_params = CheckUpdatesParameters(
-                names=[],  # Check all packages
+                packages=[],  # Check all packages
                 include_prereleases=params.include_prereleases,
             )
 

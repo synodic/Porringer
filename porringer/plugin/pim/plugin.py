@@ -7,12 +7,11 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     ProviderCapability,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName, PluginDependency
+from porringer.core.schema import Package, PackageRef, PluginDependency
 
 # Capability identifier for Python runtime providers
 PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
@@ -73,18 +72,18 @@ class PimEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a Python runtime via pymanager."""
-        return ['py', 'install', str(package)]
+        return ['py', 'install', package.name]
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a Python runtime via pymanager."""
-        return ['py', 'install', '--update', str(package)]
+        return ['py', 'install', '--update', package.name]
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs a Python runtime using pymanager.
 
         Args:
@@ -96,13 +95,13 @@ class PimEnvironment(Environment):
         logger = logging.getLogger('porringer.pim.install')
 
         # The package name is the Python version tag (e.g., "3.12", "3.14", "3.14t")
-        tag = str(params.name)
+        tag = params.package.name
 
         args = ['py', 'install', tag]
         if params.dry:
             args.append('--dry-run')
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.name, version=tag)
+            return Package(name=params.package.name, version=tag)
 
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
@@ -119,20 +118,20 @@ class PimEnvironment(Environment):
 
         # Try to get the actual installed version
         version = self.__class__._get_runtime_version(tag)
-        return Package(name=params.name, version=version or tag)
+        return Package(name=params.package.name, version=version or tag)
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches for an available Python runtime online.
 
         Args:
-            name: The Python version tag to search for (e.g., "3.12")
+            package: The package reference to search for (e.g., "3.12")
 
         Returns:
             The package if found, or None if it doesn't exist
         """
         logger = logging.getLogger('porringer.pim.search')
-        tag = str(name)
+        tag = package.name
 
         try:
             # Search online for available runtimes matching the tag
@@ -153,7 +152,7 @@ class PimEnvironment(Environment):
                 # Return the first matching runtime
                 runtime = runtimes[0]
                 version = runtime.get('tag', tag)
-                return Package(name=name, version=version)
+                return Package(name=package.name, version=version)
 
         except FileNotFoundError:
             logger.error('Python Install Manager (py) not found')
@@ -177,21 +176,21 @@ class PimEnvironment(Environment):
         logger = logging.getLogger('porringer.pim.uninstall')
         results: list[Package | None] = []
 
-        for name in params.names:
-            tag = str(name)
+        for pkg in params.packages:
+            tag = pkg.name
             # Use -y to skip confirmation prompt
             args = ['py', 'uninstall', '-y', tag]
 
             if params.dry:
                 logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version=tag))
+                results.append(Package(name=pkg.name, version=tag))
                 continue
 
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version=tag))
+                    results.append(Package(name=pkg.name, version=tag))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -205,7 +204,7 @@ class PimEnvironment(Environment):
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades a Python runtime to its latest patch version.
 
         Args:
@@ -215,15 +214,15 @@ class PimEnvironment(Environment):
             The upgraded package, or None if the upgrade failed
         """
         logger = logging.getLogger('porringer.pim.upgrade')
-        name = params.name
-        tag = str(name)
+        pkg = params.package
+        tag = pkg.name
         # Use --update flag to upgrade existing installs
         args = ['py', 'install', '--update', tag]
 
         if params.dry:
             args.append('--dry-run')
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=name, version=tag)
+            return Package(name=pkg.name, version=tag)
 
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
@@ -239,7 +238,7 @@ class PimEnvironment(Environment):
             return None
 
         version = self.__class__._get_runtime_version(tag)
-        return Package(name=name, version=version or tag)
+        return Package(name=pkg.name, version=version or tag)
 
     @override
     def packages(self) -> list[Package]:
@@ -273,7 +272,7 @@ class PimEnvironment(Environment):
                 # Use tag as the package name since that's how users identify runtimes
                 packages.append(
                     Package(
-                        name=PackageName(tag),
+                        name=tag,
                         version=version,
                     )
                 )
