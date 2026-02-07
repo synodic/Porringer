@@ -39,6 +39,12 @@ class BrewEnvironment(Environment):
         """Homebrew manages the ``system`` package backend."""
         return 'system'
 
+    @classmethod
+    @override
+    def tool_name(cls) -> str:
+        """Homebrew wraps the ``brew`` CLI."""
+        return 'brew'
+
     @staticmethod
     @override
     def install_command(package: PackageRef) -> list[str]:

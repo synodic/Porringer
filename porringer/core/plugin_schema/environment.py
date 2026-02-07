@@ -1,6 +1,7 @@
 """Plugin utilities for package environments"""
 
 import asyncio
+import shutil
 from abc import abstractmethod
 from collections.abc import Callable
 
@@ -110,17 +111,38 @@ class Environment(Plugin):
         """
         return []
 
-    @staticmethod
-    def is_available() -> bool:
+    @classmethod
+    def tool_name(cls) -> str | None:
+        """Returns the CLI executable name that this plugin wraps.
+
+        Override this method to declare which command-line tool the plugin
+        uses.  The base :meth:`is_available` implementation uses this value
+        with ``shutil.which`` to test whether the tool is on PATH.
+
+        Returns ``None`` for plugins that are not backed by a single CLI
+        tool (the default).  Those plugins are always considered available.
+
+        Returns:
+            The executable name (e.g. ``'pip'``, ``'uv'``), or ``None``.
+        """
+        return None
+
+    @classmethod
+    def is_available(cls) -> bool:
         """Checks if the underlying package manager is available on the system.
 
-        Override this method to verify that the CLI tool is installed and accessible.
-        The default implementation returns True.
+        The default implementation delegates to :meth:`tool_name`: if a tool
+        name is declared, ``shutil.which`` is used to verify the executable
+        exists on PATH.  Plugins whose ``tool_name()`` returns ``None`` are
+        always considered available.
 
         Returns:
             True if the package manager is available, False otherwise.
         """
-        return True
+        name = cls.tool_name()
+        if name is None:
+            return True
+        return shutil.which(name) is not None
 
     @staticmethod
     def supports_parallel() -> bool:

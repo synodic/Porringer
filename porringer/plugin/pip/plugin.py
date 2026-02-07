@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 import subprocess
 from collections.abc import Callable
 from typing import override
@@ -57,27 +58,27 @@ class PipEnvironment(Environment):
         """Pip manages the ``python`` package backend."""
         return 'python'
 
-    @staticmethod
+    @classmethod
     @override
-    def is_available() -> bool:
-        """Checks if pip is available on the system PATH.
+    def tool_name(cls) -> str:
+        """Pip wraps the ``pip`` CLI."""
+        return 'pip'
 
-        Runs ``python -m pip --version`` to verify that both Python and pip
-        are accessible from the current environment.
+    @classmethod
+    @override
+    def is_available(cls) -> bool:
+        """Checks if pip is usable.
+
+        Pip can be invoked either as a standalone ``pip`` executable or
+        via ``python -m pip``.  A standalone ``pip`` may be absent in
+        uv-created virtual environments even though ``python -m pip``
+        works perfectly.  This override accepts either form so that the
+        plugin is not incorrectly reported as unavailable.
 
         Returns:
-            True if pip is available, False otherwise.
+            True if ``pip`` or ``python`` is found on PATH, False otherwise.
         """
-        try:
-            result = subprocess.run(
-                ['python', '-m', 'pip', '--version'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            return result.returncode == 0
-        except FileNotFoundError, subprocess.SubprocessError:
-            return False
+        return shutil.which('pip') is not None or shutil.which('python') is not None
 
     @staticmethod
     @override

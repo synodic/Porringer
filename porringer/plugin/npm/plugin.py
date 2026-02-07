@@ -25,6 +25,12 @@ class NpmEnvironment(Environment):
         """Npm manages the ``node`` package backend."""
         return 'node'
 
+    @classmethod
+    @override
+    def tool_name(cls) -> str:
+        """Npm wraps the ``npm`` CLI."""
+        return 'npm'
+
     @staticmethod
     @override
     def install_command(package: PackageRef) -> list[str]:

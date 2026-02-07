@@ -43,6 +43,12 @@ class AptEnvironment(Environment):
         """APT manages the ``system`` package backend."""
         return 'system'
 
+    @classmethod
+    @override
+    def tool_name(cls) -> str:
+        """APT wraps the ``apt`` CLI."""
+        return 'apt'
+
     @staticmethod
     @override
     def install_command(package: PackageRef) -> list[str]:

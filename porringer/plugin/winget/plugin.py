@@ -1,7 +1,6 @@
 """Plugin implementation"""
 
 import logging
-import shutil
 import subprocess
 from typing import override
 
@@ -26,15 +25,11 @@ class WingetEnvironment(Environment):
         """Winget manages the ``system`` package backend."""
         return 'system'
 
-    @staticmethod
+    @classmethod
     @override
-    def is_available() -> bool:
-        """Checks if winget is available on the system.
-
-        Returns:
-            True if winget is found on PATH, False otherwise.
-        """
-        return shutil.which('winget') is not None
+    def tool_name(cls) -> str:
+        """Winget wraps the ``winget`` CLI."""
+        return 'winget'
 
     @staticmethod
     @override
