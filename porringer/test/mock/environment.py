@@ -14,6 +14,18 @@ from porringer.core.schema import Package, PackageName
 class MockEnvironment(Environment):
     """Mocked environment plugin"""
 
+    @staticmethod
+    @override
+    def install_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to install a package."""
+        return ['mock', 'install', str(package)]
+
+    @staticmethod
+    @override
+    def upgrade_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to upgrade a package."""
+        return ['mock', 'upgrade', str(package)]
+
     @override
     def install(self, params: InstallParameters) -> Package | None:
         """Installs the given package identified by its name
@@ -49,16 +61,16 @@ class MockEnvironment(Environment):
         return []
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> list[Package | None]:
-        """Upgrades the given list of packages
+    def upgrade(self, params: UpgradeParameters) -> Package | None:
+        """Upgrades the given package.
 
         Args:
             params: The upgrade parameters
 
         Returns:
-            A list of packages that were upgraded. Each item could be None if there was a failure
+            The package, or None if the upgrade failed.
         """
-        return []
+        return Package(name=params.name, version=None)
 
     @override
     def packages(self) -> list[Package]:

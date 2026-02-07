@@ -37,6 +37,12 @@ class WingetEnvironment(Environment):
         """Returns the CLI command to install a package via winget."""
         return ['winget', 'install', '--id', str(package)]
 
+    @staticmethod
+    @override
+    def upgrade_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to upgrade a package via winget."""
+        return ['winget', 'upgrade', '--id', str(package)]
+
     @override
     def install(self, params: InstallParameters) -> Package | None:
         logger = logging.getLogger('porringer.winget.install')
@@ -119,41 +125,37 @@ class WingetEnvironment(Environment):
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> list[Package | None]:
+    def upgrade(self, params: UpgradeParameters) -> Package | None:
         logger = logging.getLogger('porringer.winget.upgrade')
-        results: list[Package | None] = []
-        for name in params.names:
-            args = [
-                'winget',
-                'upgrade',
-                '--id',
-                str(name),
-                '--accept-source-agreements',
-                '--accept-package-agreements',
-                '-e',
-            ]
-            if params.dry:
-                logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version=None))
-                continue
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                logger.info(result.stdout)
-                if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
-                else:
-                    logger.error(result.stderr)
-                    results.append(None)
-            except FileNotFoundError:
-                logger.error('winget not found')
-                results.append(None)
-            except subprocess.SubprocessError as e:
-                logger.error(f'Failed to upgrade {name}: {e}')
-                results.append(None)
-            except Exception as e:
-                logger.error(f'Failed to upgrade {name}: {e}')
-                results.append(None)
-        return results
+        name = params.name
+        args = [
+            'winget',
+            'upgrade',
+            '--id',
+            str(name),
+            '--accept-source-agreements',
+            '--accept-package-agreements',
+            '-e',
+        ]
+        if params.dry:
+            logger.info(f'[dry-run] Would run: {" ".join(args)}')
+            return Package(name=name, version=None)
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, check=False)
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                return None
+        except FileNotFoundError:
+            logger.error('winget not found')
+            return None
+        except subprocess.SubprocessError as e:
+            logger.error(f'Failed to upgrade {name}: {e}')
+            return None
+        except Exception as e:
+            logger.error(f'Failed to upgrade {name}: {e}')
+            return None
+        return Package(name=name, version=None)
 
     @override
     def packages(self) -> list[Package]:

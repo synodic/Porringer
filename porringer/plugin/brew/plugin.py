@@ -61,6 +61,12 @@ class BrewEnvironment(Environment):
         """Returns the CLI command to install a package via brew."""
         return ['brew', 'install', str(package)]
 
+    @staticmethod
+    @override
+    def upgrade_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to upgrade a package via brew."""
+        return ['brew', 'upgrade', str(package)]
+
     @override
     def install(self, params: InstallParameters) -> Package | None:
         """Installs a package using Homebrew.
@@ -182,45 +188,40 @@ class BrewEnvironment(Environment):
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> list[Package | None]:
-        """Upgrades formulas in Homebrew.
+    def upgrade(self, params: UpgradeParameters) -> Package | None:
+        """Upgrades a formula in Homebrew.
 
         Args:
-            params: Upgrade parameters containing the list of formula names
+            params: Upgrade parameters containing the formula name
 
         Returns:
-            A list of upgraded packages, with None for any that failed
+            The upgraded package, or None if the upgrade failed
         """
         logger = logging.getLogger('porringer.brew.upgrade')
-        results: list[Package | None] = []
+        name = params.name
+        formula = str(name)
+        args = ['brew', 'upgrade', formula]
 
-        for name in params.names:
-            formula = str(name)
-            args = ['brew', 'upgrade', formula]
+        if params.dry:
+            args.append('--dry-run')
+            logger.info(f'[dry-run] Would run: {" ".join(args)}')
+            return Package(name=name, version=None)
 
-            if params.dry:
-                args.append('--dry-run')
-                logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version=None))
-                continue
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, check=False)
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                return None
+        except FileNotFoundError:
+            logger.error('Homebrew (brew) not found')
+            return None
+        except Exception as e:
+            logger.error(f'Failed to upgrade {formula}: {e}')
+            return None
 
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                logger.info(result.stdout)
-                if result.returncode == 0:
-                    version = self.__class__._get_formula_version(formula)
-                    results.append(Package(name=name, version=version))
-                else:
-                    logger.error(result.stderr)
-                    results.append(None)
-            except FileNotFoundError:
-                logger.error('Homebrew (brew) not found')
-                results.append(None)
-            except Exception as e:
-                logger.error(f'Failed to upgrade {formula}: {e}')
-                results.append(None)
-
-        return results
+        version = self.__class__._get_formula_version(formula)
+        return Package(name=name, version=version)
 
     @override
     def packages(self) -> list[Package]:

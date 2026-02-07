@@ -81,10 +81,17 @@ class UninstallParameters(BaseModel):
 class UpgradeParameters(BaseModel):
     """The upgrade parameters for an environment plugin"""
 
-    names: list[PackageName] = Field(description='The list of packages to upgrade. If empty, all packages are upgraded')
+    name: PackageName = Field(description='The package to upgrade')
     dry: bool = Field(
         default=False, description='If True, rehearses an upgrade without modifying what is actually installed'
     )
+    progress_callback: Callable[[SubActionProgress], None] | None = Field(
+        default=None,
+        exclude=True,
+        description='Optional callback for reporting sub-action progress (download %, install phase, etc.)',
+    )
+
+    model_config = {'arbitrary_types_allowed': True}
 
 
 class CheckUpdatesParameters(BaseModel):
@@ -170,6 +177,23 @@ class Environment(Plugin):
         return []
 
     @staticmethod
+    @abstractmethod
+    def upgrade_command(package: PackageName) -> list[str]:
+        """Returns the CLI command that would upgrade a package.
+
+        Plugins must implement this method to provide the actual command line
+        arguments that would be used to upgrade a package. This is used for
+        displaying commands in dry-run mode.
+
+        Args:
+            package: The package name to upgrade.
+
+        Returns:
+            A list of command arguments (e.g., ['pip', 'install', '--upgrade', 'requests']).
+        """
+        raise NotImplementedError
+
+    @staticmethod
     def is_available() -> bool:
         """Checks if the underlying package manager is available on the system.
 
@@ -209,6 +233,22 @@ class Environment(Plugin):
         """
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.install, params)
+
+    async def async_upgrade(self, params: UpgradeParameters) -> Package | None:
+        """Asynchronously upgrades the given package.
+
+        Default implementation wraps the synchronous upgrade() in an executor.
+        Override this method for true async implementations using
+        asyncio.create_subprocess_exec().
+
+        Args:
+            params: The upgrade parameters
+
+        Returns:
+            The package, or None if the upgrade failed.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.upgrade, params)
 
     @abstractmethod
     def packages(self) -> list[Package]:
@@ -256,14 +296,14 @@ class Environment(Plugin):
         raise NotImplementedError
 
     @abstractmethod
-    def upgrade(self, params: UpgradeParameters) -> list[Package | None]:
-        """Upgrades the given list of packages
+    def upgrade(self, params: UpgradeParameters) -> Package | None:
+        """Upgrades the given package.
 
         Args:
             params: The upgrade parameters
 
         Returns:
-            A list of packages that were upgraded. Each item could be None if there was a failure
+            The package, or None if the upgrade failed.
         """
         raise NotImplementedError
 

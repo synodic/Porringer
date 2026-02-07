@@ -26,6 +26,12 @@ class UvEnvironment(Environment):
         """Returns the CLI command to install a package via uv."""
         return ['uv', 'pip', 'install', str(package)]
 
+    @staticmethod
+    @override
+    def upgrade_command(package: PackageName) -> list[str]:
+        """Returns the CLI command to upgrade a package via uv."""
+        return ['uv', 'pip', 'install', '--upgrade', str(package)]
+
     @override
     def install(self, params: InstallParameters) -> Package | None:
         """Installs the given package identified by its name using uv."""
@@ -91,32 +97,29 @@ class UvEnvironment(Environment):
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> list[Package | None]:
-        """Upgrades the given list of packages using uv."""
+    def upgrade(self, params: UpgradeParameters) -> Package | None:
+        """Upgrades the given package using uv."""
         logger = logging.getLogger('porringer.uv.upgrade')
-        results: list[Package | None] = []
-        for name in params.names:
-            args = ['uv', 'pip', 'install', '--upgrade', str(name)]
-            if params.dry:
-                args.append('--dry-run')
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                logger.info(result.stdout)
-                if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
-                else:
-                    logger.error(result.stderr)
-                    results.append(None)
-            except FileNotFoundError:
-                logger.error('uv not found')
-                results.append(None)
-            except subprocess.SubprocessError as e:
-                logger.error(f'Failed to upgrade {name}: {e}')
-                results.append(None)
-            except Exception as e:
-                logger.error(f'Failed to upgrade {name}: {e}')
-                results.append(None)
-        return results
+        name = params.name
+        args = ['uv', 'pip', 'install', '--upgrade', str(name)]
+        if params.dry:
+            args.append('--dry-run')
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, check=False)
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                return None
+        except FileNotFoundError:
+            logger.error('uv not found')
+            return None
+        except subprocess.SubprocessError as e:
+            logger.error(f'Failed to upgrade {name}: {e}')
+            return None
+        except Exception as e:
+            logger.error(f'Failed to upgrade {name}: {e}')
+            return None
+        return Package(name=name, version=None)
 
     @override
     def packages(self) -> list[Package]:

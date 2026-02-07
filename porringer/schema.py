@@ -116,7 +116,7 @@ class SetupActionType(Enum):
     """The type of action to perform during setup"""
 
     CHECK_PLUGIN = auto()
-    INSTALL_PACKAGE = auto()
+    PACKAGE = auto()
     RUN_COMMAND = auto()
 
 
@@ -126,8 +126,8 @@ class SetupAction:
 
     Args:
         action_type: The type of action.
-        plugin: The plugin name (for CHECK_PLUGIN and INSTALL_PACKAGE).
-        package: The package name (for INSTALL_PACKAGE).
+        plugin: The plugin name (for CHECK_PLUGIN and PACKAGE).
+        package: The package name (for PACKAGE).
         command: The command to run (for RUN_COMMAND).
         description: Human-readable description of the action.
         cli_command: The actual CLI command (for display purposes).
@@ -310,6 +310,19 @@ class SetupManifest(BaseModel):
         return normalized
 
 
+class SetupMode(Enum):
+    """The mode controlling how manifest packages are processed.
+
+    INSTALL: Default. Install packages that aren't already present.
+    UPGRADE: Upgrade all packages. Falls back to install if a package isn't installed.
+    ENSURE: Check each package; upgrade if installed, install if not.
+    """
+
+    INSTALL = auto()
+    UPGRADE = auto()
+    ENSURE = auto()
+
+
 class SetupParameters(BaseModel):
     """Parameters for the setup command."""
 
@@ -319,6 +332,7 @@ class SetupParameters(BaseModel):
     timeout: int = Field(default=300, description='Timeout in seconds for post-install commands')
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
     dry_run: bool = Field(default=False, description='Preview actions without executing them')
+    mode: SetupMode = Field(default=SetupMode.INSTALL, description='Execution mode: install, upgrade, or ensure')
 
 
 @dataclass
