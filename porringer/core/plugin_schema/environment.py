@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 from porringer.core.schema import (
     Information,
     Package,
-    PackageName,
+    PackageRef,
     Plugin,
+    PorringerModel,
     SupportedFeatures,
 )
 from porringer.schema import SubActionProgress
@@ -51,12 +52,12 @@ class ProviderRequirement(BaseModel):
     )
 
 
-class InstallParameters(BaseModel):
-    """The install parameters for an environment plugin"""
+class PackageParameters(PorringerModel):
+    """Parameters for a package install or upgrade operation."""
 
-    name: PackageName = Field(description='The package to install')
+    package: PackageRef = Field(description='The target package')
     dry: bool = Field(
-        default=False, description='If True, rehearses an installation without modifying what is actually installed'
+        default=False, description='If True, rehearses the operation without modifying what is actually installed'
     )
     progress_callback: Callable[[SubActionProgress], None] | None = Field(
         default=None,
@@ -64,13 +65,11 @@ class InstallParameters(BaseModel):
         description='Optional callback for reporting sub-action progress (download %, install phase, etc.)',
     )
 
-    model_config = {'arbitrary_types_allowed': True}
 
-
-class UninstallParameters(BaseModel):
+class UninstallParameters(PorringerModel):
     """The uninstall parameters for an environment plugin"""
 
-    names: list[PackageName] = Field(
+    packages: list[PackageRef] = Field(
         description='The list of packages to uninstall. If empty, all packages are uninstalled'
     )
     dry: bool = Field(
@@ -78,26 +77,10 @@ class UninstallParameters(BaseModel):
     )
 
 
-class UpgradeParameters(BaseModel):
-    """The upgrade parameters for an environment plugin"""
-
-    name: PackageName = Field(description='The package to upgrade')
-    dry: bool = Field(
-        default=False, description='If True, rehearses an upgrade without modifying what is actually installed'
-    )
-    progress_callback: Callable[[SubActionProgress], None] | None = Field(
-        default=None,
-        exclude=True,
-        description='Optional callback for reporting sub-action progress (download %, install phase, etc.)',
-    )
-
-    model_config = {'arbitrary_types_allowed': True}
-
-
-class CheckUpdatesParameters(BaseModel):
+class CheckUpdatesParameters(PorringerModel):
     """Parameters for checking updates via a plugin."""
 
-    names: list[PackageName] = Field(
+    packages: list[PackageRef] = Field(
         default_factory=list, description='Packages to check for updates. Empty means check all installed packages.'
     )
     include_prereleases: bool = Field(default=False, description='Include pre-release versions')
@@ -160,7 +143,7 @@ class Environment(Plugin):
         return []
 
     @staticmethod
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command that would install a package.
 
         Override this method to provide the actual command line arguments
@@ -168,30 +151,29 @@ class Environment(Plugin):
         commands in dry-run mode.
 
         Args:
-            package: The package name to install.
+            package: The package reference (may include a version constraint).
 
         Returns:
-            A list of command arguments (e.g., ['pip', 'install', 'requests']).
+            A list of command arguments (e.g., ['pip', 'install', 'requests>=1.0']).
             Returns an empty list if the command cannot be determined.
         """
         return []
 
     @staticmethod
-    @abstractmethod
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command that would upgrade a package.
 
-        Plugins must implement this method to provide the actual command line
-        arguments that would be used to upgrade a package. This is used for
-        displaying commands in dry-run mode.
+        Override this method to provide the actual command line arguments
+        that would be used to upgrade a package. This is used for displaying
+        commands in dry-run mode.
 
         Args:
-            package: The package name to upgrade.
+            package: The package reference (may include a version constraint).
 
         Returns:
             A list of command arguments (e.g., ['pip', 'install', '--upgrade', 'requests']).
         """
-        raise NotImplementedError
+        return []
 
     @staticmethod
     def is_available() -> bool:
@@ -218,7 +200,7 @@ class Environment(Plugin):
         """
         return True
 
-    async def async_install(self, params: InstallParameters) -> Package | None:
+    async def async_install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package identified by its name.
 
         Default implementation wraps the synchronous install() in an executor.
@@ -226,7 +208,7 @@ class Environment(Plugin):
         asyncio.create_subprocess_exec().
 
         Args:
-            params: The installation parameters
+            params: The package parameters
 
         Returns:
             The package, or None if installation failed
@@ -234,7 +216,7 @@ class Environment(Plugin):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.install, params)
 
-    async def async_upgrade(self, params: UpgradeParameters) -> Package | None:
+    async def async_upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrades the given package.
 
         Default implementation wraps the synchronous upgrade() in an executor.
@@ -242,7 +224,7 @@ class Environment(Plugin):
         asyncio.create_subprocess_exec().
 
         Args:
-            params: The upgrade parameters
+            params: The package parameters
 
         Returns:
             The package, or None if the upgrade failed.
@@ -260,11 +242,11 @@ class Environment(Plugin):
         raise NotImplementedError
 
     @abstractmethod
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches the environment's sources for a package
 
         Args:
-            name: The package name to search for
+            package: The package reference to search for
 
         Returns:
             The package, or None if it doesn't exist
@@ -272,11 +254,11 @@ class Environment(Plugin):
         raise NotImplementedError
 
     @abstractmethod
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name
 
         Args:
-            params: The installation parameters
+            params: The package parameters
 
         Returns:
             The package, or None if it doesn't exist
@@ -296,11 +278,11 @@ class Environment(Plugin):
         raise NotImplementedError
 
     @abstractmethod
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades the given package.
 
         Args:
-            params: The upgrade parameters
+            params: The package parameters
 
         Returns:
             The package, or None if the upgrade failed.

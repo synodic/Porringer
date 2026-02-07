@@ -17,8 +17,8 @@ from packaging.version import InvalidVersion, Version
 
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
-from porringer.core.plugin_schema.environment import Environment, InstallParameters, UpgradeParameters
-from porringer.core.schema import Package, PackageName
+from porringer.core.plugin_schema.environment import Environment, PackageParameters
+from porringer.core.schema import Package, PackageRef
 from porringer.schema import (
     BatchSetupResults,
     DownloadParameters,
@@ -148,10 +148,13 @@ class UpdateCommands:
                 )
 
         # --- Package name validity ---
+        # Note: PackageRef validates during construction, so invalid package
+        # specifiers are caught at schema-load time above. This loop catches
+        # edge cases that pass PackageRef validation but fail Requirement parsing.
         for plugin_name, packages in manifest.packages.items():
             for j, spec in enumerate(packages):
                 try:
-                    Requirement(spec.name)
+                    Requirement(str(spec.name))
                 except InvalidRequirement as exc:
                     _warning(
                         f'packages.{plugin_name}[{j}].name',
@@ -163,10 +166,7 @@ class UpdateCommands:
         seen: dict[str, list[str]] = {}
         for plugin_name, packages in manifest.packages.items():
             for spec in packages:
-                try:
-                    canonical = str(canonicalize_name(Requirement(spec.name).name))
-                except InvalidRequirement:
-                    canonical = spec.name.lower()
+                canonical = str(canonicalize_name(spec.name.name))
                 seen.setdefault(canonical, []).append(plugin_name)
 
         for pkg_name, plugins in seen.items():
@@ -347,8 +347,8 @@ class UpdateCommands:
                 if action.plugin and action.package and action.plugin in environments:
                     env = environments[action.plugin]
                     if mode in {SetupMode.UPGRADE, SetupMode.ENSURE}:
-                        return env.upgrade_command(PackageName(action.package))
-                    return env.install_command(PackageName(action.package))
+                        return env.upgrade_command(action.package)
+                    return env.install_command(action.package)
                 return []
             case SetupActionType.RUN_COMMAND:
                 return action.command or []
@@ -559,38 +559,29 @@ class UpdateCommands:
 
     @staticmethod
     def _is_package_installed(
-        package: str,
+        package: PackageRef,
         installed_packages: list[Package],
     ) -> tuple[bool, str | None]:
         """Checks if a package is already installed with a compatible version.
 
         Args:
-            package: The package specification (e.g., 'ruff>=0.1.0')
+            package: The package reference
             installed_packages: List of installed packages from the environment
 
         Returns:
             Tuple of (is_installed, skip_reason or None)
         """
-        try:
-            req = Requirement(package)
-        except InvalidRequirement:
-            # If we can't parse, just do name matching with canonicalization
-            canonical_name = canonicalize_name(package.strip())
-            for installed in installed_packages:
-                if canonicalize_name(str(installed.name)) == canonical_name:
-                    return True, f'{installed.name}=={installed.version} already installed'
-            return False, None
-
-        canonical_name = canonicalize_name(req.name)
+        canonical_name = canonicalize_name(package.name)
         for installed in installed_packages:
-            if canonicalize_name(str(installed.name)) == canonical_name:
-                if not req.specifier:
+            if canonicalize_name(installed.name) == canonical_name:
+                if not package.constraint:
                     return True, f'{installed.name}=={installed.version} already installed'
                 if installed.version is not None:
                     try:
+                        req = Requirement(str(package))
                         if Version(installed.version) in req.specifier:
                             return True, f'{installed.name}=={installed.version} satisfies {package}'
-                    except InvalidVersion:
+                    except InvalidVersion, InvalidRequirement:
                         pass
         return False, None
 
@@ -734,19 +725,16 @@ class UpdateCommands:
         verb_inf = 'install' if is_install else 'upgrade'
 
         try:
+            if action.package is None:
+                return SetupActionResult(action=action, success=False, message='No package specified')
+            params = PackageParameters(
+                package=action.package,
+                dry=False,
+                progress_callback=sub_action_cb,
+            )
             if is_install:
-                params = InstallParameters(
-                    name=action.package,
-                    dry=False,
-                    progress_callback=sub_action_cb,
-                )
                 result = await environment.async_install(params)
             else:
-                params = UpgradeParameters(
-                    name=action.package,
-                    dry=False,
-                    progress_callback=sub_action_cb,
-                )
                 result = await environment.async_upgrade(params)
 
             if result is not None:

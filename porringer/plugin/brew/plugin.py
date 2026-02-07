@@ -7,12 +7,11 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     ProviderCapability,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageRef
 
 # Capability identifier for Python runtime providers
 PYTHON_RUNTIME_CAPABILITY = 'python-runtime'
@@ -57,18 +56,18 @@ class BrewEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via brew."""
-        return ['brew', 'install', str(package)]
+        return ['brew', 'install', package.name]
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via brew."""
-        return ['brew', 'upgrade', str(package)]
+        return ['brew', 'upgrade', package.name]
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs a package using Homebrew.
 
         Args:
@@ -79,13 +78,13 @@ class BrewEnvironment(Environment):
         """
         logger = logging.getLogger('porringer.brew.install')
 
-        formula = str(params.name)
+        formula = params.package.name
         args = ['brew', 'install', formula]
 
         if params.dry:
             args.append('--dry-run')
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.name, version=None)
+            return Package(name=params.package.name, version=None)
 
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
@@ -102,20 +101,20 @@ class BrewEnvironment(Environment):
 
         # Try to get the installed version
         version = self.__class__._get_formula_version(formula)
-        return Package(name=params.name, version=version)
+        return Package(name=params.package.name, version=version)
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches for a formula in Homebrew.
 
         Args:
-            name: The formula name to search for
+            package: The package reference to search for
 
         Returns:
             The package if found, or None if it doesn't exist
         """
         logger = logging.getLogger('porringer.brew.search')
-        formula = str(name)
+        formula = package.name
 
         try:
             # Use brew info with JSON output to check if formula exists
@@ -136,7 +135,7 @@ class BrewEnvironment(Environment):
             if formulas:
                 formula_info = formulas[0]
                 version = formula_info.get('versions', {}).get('stable', 'unknown')
-                return Package(name=name, version=version)
+                return Package(name=package.name, version=version)
 
         except FileNotFoundError:
             logger.error('Homebrew (brew) not found')
@@ -160,21 +159,21 @@ class BrewEnvironment(Environment):
         logger = logging.getLogger('porringer.brew.uninstall')
         results: list[Package | None] = []
 
-        for name in params.names:
-            formula = str(name)
+        for pkg in params.packages:
+            formula = pkg.name
             args = ['brew', 'uninstall', formula]
 
             if params.dry:
                 args.append('--dry-run')
                 logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version=None))
+                results.append(Package(name=pkg.name, version=None))
                 continue
 
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
+                    results.append(Package(name=pkg.name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -188,7 +187,7 @@ class BrewEnvironment(Environment):
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades a formula in Homebrew.
 
         Args:
@@ -198,14 +197,14 @@ class BrewEnvironment(Environment):
             The upgraded package, or None if the upgrade failed
         """
         logger = logging.getLogger('porringer.brew.upgrade')
-        name = params.name
-        formula = str(name)
+        pkg = params.package
+        formula = pkg.name
         args = ['brew', 'upgrade', formula]
 
         if params.dry:
             args.append('--dry-run')
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=name, version=None)
+            return Package(name=pkg.name, version=None)
 
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
@@ -221,7 +220,7 @@ class BrewEnvironment(Environment):
             return None
 
         version = self.__class__._get_formula_version(formula)
-        return Package(name=name, version=version)
+        return Package(name=pkg.name, version=version)
 
     @override
     def packages(self) -> list[Package]:
@@ -256,7 +255,7 @@ class BrewEnvironment(Environment):
                 version = installed[0].get('version', 'unknown') if installed else 'unknown'
                 packages.append(
                     Package(
-                        name=PackageName(name),
+                        name=name,
                         version=version,
                     )
                 )

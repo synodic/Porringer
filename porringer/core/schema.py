@@ -2,10 +2,11 @@
 
 import sys
 from abc import abstractmethod
-from typing import NewType, Protocol, TypeVar
+from typing import Protocol, TypeVar
 
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PorringerModel(BaseModel):
@@ -38,7 +39,56 @@ class PlatformScoped(BaseModel):
         return sys.platform in self.platforms
 
 
-PackageName = NewType('PackageName', str)
+class PackageRef(PorringerModel):
+    """A package reference with an optional version constraint.
+
+    Represents a package identifier that may include a PEP 440 version specifier
+    (e.g. ``"ruff>=0.8.0"``, ``"pydantic>=2,<3"``). A bare name such as ``"pytest"``
+    is also valid (constraint will be ``None``).
+
+    Can be constructed in several ways::
+
+        PackageRef(name='ruff', constraint='>=0.8.0')
+        PackageRef('ruff>=0.8.0')  # via model validator (string coercion)
+    """
+
+    model_config = {'frozen': True}
+
+    name: str = Field(description='The bare, canonical package name')
+    constraint: str | None = Field(default=None, description='PEP 440 version specifier (e.g. ">=0.8.0")')
+
+    @model_validator(mode='before')
+    @classmethod
+    def _coerce_string(cls, data: str | dict) -> dict:  # type: ignore[type-arg]
+        """Accept plain strings and auto-parse them into name + constraint."""
+        if isinstance(data, str):
+            return cls._split_spec(data)
+        return data
+
+    @staticmethod
+    def _split_spec(spec: str) -> dict[str, str | None]:
+        """Decompose a specifier string into name and constraint components."""
+        try:
+            req = Requirement(spec)
+            constraint = str(req.specifier) if req.specifier else None
+            return {'name': req.name, 'constraint': constraint}
+        except InvalidRequirement as exc:
+            raise ValueError(f'Invalid package specifier: {spec!r}') from exc
+
+    @property
+    def specifier(self) -> str:
+        """The full specifier string (name + constraint) suitable for CLI commands.
+
+        Examples:
+            ``"ruff>=0.8.0"``, ``"pytest"``
+        """
+        if self.constraint:
+            return f'{self.name}{self.constraint}'
+        return self.name
+
+    def __str__(self) -> str:
+        """Return the full specifier string."""
+        return self.specifier
 
 
 class PluginDependency(PorringerModel, PlatformScoped):
@@ -49,9 +99,9 @@ class PluginDependency(PorringerModel, PlatformScoped):
 
 
 class Package(PorringerModel):
-    """Package definition"""
+    """Package definition — represents an installed package identity."""
 
-    name: PackageName
+    name: str = Field(description='The bare package name')
     version: str | None = None
 
 

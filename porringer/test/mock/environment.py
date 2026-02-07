@@ -4,11 +4,10 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageRef
 
 
 class MockEnvironment(Environment):
@@ -16,33 +15,33 @@ class MockEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package."""
         return ['mock', 'install', str(package)]
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package."""
         return ['mock', 'upgrade', str(package)]
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name
 
         Args:
-            params: The installation parameters
+            params: The package parameters
 
         Returns:
             The package, or None if it doesn't exist
         """
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches the environment's sources for a package
 
         Args:
-            name: The package name to search for
+            package: The package reference to search for
 
         Returns:
             The package, or None if it doesn't exist
@@ -61,16 +60,16 @@ class MockEnvironment(Environment):
         return []
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades the given package.
 
         Args:
-            params: The upgrade parameters
+            params: The package parameters
 
         Returns:
             The package, or None if the upgrade failed.
         """
-        return Package(name=params.name, version=None)
+        return Package(name=params.package.name, version=None)
 
     @override
     def packages(self) -> list[Package]:

@@ -48,7 +48,7 @@ environments = builder.build_environments(builder.find_environments())
 
 # Check each plugin
 for env in environments:
-    params = CheckUpdatesParameters(names=[], include_prereleases=False)
+    params = CheckUpdatesParameters(packages=[], include_prereleases=False)
     updates = env.check_updates(params)
     
     for pkg in updates:

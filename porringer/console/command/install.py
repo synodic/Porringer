@@ -313,7 +313,7 @@ def _execute_with_progress(
                         collected_results.append(event.result)
                     continue
 
-                action_desc = event.action.package or event.action.description[:30]
+                action_desc = str(event.action.package) if event.action.package else event.action.description[:30]
 
                 if event.kind == ProgressEventKind.ACTION_STARTED:
                     if total_actions > 0 and not setup_params.dry_run:

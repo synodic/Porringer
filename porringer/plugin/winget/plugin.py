@@ -7,11 +7,10 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageRef
 
 
 class WingetEnvironment(Environment):
@@ -33,31 +32,40 @@ class WingetEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via winget."""
-        return ['winget', 'install', '--id', str(package)]
+        cmd = ['winget', 'install', '--id', package.name]
+        if package.constraint:
+            cmd.extend(['--version', package.constraint])
+        return cmd
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via winget."""
-        return ['winget', 'upgrade', '--id', str(package)]
+        cmd = ['winget', 'upgrade', '--id', package.name]
+        if package.constraint:
+            cmd.extend(['--version', package.constraint])
+        return cmd
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         logger = logging.getLogger('porringer.winget.install')
+        pkg = params.package
         args = [
             'winget',
             'install',
             '--id',
-            str(params.name),
+            pkg.name,
             '--accept-source-agreements',
             '--accept-package-agreements',
             '-e',
         ]
+        if pkg.constraint:
+            args.extend(['--version', pkg.constraint])
         if params.dry:
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.name, version=None)
+            return Package(name=pkg.name, version=None)
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
             logger.info(result.stdout)
@@ -68,19 +76,19 @@ class WingetEnvironment(Environment):
             logger.error('winget not found. Install it from https://github.com/microsoft/winget-cli')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {pkg.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {pkg.name}: {e}')
             return None
-        return Package(name=params.name, version=None)
+        return Package(name=pkg.name, version=None)
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches the environment's sources for a package
 
         Args:
-            name: The package name to search for
+            package: The package reference to search for
 
         Returns:
             The package, or None if it doesn't exist
@@ -91,25 +99,25 @@ class WingetEnvironment(Environment):
     def uninstall(self, params: UninstallParameters) -> list[Package | None]:
         logger = logging.getLogger('porringer.winget.uninstall')
         results: list[Package | None] = []
-        for name in params.names:
+        for pkg in params.packages:
             args = [
                 'winget',
                 'uninstall',
                 '--id',
-                str(name),
+                pkg.name,
                 '--accept-source-agreements',
                 '--accept-package-agreements',
                 '-e',
             ]
             if params.dry:
                 logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=name, version=None))
+                results.append(Package(name=pkg.name, version=None))
                 continue
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
+                    results.append(Package(name=pkg.name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -117,29 +125,31 @@ class WingetEnvironment(Environment):
                 logger.error('winget not found')
                 results.append(None)
             except subprocess.SubprocessError as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
             except Exception as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         logger = logging.getLogger('porringer.winget.upgrade')
-        name = params.name
+        pkg = params.package
         args = [
             'winget',
             'upgrade',
             '--id',
-            str(name),
+            pkg.name,
             '--accept-source-agreements',
             '--accept-package-agreements',
             '-e',
         ]
+        if pkg.constraint:
+            args.extend(['--version', pkg.constraint])
         if params.dry:
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=name, version=None)
+            return Package(name=pkg.name, version=None)
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
             logger.info(result.stdout)
@@ -150,12 +160,12 @@ class WingetEnvironment(Environment):
             logger.error('winget not found')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
-        return Package(name=name, version=None)
+        return Package(name=pkg.name, version=None)
 
     @override
     def packages(self) -> list[Package]:

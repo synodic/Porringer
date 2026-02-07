@@ -6,11 +6,10 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import (
     Environment,
-    InstallParameters,
+    PackageParameters,
     UninstallParameters,
-    UpgradeParameters,
 )
-from porringer.core.schema import Package, PackageName
+from porringer.core.schema import Package, PackageRef
 
 
 class NpmEnvironment(Environment):
@@ -22,21 +21,28 @@ class NpmEnvironment(Environment):
 
     @staticmethod
     @override
-    def install_command(package: PackageName) -> list[str]:
+    def install_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via npm."""
-        return ['npm', 'install', '-g', str(package)]
+        # npm uses name@constraint syntax for version pinning
+        if package.constraint:
+            return ['npm', 'install', '-g', f'{package.name}@{package.constraint}']
+        return ['npm', 'install', '-g', package.name]
 
     @staticmethod
     @override
-    def upgrade_command(package: PackageName) -> list[str]:
+    def upgrade_command(package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via npm."""
-        return ['npm', 'update', '-g', str(package)]
+        if package.constraint:
+            return ['npm', 'update', '-g', f'{package.name}@{package.constraint}']
+        return ['npm', 'update', '-g', package.name]
 
     @override
-    def install(self, params: InstallParameters) -> Package | None:
+    def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using npm."""
         logger = logging.getLogger('porringer.npm.install')
-        args = ['npm', 'install', '-g', str(params.name)]
+        pkg = params.package
+        spec = f'{pkg.name}@{pkg.constraint}' if pkg.constraint else pkg.name
+        args = ['npm', 'install', '-g', spec]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -49,19 +55,19 @@ class NpmEnvironment(Environment):
             logger.error('npm not found. Install Node.js from https://nodejs.org')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {pkg.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to install {params.name}: {e}')
+            logger.error(f'Failed to install {pkg.name}: {e}')
             return None
-        return Package(name=params.name, version=None)
+        return Package(name=pkg.name, version=None)
 
     @override
-    def search(self, name: PackageName) -> Package | None:
+    def search(self, package: PackageRef) -> Package | None:
         """Searches the environment's sources for a package
 
         Args:
-            name: The package name to search for
+            package: The package reference to search for
 
         Returns:
             The package, or None if it doesn't exist
@@ -73,15 +79,15 @@ class NpmEnvironment(Environment):
         """Uninstalls the given list of packages using npm."""
         logger = logging.getLogger('porringer.npm.uninstall')
         results: list[Package | None] = []
-        for name in params.names:
-            args = ['npm', 'uninstall', '-g', str(name)]
+        for pkg in params.packages:
+            args = ['npm', 'uninstall', '-g', pkg.name]
             if params.dry:
                 args.append('--dry-run')
             try:
                 result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
-                    results.append(Package(name=name, version=None))
+                    results.append(Package(name=pkg.name, version=None))
                 else:
                     logger.error(result.stderr)
                     results.append(None)
@@ -89,19 +95,20 @@ class NpmEnvironment(Environment):
                 logger.error('npm not found')
                 results.append(None)
             except subprocess.SubprocessError as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
             except Exception as e:
-                logger.error(f'Failed to uninstall {name}: {e}')
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
         return results
 
     @override
-    def upgrade(self, params: UpgradeParameters) -> Package | None:
+    def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades the given package using npm."""
         logger = logging.getLogger('porringer.npm.upgrade')
-        name = params.name
-        args = ['npm', 'update', '-g', str(name)]
+        pkg = params.package
+        spec = f'{pkg.name}@{pkg.constraint}' if pkg.constraint else pkg.name
+        args = ['npm', 'update', '-g', spec]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -114,12 +121,12 @@ class NpmEnvironment(Environment):
             logger.error('npm not found')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f'Failed to upgrade {name}: {e}')
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
-        return Package(name=name, version=None)
+        return Package(name=pkg.name, version=None)
 
     @override
     def packages(self) -> list[Package]:

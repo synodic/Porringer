@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from porringer.core.plugin_schema.environment import InstallParameters
-from porringer.core.schema import PackageName
+from porringer.core.plugin_schema.environment import PackageParameters
+from porringer.core.schema import PackageRef
 from porringer.plugin.pip.plugin import PipEnvironment
 from porringer.schema import (
     ProgressEvent,
@@ -23,7 +23,7 @@ def _make_action(package: str = 'requests') -> SetupAction:
         action_type=SetupActionType.PACKAGE,
         description=f'Install {package}',
         plugin='pip',
-        package=package,
+        package=PackageRef(name=package),
     )
 
 
@@ -98,24 +98,24 @@ class TestProgressEvent:
         assert event.sub_action is None
 
 
-class TestInstallParametersProgressCallback:
-    """Tests for progress_callback on InstallParameters."""
+class TestPackageParametersProgressCallback:
+    """Tests for progress_callback on PackageParameters."""
 
     @staticmethod
     def test_default_is_none() -> None:
-        params = InstallParameters(name=PackageName('requests'))
+        params = PackageParameters(package=PackageRef(name='requests'))
         assert params.progress_callback is None
 
     @staticmethod
     def test_accepts_callback() -> None:
         cb = MagicMock()
-        params = InstallParameters(name=PackageName('requests'), progress_callback=cb)
+        params = PackageParameters(package=PackageRef(name='requests'), progress_callback=cb)
         assert params.progress_callback is cb
 
     @staticmethod
     def test_callback_excluded_from_serialization() -> None:
         cb = MagicMock()
-        params = InstallParameters(name=PackageName('requests'), progress_callback=cb)
+        params = PackageParameters(package=PackageRef(name='requests'), progress_callback=cb)
         data = params.model_dump()
         assert 'progress_callback' not in data
 
