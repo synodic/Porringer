@@ -25,6 +25,17 @@ class UvEnvironment(Environment):
         super().__init__(parameters)
         self._cached_packages: list[Package] | None = None
 
+    def _python_args(self) -> list[str]:
+        """Return ``['--python', '<path>']`` when an override is active.
+
+        Reads from ``self.python_executable`` (set by the sync engine
+        via a runtime provider).  Returns an empty list when no override
+        is set.
+        """
+        if self.python_executable is not None:
+            return ['--python', str(self.python_executable)]
+        return []
+
     @staticmethod
     @override
     def package_backend() -> str:
@@ -53,7 +64,7 @@ class UvEnvironment(Environment):
     def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using uv."""
         logger = logging.getLogger('porringer.uv.install')
-        args = ['uv', 'pip', 'install', params.package.specifier]
+        args = ['uv', 'pip', 'install', *self._python_args(), params.package.specifier]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -118,7 +129,7 @@ class UvEnvironment(Environment):
         """Upgrades the given package using uv."""
         logger = logging.getLogger('porringer.uv.upgrade')
         pkg = params.package
-        args = ['uv', 'pip', 'install', '--upgrade', pkg.specifier]
+        args = ['uv', 'pip', 'install', '--upgrade', *self._python_args(), pkg.specifier]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -153,8 +164,9 @@ class UvEnvironment(Environment):
 
         logger = logging.getLogger('porringer.uv.packages')
         try:
+            args = ['uv', 'pip', 'list', '--format=json', *self._python_args()]
             result = subprocess.run(
-                ['uv', 'pip', 'list', '--format=json'],
+                args,
                 capture_output=True,
                 text=True,
                 check=False,

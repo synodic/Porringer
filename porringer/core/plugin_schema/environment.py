@@ -4,6 +4,7 @@ import asyncio
 import shutil
 from abc import abstractmethod
 from collections.abc import Callable
+from pathlib import Path
 
 from pydantic import Field
 
@@ -11,6 +12,7 @@ from porringer.core.schema import (
     Package,
     PackageRef,
     Plugin,
+    PluginParameters,
     PorringerModel,
 )
 from porringer.schema import SubActionProgress
@@ -52,6 +54,22 @@ class CheckUpdatesParameters(PorringerModel):
 
 class Environment(Plugin):
     """Plugin definition for package environments"""
+
+    python_executable: Path | None
+    """Override the Python interpreter to target.
+
+    When set by a runtime provider (pim, pyenv) during phased execution,
+    installers use this path instead of the default ``python`` on PATH.
+    """
+
+    def __init__(self, parameters: PluginParameters) -> None:
+        """Initializes the environment plugin.
+
+        Args:
+            parameters: Plugin parameters including distribution info
+        """
+        super().__init__(parameters)
+        self.python_executable = None
 
     @staticmethod
     def package_backend() -> str | None:

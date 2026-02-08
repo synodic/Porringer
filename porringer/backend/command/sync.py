@@ -21,6 +21,7 @@ from porringer.backend.backend import BackendResolver
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
+from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Package, PackageRef
 from porringer.schema import (
     BatchSetupResults,
@@ -1000,8 +1001,12 @@ class SyncCommands:
     ) -> SetupResults:
         """Execute setup actions for a single path with parallel support.
 
+        Execution is **phased**: actions targeting the ``python-runtime``
+        backend run first so that the resolved interpreter path can be
+        forwarded to downstream ``python`` / ``python-tool`` installers.
+
         Package operations are executed in parallel when plugins support it.
-        RUN_COMMAND actions are executed sequentially.
+        RUN_COMMAND actions are executed sequentially after all packages.
 
         Uses asyncio.TaskGroup (Python 3.11+) for structured concurrency.
 
@@ -1030,10 +1035,29 @@ class SyncCommands:
 
         results: list[SetupActionResult] = []
 
-        # Execute PACKAGE actions
-        if package_actions:
+        # --- Phase 1: python-runtime actions (pim / pyenv) ---------------
+        runtime_actions = [a for a in package_actions if a.backend == 'python-runtime']
+        dependent_actions = [a for a in package_actions if a.backend != 'python-runtime']
+
+        if runtime_actions:
+            runtime_results, should_continue = await self._execute_package_actions(
+                runtime_actions,
+                environments,
+                available_plugins,
+                parameters,
+                event_queue,
+            )
+            results.extend(runtime_results)
+            if not should_continue:
+                return SetupResults(actions=actions, results=results)
+
+            # Resolve interpreter and propagate to downstream plugins
+            self._propagate_runtime_executable(runtime_actions, environments)
+
+        # --- Phase 2: remaining package actions --------------------------
+        if dependent_actions:
             package_results, should_continue = await self._execute_package_actions(
-                package_actions,
+                dependent_actions,
                 environments,
                 available_plugins,
                 parameters,
@@ -1043,7 +1067,7 @@ class SyncCommands:
             if not should_continue:
                 return SetupResults(actions=actions, results=results)
 
-        # Execute RUN_COMMAND actions
+        # --- Phase 3: RUN_COMMAND actions --------------------------------
         command_context = _CommandExecutionContext(
             available_plugins=available_plugins,
             environments=environments,
@@ -1055,6 +1079,42 @@ class SyncCommands:
         results.extend(command_results)
 
         return SetupResults(actions=actions, results=results)
+
+    @staticmethod
+    def _propagate_runtime_executable(
+        runtime_actions: list[SetupAction],
+        environments: dict[str, Environment],
+    ) -> None:
+        """After python-runtime actions complete, resolve the interpreter path
+        and set it on downstream python/python-tool environment plugins.
+
+        This enables pip/uv to operate against a specific managed Python
+        rather than whichever ``python`` happens to be on PATH.
+        """
+        # Find a RuntimeProvider among the runtime action installers
+        for action in runtime_actions:
+            if action.installer is None or action.package is None:
+                continue
+            env = environments.get(action.installer)
+            if env is None or not isinstance(env, RuntimeProvider):
+                continue
+            tag = action.package.name
+            executable = env.resolve_executable(tag)
+            if executable is None:
+                logger.debug('RuntimeProvider %s could not resolve executable for tag %s', action.installer, tag)
+                continue
+
+            logger.info('Runtime resolved: %s -> %s', tag, executable)
+
+            # Propagate to all python / python-tool environment plugins
+            for name, downstream in environments.items():
+                backend = type(downstream).package_backend()
+                if backend in ('python', 'python-tool'):
+                    downstream.python_executable = executable
+                    logger.debug('Set python_executable on %s to %s', name, executable)
+
+            # Use only the first successfully resolved runtime
+            break
 
     async def execute_stream(
         self,
