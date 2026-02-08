@@ -52,6 +52,17 @@ class PipEnvironment(Environment):
         super().__init__(parameters)
         self._cached_packages: list[Package] | None = None
 
+    @property
+    def python_command(self) -> str:
+        """The Python interpreter command to use in subprocesses.
+
+        Returns the override path when a runtime provider has resolved one,
+        otherwise falls back to the bare ``python`` found on PATH.
+        """
+        if self.python_executable is not None:
+            return str(self.python_executable)
+        return 'python'
+
     @staticmethod
     @override
     def package_backend() -> str:
@@ -102,7 +113,7 @@ class PipEnvironment(Environment):
     def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using pip."""
         logger = logging.getLogger('porringer.pip.install')
-        args = ['python', '-m', 'pip', 'install', params.package.specifier]
+        args = [self.python_command, '-m', 'pip', 'install', params.package.specifier]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -319,7 +330,7 @@ class PipEnvironment(Environment):
         logger = logging.getLogger('porringer.pip.uninstall')
         results: list[Package | None] = []
         for pkg in params.packages:
-            args = ['python', '-m', 'pip', 'uninstall', '-y', pkg.name]
+            args = [self.python_command, '-m', 'pip', 'uninstall', '-y', pkg.name]
             if params.dry:
                 args.append('--dry-run')
             try:
@@ -346,7 +357,7 @@ class PipEnvironment(Environment):
         """Upgrades the given package using pip."""
         logger = logging.getLogger('porringer.pip.upgrade')
         pkg = params.package
-        args = ['python', '-m', 'pip', 'install', '--upgrade', pkg.specifier]
+        args = [self.python_command, '-m', 'pip', 'install', '--upgrade', pkg.specifier]
         if params.dry:
             args.append('--dry-run')
         try:
@@ -370,9 +381,10 @@ class PipEnvironment(Environment):
     def packages(self) -> list[Package]:
         """Gathers installed packages visible to the active Python on PATH.
 
-        Uses ``python -m pip list --format=json`` via subprocess so that the
-        result reflects the *user's* active environment (e.g. a project venv)
-        rather than the interpreter that porringer itself runs under.
+        Tries ``python -m pip list --format=json`` first.  If the pip module
+        is not installed (common in uv-created virtual environments), falls
+        back to ``importlib.metadata`` which is part of the standard library
+        and can enumerate installed packages without pip.
 
         The result is cached for the lifetime of this plugin instance to avoid
         repeated subprocess invocations (``packages()`` is called once per
@@ -385,27 +397,96 @@ class PipEnvironment(Environment):
             return self._cached_packages
 
         logger = logging.getLogger('porringer.pip.packages')
+
+        # Try pip list first
+        packages = self._list_packages_via_pip(logger, self.python_command)
+        if packages is not None:
+            self._cached_packages = packages
+            return self._cached_packages
+
+        # Fallback: importlib.metadata (works without pip module installed)
+        logger.debug('pip module unavailable, falling back to importlib.metadata')
+        packages = self._list_packages_via_importlib(logger, self.python_command)
+        if packages is not None:
+            self._cached_packages = packages
+            return self._cached_packages
+
+        self._cached_packages = []
+        return self._cached_packages
+
+    @staticmethod
+    def _list_packages_via_pip(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
+        """List packages using ``python -m pip list --format=json``.
+
+        Args:
+            logger: Logger instance.
+            python: Python interpreter command or path.
+
+        Returns:
+            A list of packages, or ``None`` if pip is not usable.
+        """
         try:
             result = subprocess.run(
-                ['python', '-m', 'pip', 'list', '--format=json'],
+                [python, '-m', 'pip', 'list', '--format=json'],
                 capture_output=True,
                 text=True,
                 check=True,
             )
             entries: list[dict[str, str]] = json.loads(result.stdout)
-            self._cached_packages = [
+            return [
                 Package(name=entry['name'], version=entry.get('version'))
                 for entry in entries
                 if entry.get('name') is not None
             ]
         except subprocess.CalledProcessError as e:
-            logger.warning(f'Failed to list pip packages: {e}')
-            self._cached_packages = []
+            logger.debug(f'pip list failed (pip module may not be installed): {e}')
+            return None
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning(f'Failed to parse pip package list: {e}')
-            self._cached_packages = []
+            return []
         except FileNotFoundError:
             logger.warning('Python not found on PATH; cannot list pip packages')
-            self._cached_packages = []
+            return []
 
-        return self._cached_packages
+    @staticmethod
+    def _list_packages_via_importlib(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
+        """List packages using ``importlib.metadata`` via subprocess.
+
+        This fallback works in any Python environment, even when the pip
+        module is not installed (e.g. uv-created virtual environments).
+
+        Args:
+            logger: Logger instance.
+            python: Python interpreter command or path.
+
+        Returns:
+            A list of packages, or ``None`` on failure.
+        """
+        script = (
+            'import json, importlib.metadata; '
+            'print(json.dumps([{"name": d.metadata.get("Name"), "version": d.version} '
+            'for d in importlib.metadata.distributions() '
+            'if d.metadata.get("Name") is not None]))'
+        )
+        try:
+            result = subprocess.run(
+                [python, '-c', script],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            entries: list[dict[str, str]] = json.loads(result.stdout)
+            return [
+                Package(name=entry['name'], version=entry.get('version'))
+                for entry in entries
+                if entry.get('name') is not None
+            ]
+        except subprocess.CalledProcessError as e:
+            logger.warning(f'importlib.metadata fallback failed: {e}')
+            return None
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f'Failed to parse importlib.metadata output: {e}')
+            return None
+        except FileNotFoundError:
+            logger.warning('Python not found on PATH; cannot list packages')
+            return None

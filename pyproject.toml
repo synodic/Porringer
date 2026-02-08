@@ -42,6 +42,7 @@ winget = "porringer.plugin.winget.plugin:WingetEnvironment"
 uv = "porringer.plugin.uv.plugin:UvEnvironment"
 npm = "porringer.plugin.npm.plugin:NpmEnvironment"
 pim = "porringer.plugin.pim.plugin:PimEnvironment"
+pyenv = "porringer.plugin.pyenv.plugin:PyenvEnvironment"
 brew = "porringer.plugin.brew.plugin:BrewEnvironment"
 apt = "porringer.plugin.apt.plugin:AptEnvironment"
 

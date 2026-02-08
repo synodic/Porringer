@@ -8,11 +8,41 @@ backend declared in a manifest.  For example, ``"python"`` might resolve to
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Mapping
 
 from porringer.core.plugin_schema.environment import Environment
 
 logger = logging.getLogger(__name__)
+
+
+def _platform_system_order() -> list[str]:
+    """Return the preferred system-backend plugin order for the current platform.
+
+    On Windows ``winget`` is the native package manager and is tried first.
+    On macOS ``brew`` is the de-facto standard.
+    On Linux the distribution package manager (``apt``) is preferred with
+    ``brew`` (linuxbrew) as a fallback.
+    """
+    if sys.platform == 'win32':
+        return ['winget']
+    if sys.platform == 'darwin':
+        return ['brew']
+    # Linux / other POSIX
+    return ['apt', 'brew']
+
+
+def _platform_runtime_order() -> list[str]:
+    """Return the preferred python-runtime plugin order for the current platform.
+
+    On Windows, ``pim`` (Python Install Manager / pymanager) is the
+    recommended tool.  On Linux and macOS, ``pyenv`` is the de-facto
+    standard.
+    """
+    if sys.platform == 'win32':
+        return ['pim']
+    return ['pyenv']
+
 
 # Centralized default preference order per backend.
 #
@@ -22,9 +52,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_PREFERENCE_ORDER: dict[str, list[str]] = {
     'python': ['uv', 'pip'],
     'python-tool': ['pipx'],
-    'system': ['brew', 'apt', 'winget'],
+    'system': _platform_system_order(),
     'node': ['npm'],
-    'python-runtime': ['pim'],
+    'python-runtime': _platform_runtime_order(),
 }
 
 

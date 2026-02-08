@@ -3,6 +3,7 @@
 import json
 import logging
 import subprocess
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -10,10 +11,11 @@ from porringer.core.plugin_schema.environment import (
     PackageParameters,
     UninstallParameters,
 )
+from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Package, PackageRef, PluginDependency
 
 
-class PimEnvironment(Environment):
+class PimEnvironment(Environment, RuntimeProvider):
     """Represents a Python runtime environment managed by Python Install Manager (pymanager).
 
     Provides methods to install, search, uninstall, upgrade, and list Python runtimes using
@@ -62,6 +64,38 @@ class PimEnvironment(Environment):
                 platforms=['win32'],
             ),
         ]
+
+    def resolve_executable(self, tag: str) -> Path | None:
+        """Return the path to the Python interpreter for a managed runtime.
+
+        Uses ``py -<tag> -c "import sys; print(sys.executable)"`` to ask
+        the Python Install Manager where the given runtime lives.
+
+        Args:
+            tag: The Python version tag (e.g. ``"3.14"``, ``"3.12"``).
+
+        Returns:
+            Absolute path to the interpreter, or ``None`` if not installed.
+        """
+        logger = logging.getLogger('porringer.pim.resolve_executable')
+        try:
+            result = subprocess.run(
+                ['py', f'-{tag}', '-c', 'import sys; print(sys.executable)'],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            path = Path(result.stdout.strip())
+            if path.exists():
+                return path
+            logger.warning('py -%s resolved to %s but it does not exist', tag, path)
+        except subprocess.CalledProcessError as e:
+            logger.debug('py -%s failed: %s', tag, e.stderr.strip() if e.stderr else e)
+        except FileNotFoundError:
+            logger.debug('py launcher not found')
+        except Exception as e:
+            logger.debug('resolve_executable failed for tag %s: %s', tag, e)
+        return None
 
     @staticmethod
     @override
