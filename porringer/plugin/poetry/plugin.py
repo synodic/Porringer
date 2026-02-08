@@ -19,6 +19,18 @@ class PoetryProjectEnvironment(ProjectEnvironment):
     unlike PDM/uv which accept ``--python`` inline.
     """
 
+    @staticmethod
+    @override
+    def package_backend() -> str:
+        """Poetry manages the ``python-project`` backend."""
+        return 'python-project'
+
+    @classmethod
+    @override
+    def consumed_runtime_kind(cls) -> str:
+        """Poetry consumes a Python runtime."""
+        return 'python'
+
     @classmethod
     @override
     def tool_name(cls) -> str:
@@ -49,8 +61,8 @@ class PoetryProjectEnvironment(ProjectEnvironment):
             True on success.
         """
         # Poetry requires `env use` to select a non-default interpreter
-        if self.python_executable is not None:
-            env_args = ['poetry', 'env', 'use', str(self.python_executable)]
+        if self.runtime_executable is not None:
+            env_args = ['poetry', 'env', 'use', str(self.runtime_executable)]
             if not self._run_sync(env_args, params.directory):
                 return False
 

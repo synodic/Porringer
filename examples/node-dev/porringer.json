@@ -1,0 +1,28 @@
+{
+    "version": "1",
+    "name": "Node.js Development Environment",
+    "description": "Common global tools and project setup for Node.js / Deno development",
+    "author": "Synodic Software",
+    "url": "https://github.com/synodic/porringer",
+    "state": {
+        "node": [
+            {
+                "name": "typescript",
+                "description": "TypeScript compiler"
+            },
+            {
+                "name": "@biomejs/biome",
+                "description": "Fast linter and formatter for JS/TS"
+            },
+            "tsx"
+        ],
+        "node-project": [],
+        "deno": [
+            {
+                "name": "jsr:@std/cli",
+                "description": "Deno standard-library CLI helpers"
+            }
+        ],
+        "deno-project": []
+    }
+}

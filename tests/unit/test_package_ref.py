@@ -72,9 +72,15 @@ class TestPackageRefStringCoercion:
 
     @staticmethod
     def test_invalid_specifier() -> None:
-        """Invalid specifiers raise validation errors."""
+        """Empty specifiers raise validation errors."""
         with pytest.raises((ValueError, ValidationError)):
-            PackageRef.model_validate('!!!invalid!!!')
+            PackageRef.model_validate('')
+
+    @staticmethod
+    def test_invalid_scoped_specifier() -> None:
+        """Scoped package without a slash raises validation errors."""
+        with pytest.raises((ValueError, ValidationError)):
+            PackageRef.model_validate('@no-slash')
 
 
 class TestPackageRefModelValidate:
@@ -102,9 +108,9 @@ class TestPackageRefModelValidate:
 
     @staticmethod
     def test_validate_invalid() -> None:
-        """Invalid package strings raise errors."""
+        """Empty package strings raise errors."""
         with pytest.raises((ValueError, ValidationError)):
-            PackageRef.model_validate('!!!bad!!!')
+            PackageRef.model_validate('')
 
 
 class TestPackageRefSpecifier:
@@ -174,3 +180,69 @@ class TestPackageRefRoundTrip:
         restored = PackageRef.model_validate_json(json_str)
         assert restored.name == ref.name
         assert restored.constraint == ref.constraint
+
+
+class TestPackageRefNpmStyle:
+    """Tests for npm / non-PEP-440 specifier handling."""
+
+    @staticmethod
+    def test_bare_npm_name() -> None:
+        """Bare npm package name is accepted."""
+        ref = PackageRef.model_validate('typescript')
+        assert ref.name == 'typescript'
+        assert ref.constraint is None
+
+    @staticmethod
+    def test_scoped_name() -> None:
+        """Scoped npm package name is accepted."""
+        ref = PackageRef.model_validate('@types/node')
+        assert ref.name == '@types/node'
+        assert ref.constraint is None
+
+    @staticmethod
+    def test_name_at_constraint() -> None:
+        """name@constraint syntax is parsed."""
+        ref = PackageRef.model_validate('lodash@^4.0.0')
+        assert ref.name == 'lodash'
+        assert ref.constraint == '^4.0.0'
+
+    @staticmethod
+    def test_scoped_name_at_constraint() -> None:
+        """@scope/name@constraint syntax is parsed."""
+        ref = PackageRef.model_validate('@angular/core@~18.0')
+        assert ref.name == '@angular/core'
+        assert ref.constraint == '~18.0'
+
+    @staticmethod
+    def test_scoped_name_at_latest() -> None:
+        """@scope/name@latest syntax is parsed."""
+        ref = PackageRef.model_validate('@types/node@latest')
+        assert ref.name == '@types/node'
+        assert ref.constraint == 'latest'
+
+    @staticmethod
+    def test_name_at_latest() -> None:
+        """name@latest syntax is parsed."""
+        ref = PackageRef.model_validate('typescript@latest')
+        assert ref.name == 'typescript'
+        assert ref.constraint == 'latest'
+
+    @staticmethod
+    def test_pep440_still_works() -> None:
+        """PEP 440 specifiers still go through the PEP 440 path."""
+        ref = PackageRef.model_validate('ruff>=0.8.0')
+        assert ref.name == 'ruff'
+        assert ref.constraint == '>=0.8.0'
+
+    @staticmethod
+    def test_specifier_property_at_syntax() -> None:
+        """Specifier joins name + constraint for npm-style refs."""
+        ref = PackageRef(name='lodash', constraint='^4.0.0')
+        assert ref.specifier == 'lodash^4.0.0'
+
+    @staticmethod
+    def test_non_pep440_name_accepted() -> None:
+        """Names that are invalid PEP 508 but valid in other ecosystems are accepted."""
+        ref = PackageRef.model_validate('!!!special!!!')
+        assert ref.name == '!!!special!!!'
+        assert ref.constraint is None

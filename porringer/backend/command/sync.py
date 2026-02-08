@@ -12,6 +12,7 @@ import tomllib
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
@@ -22,7 +23,7 @@ from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectSyncParameters
-from porringer.core.plugin_schema.runtime import RuntimeProvider
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
 from porringer.core.schema import Package, PackageRef
 from porringer.schema import (
     BatchSetupResults,
@@ -42,6 +43,7 @@ from porringer.schema import (
     SetupManifest,
     SetupParameters,
     SetupResults,
+    SkipReason,
     SubActionProgress,
     SyncStrategy,
 )
@@ -50,6 +52,19 @@ from porringer.utility.exception import ManifestError, PluginError
 from porringer.utility.utility import canonicalize_type
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _ExecutionPhaseContext:
+    """Shared context for execution phase operations."""
+
+    environments: dict[str, Environment]
+    project_environments: dict[str, ProjectEnvironment] | None
+    available_plugins: set[str]
+    parameters: SetupParameters
+    skip_project: bool
+    working_dir: Path
+    event_queue: asyncio.Queue[ProgressEvent | None] | None
 
 
 @dataclass(frozen=True)
@@ -199,22 +214,46 @@ class SyncCommands:
                     ManifestValidationCode.UNKNOWN_PLUGIN,
                 )
 
+    # Backends whose package names conform to PEP 508 / PEP 440.
+    _PEP440_BACKENDS: frozenset[str] = frozenset(
+        {
+            'python',
+            'python-tool',
+            'python-runtime',
+            'python-project',
+        }
+    )
+
     @staticmethod
     def _validate_package_names(
         manifest: SetupManifest,
         warning_callback: Callable[[str, str, ManifestValidationCode], None],
     ) -> None:
-        """Validate package specifiers in a manifest."""
+        """Validate package specifiers in a manifest.
+
+        PEP 440 validation is only applied to Python-ecosystem backends.
+        Non-Python backends (node, deno, system, …) accept any non-empty
+        package name since their naming conventions differ.
+        """
         for backend_name, packages in manifest.state.items():
             for j, spec in enumerate(packages):
-                try:
-                    Requirement(str(spec.name))
-                except InvalidRequirement as exc:
+                name_str = str(spec.name)
+                if not name_str.strip():
                     warning_callback(
                         f'state.{backend_name}[{j}].name',
-                        f"Invalid package specifier '{spec.name}': {exc}",
+                        'Empty package name',
                         ManifestValidationCode.INVALID_PACKAGE_NAME,
                     )
+                    continue
+                if backend_name in SyncCommands._PEP440_BACKENDS:
+                    try:
+                        Requirement(name_str)
+                    except InvalidRequirement as exc:
+                        warning_callback(
+                            f'state.{backend_name}[{j}].name',
+                            f"Invalid package specifier '{spec.name}': {exc}",
+                            ManifestValidationCode.INVALID_PACKAGE_NAME,
+                        )
 
     @staticmethod
     def _validate_duplicate_packages(
@@ -419,23 +458,22 @@ class SyncCommands:
         Returns:
             The CLI command as a list of strings, or empty list if not applicable.
         """
+        cmd: list[str] = []
         match action.action_type:
             case SetupActionType.PACKAGE:
                 if action.installer and action.package and action.installer in environments:
                     env = environments[action.installer]
                     if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
-                        return env.upgrade_command(action.package)
-                    return env.install_command(action.package)
-                return []
+                        cmd = env.upgrade_command(action.package)
+                    else:
+                        cmd = env.install_command(action.package)
             case SetupActionType.PROJECT_SYNC:
                 proj_envs = project_environments or {}
                 if action.installer and action.installer in proj_envs:
-                    return proj_envs[action.installer].sync_command()
-                return []
+                    cmd = proj_envs[action.installer].sync_command()
             case SetupActionType.RUN_COMMAND:
-                return action.command or []
-            case _:
-                return []
+                cmd = action.command or []
+        return cmd
 
     @staticmethod
     def _build_actions(
@@ -620,7 +658,9 @@ class SyncCommands:
 
         try:
             installed_packages = environments[action.installer].packages()
-            is_installed, skip_reason = SyncCommands._is_package_installed(action.package, installed_packages)
+            is_installed, installed_detail = SyncCommands._is_package_installed(
+                action.package, installed_packages, action.backend
+            )
         except PluginError as e:
             logger.debug(f'Dry-run: plugin error checking packages for {action.installer}: {e}')
             return SetupActionResult(action=action, success=True)
@@ -630,18 +670,19 @@ class SyncCommands:
 
         if strategy == SyncStrategy.MINIMAL:
             if is_installed:
-                logger.info(f"Dry-run: skipping '{action.package}': {skip_reason}")
+                logger.info(f"Dry-run: skipping '{action.package}': {installed_detail}")
                 return SetupActionResult(
                     action=action,
                     success=True,
                     skipped=True,
-                    skip_reason=skip_reason,
+                    skip_reason=SkipReason.ALREADY_INSTALLED,
+                    message=installed_detail,
                 )
         elif not is_installed:
             return SetupActionResult(
                 action=action,
                 success=True,
-                skip_reason='not installed, will install instead',
+                message='not installed, will install instead',
             )
 
         return SetupActionResult(action=action, success=True)
@@ -650,28 +691,48 @@ class SyncCommands:
     def _is_package_installed(
         package: PackageRef,
         installed_packages: list[Package],
+        backend: str | None = None,
     ) -> tuple[bool, str | None]:
         """Checks if a package is already installed with a compatible version.
+
+        For Python-ecosystem backends, uses PEP 440 canonicalization and
+        specifier matching.  For other backends, uses case-insensitive name
+        comparison and simple string version equality.
 
         Args:
             package: The package reference
             installed_packages: List of installed packages from the environment
+            backend: The backend identifier (used to select matching strategy)
 
         Returns:
             Tuple of (is_installed, skip_reason or None)
         """
-        canonical_name = canonicalize_name(package.name)
+        is_pep440 = backend in SyncCommands._PEP440_BACKENDS if backend else True
+
         for installed in installed_packages:
-            if canonicalize_name(installed.name) == canonical_name:
-                if not package.constraint:
-                    return True, f'{installed.name}=={installed.version} already installed'
-                if installed.version is not None:
+            if is_pep440:
+                if canonicalize_name(installed.name) != canonicalize_name(package.name):
+                    continue
+            elif installed.name.lower() != package.name.lower():
+                continue
+
+            # Name matched
+            if not package.constraint:
+                return True, f'{installed.name}=={installed.version} already installed'
+
+            if installed.version is not None:
+                if is_pep440:
                     try:
                         req = Requirement(str(package))
                         if Version(installed.version) in req.specifier:
                             return True, f'{installed.name}=={installed.version} satisfies {package}'
                     except InvalidVersion, InvalidRequirement:
                         pass
+                else:
+                    # Non-PEP-440: installed means installed; constraint
+                    # satisfaction is left to the underlying tool.
+                    return True, f'{installed.name}=={installed.version} already installed'
+
         return False, None
 
     @staticmethod
@@ -751,11 +812,13 @@ class SyncCommands:
 
         # Check if package is already installed
         is_installed = False
-        skip_reason: str | None = None
+        installed_detail: str | None = None
         try:
             loop = asyncio.get_running_loop()
             installed_packages = await loop.run_in_executor(None, environment.packages)
-            is_installed, skip_reason = SyncCommands._is_package_installed(action.package, installed_packages)
+            is_installed, installed_detail = SyncCommands._is_package_installed(
+                action.package, installed_packages, action.backend
+            )
         except PluginError as e:
             logger.debug(f'Plugin error checking packages for {action.installer}: {e}')
         except Exception as e:
@@ -763,12 +826,13 @@ class SyncCommands:
 
         if strategy == SyncStrategy.MINIMAL:
             if is_installed:
-                logger.info(f"Skipping '{action.package}': {skip_reason}")
+                logger.info(f"Skipping '{action.package}': {installed_detail}")
                 return SetupActionResult(
                     action=action,
                     success=True,
                     skipped=True,
-                    skip_reason=skip_reason,
+                    skip_reason=SkipReason.ALREADY_INSTALLED,
+                    message=installed_detail,
                 )
             logger.info(f"Installing '{action.package}' via {action.installer}")
             return await self._attempt_package_operation(action, environment, SyncStrategy.MINIMAL, event_queue)
@@ -1070,10 +1134,16 @@ class SyncCommands:
         """
         logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
+        results: list[SetupActionResult] = []
         environments = self._get_available_environments()
         project_environments = self._get_available_project_environments()
         available_plugins = set(environments.keys()) | set(project_environments.keys())
-        working_dir = path if path.is_dir() else path.parent
+
+        skip_project = parameters.project_directory is False
+        if isinstance(parameters.project_directory, Path):
+            working_dir = parameters.project_directory
+        else:
+            working_dir = path if path.is_dir() else path.parent
 
         # Populate CLI commands for all actions
         for action in actions:
@@ -1086,11 +1156,10 @@ class SyncCommands:
         project_sync_actions = [a for a in actions if a.action_type == SetupActionType.PROJECT_SYNC]
         command_actions = [a for a in actions if a.action_type == SetupActionType.RUN_COMMAND]
 
-        results: list[SetupActionResult] = []
-
-        # --- Phase 1: python-runtime actions (pim / pyenv) ---------------
-        runtime_actions = [a for a in package_actions if a.backend == 'python-runtime']
-        dependent_actions = [a for a in package_actions if a.backend != 'python-runtime']
+        # --- Phase 1: runtime-provider actions (pim / pyenv) ---------------
+        runtime_actions = [
+            a for a in package_actions if a.installer and isinstance(environments.get(a.installer), RuntimeProvider)
+        ]
 
         if runtime_actions:
             runtime_results, should_continue = await self._execute_package_actions(
@@ -1103,11 +1172,10 @@ class SyncCommands:
             results.extend(runtime_results)
             if not should_continue:
                 return SetupResults(actions=actions, results=results)
-
-            # Resolve interpreter and propagate to downstream plugins
-            self._propagate_runtime_executable(runtime_actions, environments, project_environments)
+            self._propagate_runtime(runtime_actions, environments, project_environments)
 
         # --- Phase 2: remaining package actions --------------------------
+        dependent_actions = [a for a in package_actions if a not in runtime_actions]
         if dependent_actions:
             package_results, should_continue = await self._execute_package_actions(
                 dependent_actions,
@@ -1120,42 +1188,97 @@ class SyncCommands:
             if not should_continue:
                 return SetupResults(actions=actions, results=results)
 
-        # --- Phase 2.5: PROJECT_SYNC actions (pdm / poetry / uv-project) -
+        # --- Phase 2.5 & 3: project sync and command phases ---------------
         if project_sync_actions:
-            project_results = await self._execute_project_sync_actions(
-                project_sync_actions,
-                project_environments,
-                working_dir,
-                parameters,
-                event_queue,
+            results.extend(
+                await self._execute_project_sync_phase(
+                    project_sync_actions,
+                    _ExecutionPhaseContext(
+                        environments=environments,
+                        project_environments=project_environments,
+                        available_plugins=available_plugins,
+                        parameters=parameters,
+                        skip_project=skip_project,
+                        working_dir=working_dir,
+                        event_queue=event_queue,
+                    ),
+                )
             )
-            results.extend(project_results)
 
-        # --- Phase 3: RUN_COMMAND actions --------------------------------
-        command_context = _CommandExecutionContext(
-            available_plugins=available_plugins,
-            environments=environments,
-            working_dir=working_dir,
-            parameters=parameters,
-            event_queue=event_queue,
-        )
-        command_results = await self._execute_command_actions(command_actions, command_context)
-        results.extend(command_results)
+        if command_actions:
+            results.extend(
+                await self._execute_command_phase(
+                    command_actions,
+                    _ExecutionPhaseContext(
+                        environments=environments,
+                        project_environments=project_environments,
+                        available_plugins=available_plugins,
+                        parameters=parameters,
+                        skip_project=skip_project,
+                        working_dir=working_dir,
+                        event_queue=event_queue,
+                    ),
+                )
+            )
 
         return SetupResults(actions=actions, results=results)
 
+    async def _execute_project_sync_phase(
+        self,
+        project_sync_actions: list[SetupAction],
+        context: _ExecutionPhaseContext,
+    ) -> list[SetupActionResult]:
+        """Execute or skip project-sync actions based on context."""
+        if not context.skip_project:
+            return await self._execute_project_sync_actions(
+                project_sync_actions,
+                context.project_environments,
+                context.working_dir,
+                context.parameters,
+                context.event_queue,
+            )
+        return self._skip_actions(
+            project_sync_actions,
+            SkipReason.NO_PROJECT_DIRECTORY,
+            'No project directory provided',
+            context.event_queue,
+        )
+
+    async def _execute_command_phase(
+        self,
+        command_actions: list[SetupAction],
+        context: _ExecutionPhaseContext,
+    ) -> list[SetupActionResult]:
+        """Execute or skip command actions based on context."""
+        if not context.skip_project:
+            cmd_context = _CommandExecutionContext(
+                available_plugins=context.available_plugins,
+                environments=context.environments,
+                working_dir=context.working_dir,
+                parameters=context.parameters,
+                event_queue=context.event_queue,
+            )
+            return await self._execute_command_actions(command_actions, cmd_context)
+        return self._skip_actions(
+            command_actions,
+            SkipReason.NO_PROJECT_DIRECTORY,
+            'No project directory for post-sync command',
+            context.event_queue,
+        )
+
     @staticmethod
-    def _propagate_runtime_executable(
+    def _propagate_runtime(
         runtime_actions: list[SetupAction],
         environments: dict[str, Environment],
         project_environments: dict[str, ProjectEnvironment] | None = None,
     ) -> None:
-        """After python-runtime actions complete, resolve the interpreter path
-        and set it on downstream python/python-tool environment plugins and
-        project-environment plugins.
+        """Resolve the interpreter path and propagate to downstream consumers.
 
-        This enables pip/uv to operate against a specific managed Python
-        rather than whichever ``python`` happens to be on PATH.
+        After runtime-provider actions complete, finds the first
+        :class:`RuntimeProvider` that can resolve an executable and sets
+        ``runtime_executable`` on all :class:`RuntimeConsumer` plugins
+        whose ``consumed_runtime_kind`` matches the provider's
+        ``provided_runtime_kind``.
         """
         proj_envs = project_environments or {}
 
@@ -1166,6 +1289,8 @@ class SyncCommands:
             env = environments.get(action.installer)
             if env is None or not isinstance(env, RuntimeProvider):
                 continue
+
+            kind = cast(type[RuntimeProvider], type(env)).provided_runtime_kind()
             tag = action.package.name
             executable = env.resolve_executable(tag)
             if executable is None:
@@ -1174,25 +1299,62 @@ class SyncCommands:
 
             logger.info('Runtime resolved: %s -> %s', tag, executable)
 
-            # Propagate to all python / python-tool environment plugins
+            # Propagate to environment plugins that consume this runtime kind
             for name, downstream in environments.items():
-                backend = type(downstream).package_backend()
-                if backend in ('python', 'python-tool'):
-                    downstream.python_executable = executable
-                    logger.debug('Set python_executable on %s to %s', name, executable)
+                if isinstance(downstream, RuntimeConsumer):
+                    downstream_type = cast(type[RuntimeConsumer], type(downstream))
+                    if downstream_type.consumed_runtime_kind() == kind:
+                        downstream.runtime_executable = executable
+                        logger.debug('Set runtime_executable on %s to %s', name, executable)
 
-            # Propagate to all project-environment plugins
+            # Propagate to project-environment plugins that consume this runtime kind
             for name, proj_downstream in proj_envs.items():
-                proj_downstream.python_executable = executable
-                logger.debug('Set python_executable on project plugin %s to %s', name, executable)
+                is_consumer = isinstance(proj_downstream, RuntimeConsumer)
+                if is_consumer:
+                    proj_type = cast(type[RuntimeConsumer], type(proj_downstream))
+                    if proj_type.consumed_runtime_kind() == kind:
+                        proj_downstream.runtime_executable = executable
+                        logger.debug('Set runtime_executable on project plugin %s to %s', name, executable)
 
             # Use only the first successfully resolved runtime
             break
 
+    @staticmethod
+    def _skip_actions(
+        actions: list[SetupAction],
+        skip_reason: SkipReason,
+        message: str,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
+    ) -> list[SetupActionResult]:
+        """Skip a list of actions, emitting progress events and a warning for each.
+
+        Args:
+            actions: The actions to skip.
+            skip_reason: Machine-readable skip code.
+            message: Human-readable skip detail.
+            event_queue: Optional queue for progress events.
+
+        Returns:
+            List of skipped action results.
+        """
+        results: list[SetupActionResult] = []
+        for action in actions:
+            logger.warning("Skipping '%s': %s", action.description, message)
+            result = SetupActionResult(
+                action=action, success=True, skipped=True, skip_reason=skip_reason, message=message
+            )
+            results.append(result)
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                )
+        return results
+
     async def _execute_project_sync_actions(
         self,
         project_sync_actions: list[SetupAction],
-        project_environments: dict[str, ProjectEnvironment],
+        project_environments: dict[str, ProjectEnvironment] | None,
         working_dir: Path,
         parameters: SetupParameters,
         event_queue: asyncio.Queue[ProgressEvent | None] | None,
@@ -1237,7 +1399,7 @@ class SyncCommands:
     @staticmethod
     async def _execute_project_sync(
         action: SetupAction,
-        project_environments: dict[str, ProjectEnvironment],
+        project_environments: dict[str, ProjectEnvironment] | None,
         working_dir: Path,
         parameters: SetupParameters,
     ) -> SetupActionResult:
@@ -1252,12 +1414,13 @@ class SyncCommands:
         Returns:
             The result of the sync operation.
         """
-        if action.installer is None or action.installer not in project_environments:
+        proj_envs = project_environments or {}
+        if action.installer is None or action.installer not in proj_envs:
             return SetupActionResult(
                 action=action, success=False, message=f"Project environment '{action.installer}' is not available"
             )
 
-        proj_env = project_environments[action.installer]
+        proj_env = proj_envs[action.installer]
         params = ProjectSyncParameters(directory=working_dir, dry=parameters.dry_run)
 
         try:

@@ -58,11 +58,12 @@ class CheckUpdatesParameters(PorringerModel):
 class Environment(Plugin):
     """Plugin definition for package environments"""
 
-    python_executable: Path | None
-    """Override the Python interpreter to target.
+    runtime_executable: Path | None
+    """Override the language runtime interpreter to target.
 
-    When set by a runtime provider (pim, pyenv) during phased execution,
-    installers use this path instead of the default ``python`` on PATH.
+    When set by a :class:`~porringer.core.plugin_schema.runtime.RuntimeProvider`
+    during phased execution, installers use this path instead of the
+    default interpreter on PATH.
     """
 
     def __init__(self, parameters: PluginParameters) -> None:
@@ -72,7 +73,7 @@ class Environment(Plugin):
             parameters: Plugin parameters including distribution info
         """
         super().__init__(parameters)
-        self.python_executable = None
+        self.runtime_executable = None
 
     @staticmethod
     def package_backend() -> str | None:
@@ -107,7 +108,7 @@ class Environment(Plugin):
         Override this method to provide the actual command line arguments
         that would be used to install a package.  This is used for
         displaying commands in dry-run / preview mode and should reflect
-        instance state such as :attr:`python_executable`.
+        instance state such as :attr:`runtime_executable`.
 
         Args:
             package: The package reference (may include a version constraint).
@@ -124,7 +125,7 @@ class Environment(Plugin):
         Override this method to provide the actual command line arguments
         that would be used to upgrade a package.  This is used for
         displaying commands in dry-run / preview mode and should reflect
-        instance state such as :attr:`python_executable`.
+        instance state such as :attr:`runtime_executable`.
 
         Args:
             package: The package reference (may include a version constraint).
@@ -197,7 +198,7 @@ class Environment(Plugin):
                 check=False,
             )
             output = result.stdout + result.stderr
-        except (OSError, subprocess.SubprocessError):
+        except OSError, subprocess.SubprocessError:
             return None
 
         match = re.search(r'v?\d+\.\d+(?:\.\d+)*', output)

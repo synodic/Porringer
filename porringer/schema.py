@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from importlib.metadata import Distribution
 from pathlib import Path
+from typing import Literal
 
 from packaging.version import Version
 from platformdirs import user_cache_dir
@@ -111,6 +112,16 @@ class SetupActionType(Enum):
     RUN_COMMAND = auto()
 
 
+class SkipReason(Enum):
+    """Machine-readable reason an action was skipped.
+
+    Use ``SetupActionResult.message`` for the human-readable detail.
+    """
+
+    ALREADY_INSTALLED = auto()
+    NO_PROJECT_DIRECTORY = auto()
+
+
 @dataclass
 class SetupAction:
     """A single action to perform during setup.
@@ -142,16 +153,16 @@ class SetupActionResult:
     Args:
         action: The action that was executed.
         success: Whether the action succeeded.
-        message: Optional message (error details on failure).
-        skipped: Whether the action was skipped (e.g., plugin check found plugin).
-        skip_reason: Human-readable reason for skipping (e.g., 'already installed').
+        message: Optional human-readable detail (error on failure, description on skip).
+        skipped: Whether the action was skipped.
+        skip_reason: Machine-readable skip code (see :class:`SkipReason`).
     """
 
     action: SetupAction
     success: bool
     message: str | None = None
     skipped: bool = False
-    skip_reason: str | None = None
+    skip_reason: SkipReason | None = None
 
 
 @dataclass
@@ -308,6 +319,15 @@ class SetupParameters(BaseModel):
     paths: Path | Sequence[Path] | None = Field(
         default=None, description='Path(s) to manifest file(s) or directories. None uses all cached directories.'
     )
+    project_directory: Path | Literal[False] | None = Field(
+        default=None,
+        description=(
+            'Controls where project-sync and post-sync actions run. '
+            'None (default) infers the working directory from the manifest path. '
+            'A Path overrides the working directory. '
+            'False skips project-sync and post-sync actions entirely.'
+        ),
+    )
     timeout: int = Field(default=300, description='Timeout in seconds for post-sync commands')
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
     dry_run: bool = Field(default=False, description='Preview actions without executing them')
@@ -376,13 +396,29 @@ class BatchSetupResults:
 
     @property
     def total_succeeded(self) -> int:
-        """Total number of successful action results."""
-        return sum(sum(1 for r in m.results if r.success) for m in self.manifest_results)
+        """Total number of successful action results (excludes skipped)."""
+        return sum(sum(1 for r in m.results if r.success and not r.skipped) for m in self.manifest_results)
 
     @property
     def total_failed(self) -> int:
         """Total number of failed action results."""
         return sum(sum(1 for r in m.results if not r.success) for m in self.manifest_results)
+
+    @property
+    def total_skipped(self) -> int:
+        """Total number of skipped action results."""
+        return sum(sum(1 for r in m.results if r.skipped) for m in self.manifest_results)
+
+    @property
+    def skips(self) -> list[SetupActionResult]:
+        """All skipped action results.
+
+        Each result carries ``skip_reason`` (:class:`SkipReason` enum),
+        ``message`` (human-readable detail), and ``action`` (with
+        ``action_type``, ``backend``, ``installer``) for programmatic
+        inspection.
+        """
+        return [r for m in self.manifest_results for r in m.results if r.skipped]
 
 
 @dataclass
@@ -404,10 +440,10 @@ class ListPluginResults:
 
 
 @dataclass
-class PluginInformation[Plugin]:
+class PluginInformation[P]:
     """Gathered information about available plugins"""
 
-    type: type[Plugin]
+    type: type[P]
     distribution: Distribution
 
 

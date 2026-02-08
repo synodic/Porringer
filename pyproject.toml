@@ -41,6 +41,9 @@ pipx = "porringer.plugin.pipx.plugin:PipxEnvironment"
 winget = "porringer.plugin.winget.plugin:WingetEnvironment"
 uv = "porringer.plugin.uv.plugin:UvEnvironment"
 npm = "porringer.plugin.npm.plugin:NpmEnvironment"
+pnpm = "porringer.plugin.pnpm.plugin:PnpmEnvironment"
+bun = "porringer.plugin.bun.plugin:BunEnvironment"
+deno = "porringer.plugin.deno.plugin:DenoEnvironment"
 pim = "porringer.plugin.pim.plugin:PimEnvironment"
 pyenv = "porringer.plugin.pyenv.plugin:PyenvEnvironment"
 brew = "porringer.plugin.brew.plugin:BrewEnvironment"
@@ -50,6 +53,11 @@ apt = "porringer.plugin.apt.plugin:AptEnvironment"
 uv-project = "porringer.plugin.uv_project.plugin:UvProjectEnvironment"
 pdm = "porringer.plugin.pdm.plugin:PdmProjectEnvironment"
 poetry = "porringer.plugin.poetry.plugin:PoetryProjectEnvironment"
+npm-project = "porringer.plugin.npm_project.plugin:NpmProjectEnvironment"
+pnpm-project = "porringer.plugin.pnpm_project.plugin:PnpmProjectEnvironment"
+yarn-project = "porringer.plugin.yarn_project.plugin:YarnProjectEnvironment"
+bun-project = "porringer.plugin.bun_project.plugin:BunProjectEnvironment"
+deno-project = "porringer.plugin.deno_project.plugin:DenoProjectEnvironment"
 
 [project.scripts]
 porringer = "porringer.console.entry:app"
@@ -81,6 +89,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "porringer/console/command/*.py" = ["PLR0913", "PLR0917"]
+"tests/**/*.py" = ["D102", "PLR6301", "PLR2004"]
 
 [tool.ruff.format]
 docstring-code-format = true

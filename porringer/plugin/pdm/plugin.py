@@ -12,6 +12,18 @@ class PdmProjectEnvironment(ProjectEnvironment):
     synchronisation to ``pdm install``.
     """
 
+    @staticmethod
+    @override
+    def package_backend() -> str:
+        """PDM manages the ``python-project`` backend."""
+        return 'python-project'
+
+    @classmethod
+    @override
+    def consumed_runtime_kind(cls) -> str:
+        """PDM consumes a Python runtime."""
+        return 'python'
+
     @classmethod
     @override
     def tool_name(cls) -> str:

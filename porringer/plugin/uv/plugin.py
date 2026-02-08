@@ -10,10 +10,11 @@ from porringer.core.plugin_schema.environment import (
     PackageParameters,
     UninstallParameters,
 )
+from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import Package, PackageRef, PluginParameters
 
 
-class UvEnvironment(Environment):
+class UvEnvironment(Environment, RuntimeConsumer):
     """Represents a Python environment managed by uv.
 
     Provides methods to install, search, uninstall, upgrade, and list Python packages using uv
@@ -28,18 +29,24 @@ class UvEnvironment(Environment):
     def _python_args(self) -> list[str]:
         """Return ``['--python', '<path>']`` when an override is active.
 
-        Reads from ``self.python_executable`` (set by the sync engine
+        Reads from ``self.runtime_executable`` (set by the sync engine
         via a runtime provider).  Returns an empty list when no override
         is set.
         """
-        if self.python_executable is not None:
-            return ['--python', str(self.python_executable)]
+        if self.runtime_executable is not None:
+            return ['--python', str(self.runtime_executable)]
         return []
 
     @staticmethod
     @override
     def package_backend() -> str:
         """UV manages the ``python`` package backend."""
+        return 'python'
+
+    @classmethod
+    @override
+    def consumed_runtime_kind(cls) -> str:
+        """UV consumes a Python runtime."""
         return 'python'
 
     @classmethod

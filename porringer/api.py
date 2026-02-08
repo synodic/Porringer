@@ -34,5 +34,5 @@ class API:
         self.cache = DirectoryCacheManager(self.configuration.data_directory)
 
         self.plugin = PluginCommands()
-        self.porringer = SelfCommands()
+        self.updates = SelfCommands()
         self.sync = SyncCommands(self.cache)

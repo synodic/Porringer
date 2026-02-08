@@ -93,6 +93,8 @@ class ProjectEnvironmentUnitTests[T: ProjectEnvironment](
         assert all(isinstance(part, str) for part in cmd)
 
     @staticmethod
-    def test_package_backend_is_python_project(plugin_type: type[T]) -> None:
-        """package_backend() should return 'python-project'."""
-        assert plugin_type.package_backend() == 'python-project'
+    def test_package_backend_returns_string(plugin_type: type[T]) -> None:
+        """package_backend() should return a non-empty string identifier."""
+        backend = plugin_type.package_backend()
+        assert isinstance(backend, str)
+        assert len(backend) > 0
