@@ -37,7 +37,9 @@ def plugin_list(
         configuration.console.print('[yellow]No plugins found[/yellow]')
     else:
         for result in results:
-            configuration.console.print(result)
+            tool_ver = str(result.tool_version) if result.tool_version else 'n/a'
+            status = '[green]installed[/green]' if result.installed else '[red]not installed[/red]'
+            configuration.console.print(f'{result.name} v{result.version} (tool: {tool_ver}) {status}')
 
 
 @app.command('install')

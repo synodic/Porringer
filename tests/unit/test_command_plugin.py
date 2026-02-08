@@ -5,6 +5,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from packaging.version import Version
 
 from porringer.api import API
 from porringer.backend.builder import Builder
@@ -39,6 +40,11 @@ class TestCommandPlugin:
         # Each result should have an installed status based on is_available()
         for result in results:
             assert isinstance(result.installed, bool)
+            # tool_version should be a Version when installed, None otherwise
+            if result.installed:
+                assert result.tool_version is None or isinstance(result.tool_version, Version)
+            else:
+                assert result.tool_version is None
 
     @staticmethod
     def test_plugin_list_with_missing_module() -> None:
