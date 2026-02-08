@@ -12,8 +12,12 @@ import sys
 from collections.abc import Mapping
 
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 
 logger = logging.getLogger(__name__)
+
+# Type alias for any plugin that participates in backend resolution.
+BackendPlugin = Environment | ProjectEnvironment
 
 
 def _platform_system_order() -> list[str]:
@@ -52,6 +56,7 @@ def _platform_runtime_order() -> list[str]:
 DEFAULT_PREFERENCE_ORDER: dict[str, list[str]] = {
     'python': ['uv', 'pip'],
     'python-tool': ['pipx'],
+    'python-project': ['uv-project', 'pdm', 'poetry'],
     'system': _platform_system_order(),
     'node': ['npm'],
     'python-runtime': _platform_runtime_order(),
@@ -68,6 +73,7 @@ class BackendResolver:
     * *preferences* – an optional dict coming from the manifest's
       ``preferences`` field (e.g. ``{"python": "uv"}``).
 
+    Optionally accepts *project_environments* for project-scoped plugins.
     The resolver builds a mapping from every declared backend to the
     chosen plugin name, falling back to :data:`DEFAULT_PREFERENCE_ORDER`
     for backends without an explicit preference.
@@ -77,20 +83,27 @@ class BackendResolver:
         self,
         environments: Mapping[str, Environment],
         preferences: Mapping[str, str] | None = None,
+        project_environments: Mapping[str, ProjectEnvironment] | None = None,
     ) -> None:
         """Initialise the resolver with available environment plugins.
 
         Args:
             environments: Mapping of plugin name to Environment instance.
             preferences: Optional explicit backend-to-installer overrides.
+            project_environments: Optional mapping of project-environment plugins.
         """
         self._environments = environments
+        self._project_environments: Mapping[str, ProjectEnvironment] = project_environments or {}
         self._preferences = preferences or {}
+
+        # Merged view for backend indexing and availability checks
+        self._all_plugins: dict[str, BackendPlugin] = dict(environments)
+        self._all_plugins.update(self._project_environments)
 
         # Index: backend -> [plugin_name, ...] ordered by pref
         self._backend_plugins: dict[str, list[str]] = {}
-        for name, env in environments.items():
-            backend = type(env).package_backend()
+        for name, plugin in self._all_plugins.items():
+            backend = type(plugin).package_backend()
             if backend is not None:
                 self._backend_plugins.setdefault(backend, []).append(name)
 
@@ -162,11 +175,11 @@ class BackendResolver:
 
     def _is_available(self, plugin_name: str) -> bool:
         """Check if *plugin_name* reports itself as available."""
-        env = self._environments.get(plugin_name)
-        if env is None:
+        plugin = self._all_plugins.get(plugin_name)
+        if plugin is None:
             return False
         try:
-            return type(env).is_available()
+            return type(plugin).is_available()
         except Exception:
             logger.debug("is_available() failed for plugin '%s'", plugin_name, exc_info=True)
             return False

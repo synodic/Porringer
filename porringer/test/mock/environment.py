@@ -13,15 +13,13 @@ from porringer.core.schema import Package, PackageRef
 class MockEnvironment(Environment):
     """Mocked environment plugin"""
 
-    @staticmethod
     @override
-    def install_command(package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package."""
         return ['mock', 'install', str(package)]
 
-    @staticmethod
     @override
-    def upgrade_command(package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package."""
         return ['mock', 'upgrade', str(package)]
 

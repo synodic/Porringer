@@ -91,17 +91,15 @@ class PipEnvironment(Environment):
         """
         return shutil.which('pip') is not None or shutil.which('python') is not None
 
-    @staticmethod
     @override
-    def install_command(package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via pip."""
-        return ['pip', 'install', package.specifier]
+        return [self.python_command, '-m', 'pip', 'install', package.specifier]
 
-    @staticmethod
     @override
-    def upgrade_command(package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via pip."""
-        return ['pip', 'install', '--upgrade', package.specifier]
+        return [self.python_command, '-m', 'pip', 'install', '--upgrade', package.specifier]
 
     @staticmethod
     @override
@@ -113,7 +111,7 @@ class PipEnvironment(Environment):
     def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using pip."""
         logger = logging.getLogger('porringer.pip.install')
-        args = [self.python_command, '-m', 'pip', 'install', params.package.specifier]
+        args = list(self.install_command(params.package))
         if params.dry:
             args.append('--dry-run')
         try:
@@ -142,7 +140,7 @@ class PipEnvironment(Environment):
         ``async_run_command`` path for zero overhead.
         """
         logger = logging.getLogger('porringer.pip.install')
-        args = ['python', '-m', 'pip', 'install', params.package.specifier]
+        args = list(self.install_command(params.package))
         if params.dry:
             args.append('--dry-run')
 
@@ -357,7 +355,7 @@ class PipEnvironment(Environment):
         """Upgrades the given package using pip."""
         logger = logging.getLogger('porringer.pip.upgrade')
         pkg = params.package
-        args = [self.python_command, '-m', 'pip', 'install', '--upgrade', pkg.specifier]
+        args = list(self.upgrade_command(pkg))
         if params.dry:
             args.append('--dry-run')
         try:

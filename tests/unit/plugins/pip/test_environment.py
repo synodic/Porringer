@@ -228,4 +228,5 @@ class TestCaching:
         env1.packages()
         env2.packages()
 
-        assert call_count == 2  # noqa: PLR2004
+        expected_calls = 2
+        assert call_count == expected_calls

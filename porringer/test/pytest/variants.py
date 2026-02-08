@@ -5,8 +5,10 @@ from collections.abc import Sequence
 from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import Distribution
 from porringer.test.mock.environment import MockEnvironment
+from porringer.test.mock.project_environment import MockProjectEnvironment
 
 
 def _mock_environment_list() -> Sequence[type[Environment]]:
@@ -19,6 +21,20 @@ def _mock_environment_list() -> Sequence[type[Environment]]:
 
     # Default
     variants.append(MockEnvironment)
+
+    return variants
+
+
+def _mock_project_environment_list() -> Sequence[type[ProjectEnvironment]]:
+    """Mocked list of project environments.
+
+    Returns:
+        List of mock project environments.
+    """
+    variants = []
+
+    # Default
+    variants.append(MockProjectEnvironment)
 
     return variants
 
@@ -39,4 +55,5 @@ def _porringer_distribution_list() -> Sequence[Distribution]:
 
 
 environment_variants = _mock_environment_list()
+project_environment_variants = _mock_project_environment_list()
 porringer_distribution_list = _porringer_distribution_list()

@@ -59,15 +59,13 @@ class PipxEnvironment(Environment):
         """Pipx wraps the ``pipx`` CLI."""
         return 'pipx'
 
-    @staticmethod
     @override
-    def install_command(package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via pipx."""
         return ['pipx', 'install', package.specifier]
 
-    @staticmethod
     @override
-    def upgrade_command(package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via pipx."""
         return ['pipx', 'upgrade', package.specifier]
 

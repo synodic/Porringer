@@ -22,6 +22,7 @@
                 "name": "pdm",
                 "description": "Python package and dependency manager"
             }
-        ]
+        ],
+        "python-project": []
     }
 }

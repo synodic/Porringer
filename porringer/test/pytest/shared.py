@@ -5,8 +5,9 @@ from typing import LiteralString, cast
 
 import pytest
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import Plugin, PluginParameters
-from porringer.test.pytest.variants import environment_variants
+from porringer.test.pytest.variants import environment_variants, project_environment_variants
 
 
 class BaseTests[T: Plugin](metaclass=ABCMeta):
@@ -88,3 +89,26 @@ class EnvironmentTests[T: Environment](PluginTests[T], metaclass=ABCMeta):
         environment_type = cast(type[Environment], request.param)
 
         return environment_type
+
+
+class ProjectEnvironmentTests[T: ProjectEnvironment](PluginTests[T], metaclass=ABCMeta):
+    """Shared functionality between the different project-environment testing categories."""
+
+    @staticmethod
+    @pytest.fixture(
+        name='project_environment_type',
+        scope='session',
+        params=project_environment_variants,
+    )
+    def fixture_project_environment_type(request: pytest.FixtureRequest) -> type[ProjectEnvironment]:
+        """Fixture defining all testable variations of mock ProjectEnvironment.
+
+        Args:
+            request: Parameterization list
+
+        Returns:
+            Variation of a ProjectEnvironment
+        """
+        project_environment_type = cast(type[ProjectEnvironment], request.param)
+
+        return project_environment_type

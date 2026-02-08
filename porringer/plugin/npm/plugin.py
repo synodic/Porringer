@@ -31,18 +31,16 @@ class NpmEnvironment(Environment):
         """Npm wraps the ``npm`` CLI."""
         return 'npm'
 
-    @staticmethod
     @override
-    def install_command(package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via npm."""
         # npm uses name@constraint syntax for version pinning
         if package.constraint:
             return ['npm', 'install', '-g', f'{package.name}@{package.constraint}']
         return ['npm', 'install', '-g', package.name]
 
-    @staticmethod
     @override
-    def upgrade_command(package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via npm."""
         if package.constraint:
             return ['npm', 'update', '-g', f'{package.name}@{package.constraint}']
