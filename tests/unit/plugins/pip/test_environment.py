@@ -40,10 +40,12 @@ class TestPackages:
     @staticmethod
     def test_packages_parses_json_output(monkeypatch: pytest.MonkeyPatch) -> None:
         """packages() should parse pip list --format=json output into Package objects."""
-        pip_output = json.dumps([
-            {'name': 'ruff', 'version': '0.15.0'},
-            {'name': 'pytest', 'version': '9.0.2'},
-        ])
+        pip_output = json.dumps(
+            [
+                {'name': 'ruff', 'version': '0.15.0'},
+                {'name': 'pytest', 'version': '9.0.2'},
+            ]
+        )
 
         def mock_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
             return subprocess.CompletedProcess(args=[], returncode=0, stdout=pip_output, stderr='')
@@ -118,11 +120,13 @@ class TestPackages:
     @staticmethod
     def test_packages_skips_entries_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
         """packages() should skip entries missing a name field."""
-        pip_output = json.dumps([
-            {'name': 'ruff', 'version': '0.15.0'},
-            {'version': '1.0.0'},
-            {'name': None, 'version': '2.0.0'},
-        ])
+        pip_output = json.dumps(
+            [
+                {'name': 'ruff', 'version': '0.15.0'},
+                {'version': '1.0.0'},
+                {'name': None, 'version': '2.0.0'},
+            ]
+        )
 
         def mock_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
             return subprocess.CompletedProcess(args=[], returncode=0, stdout=pip_output, stderr='')
@@ -146,37 +150,3 @@ class TestPackages:
         result = env.packages()
 
         assert result == []
-
-
-class TestIsAvailable:
-    """Tests for PipEnvironment.is_available()."""
-
-    @staticmethod
-    def test_is_available_returns_true(monkeypatch: pytest.MonkeyPatch) -> None:
-        """is_available() should return True when pip --version succeeds."""
-
-        def mock_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-            return subprocess.CompletedProcess(args=[], returncode=0, stdout='pip 24.0', stderr='')
-
-        monkeypatch.setattr(subprocess, 'run', mock_run)
-        assert PipEnvironment.is_available() is True
-
-    @staticmethod
-    def test_is_available_returns_false_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-        """is_available() should return False when pip --version fails."""
-
-        def mock_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-            return subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='error')
-
-        monkeypatch.setattr(subprocess, 'run', mock_run)
-        assert PipEnvironment.is_available() is False
-
-    @staticmethod
-    def test_is_available_returns_false_on_missing_python(monkeypatch: pytest.MonkeyPatch) -> None:
-        """is_available() should return False when python is not on PATH."""
-
-        def mock_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-            raise FileNotFoundError
-
-        monkeypatch.setattr(subprocess, 'run', mock_run)
-        assert PipEnvironment.is_available() is False

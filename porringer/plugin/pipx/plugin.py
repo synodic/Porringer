@@ -53,6 +53,12 @@ class PipxEnvironment(Environment):
         """Pipx manages the ``python-tool`` package backend."""
         return 'python-tool'
 
+    @classmethod
+    @override
+    def tool_name(cls) -> str:
+        """Pipx wraps the ``pipx`` CLI."""
+        return 'pipx'
+
     @staticmethod
     @override
     def install_command(package: PackageRef) -> list[str]:

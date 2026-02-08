@@ -38,6 +38,12 @@ class PimEnvironment(Environment):
         """PIM manages the ``python-runtime`` package backend."""
         return 'python-runtime'
 
+    @classmethod
+    @override
+    def tool_name(cls) -> str:
+        """PIM wraps the ``py`` CLI."""
+        return 'py'
+
     @staticmethod
     @override
     def dependencies() -> list[PluginDependency]:
