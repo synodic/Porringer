@@ -36,6 +36,12 @@ class PyenvEnvironment(Environment, RuntimeProvider):
 
     @classmethod
     @override
+    def provided_runtime_kind(cls) -> str:
+        """Pyenv provides Python runtimes."""
+        return 'python'
+
+    @classmethod
+    @override
     def tool_name(cls) -> str:
         """Pyenv wraps the ``pyenv`` CLI."""
         return 'pyenv'
@@ -54,6 +60,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     # RuntimeProvider
     # ------------------------------------------------------------------
 
+    @override
     def resolve_executable(self, tag: str) -> Path | None:
         """Return the path to the Python interpreter for a pyenv-managed runtime.
 

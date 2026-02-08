@@ -17,6 +17,7 @@ from pathlib import Path
 
 from pydantic import Field
 
+from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import Plugin, PluginParameters, PorringerModel
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class ProjectSyncParameters(PorringerModel):
     dry: bool = Field(default=False, description='If True, preview the sync without modifying the environment')
 
 
-class ProjectEnvironment(Plugin):
+class ProjectEnvironment(Plugin, RuntimeConsumer):
     """Plugin definition for project-scoped dependency managers.
 
     Unlike :class:`~porringer.core.plugin_schema.environment.Environment`,
@@ -50,12 +51,12 @@ class ProjectEnvironment(Plugin):
     Override to ``"sync"`` for tools like uv.
     """
 
-    python_executable: Path | None
-    """Override the Python interpreter for this project.
+    runtime_executable: Path | None
+    """Override the language runtime interpreter for this project.
 
-    When set by a runtime provider (pim, pyenv) during phased execution,
-    the sync command is invoked with a flag that selects this interpreter
-    (e.g. ``--python <path>``).
+    When set by a :class:`~porringer.core.plugin_schema.runtime.RuntimeProvider`
+    during phased execution, the sync command is invoked with a flag
+    that selects this interpreter (e.g. ``--python <path>``).
     """
 
     def __init__(self, parameters: PluginParameters) -> None:
@@ -65,7 +66,7 @@ class ProjectEnvironment(Plugin):
             parameters: Plugin parameters including distribution info
         """
         super().__init__(parameters)
-        self.python_executable = None
+        self.runtime_executable = None
 
     # ------------------------------------------------------------------
     # Subclass hooks
@@ -86,12 +87,22 @@ class ProjectEnvironment(Plugin):
     # ------------------------------------------------------------------
 
     @staticmethod
+    @abstractmethod
     def package_backend() -> str:
-        """Return the backend identifier for project environments.
+        """Return the backend identifier for this project environment.
 
-        All project-environment plugins return ``"python-project"``.
+        Examples: ``"python-project"``, ``"node-project"``, ``"deno-project"``.
         """
-        return 'python-project'
+        ...
+
+    @classmethod
+    @abstractmethod
+    def consumed_runtime_kind(cls) -> str:
+        """Return the kind of runtime this project environment consumes.
+
+        Examples: ``"python"``, ``"node"``, ``"deno"``.
+        """
+        ...
 
     def sync_command(self) -> list[str]:
         """Return the CLI command for syncing the project.
@@ -103,8 +114,8 @@ class ProjectEnvironment(Plugin):
         and should reflect instance state.
         """
         cmd = [self.tool_name(), self._sync_verb]
-        if self.python_executable is not None:
-            cmd.extend(['--python', str(self.python_executable)])
+        if self.runtime_executable is not None:
+            cmd.extend(['--python', str(self.runtime_executable)])
         return cmd
 
     def sync(self, params: ProjectSyncParameters) -> bool:

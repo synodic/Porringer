@@ -14,6 +14,7 @@ from porringer.core.plugin_schema.environment import (
     PackageParameters,
     UninstallParameters,
 )
+from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import Package, PackageRef, PluginParameters
 from porringer.schema import SetupAction, SetupActionType, SubActionProgress
 from porringer.utility.utility import async_run_command
@@ -33,7 +34,7 @@ _ALREADY_SATISFIED_PATTERN = re.compile(
 )
 
 
-class PipEnvironment(Environment):
+class PipEnvironment(Environment, RuntimeConsumer):
     """Represents a Python environment managed by pip.
 
     Provides methods to install, search, uninstall, upgrade, and list Python packages using pip
@@ -59,14 +60,20 @@ class PipEnvironment(Environment):
         Returns the override path when a runtime provider has resolved one,
         otherwise falls back to the bare ``python`` found on PATH.
         """
-        if self.python_executable is not None:
-            return str(self.python_executable)
+        if self.runtime_executable is not None:
+            return str(self.runtime_executable)
         return 'python'
 
     @staticmethod
     @override
     def package_backend() -> str:
         """Pip manages the ``python`` package backend."""
+        return 'python'
+
+    @classmethod
+    @override
+    def consumed_runtime_kind(cls) -> str:
+        """Pip consumes a Python runtime."""
         return 'python'
 
     @classmethod

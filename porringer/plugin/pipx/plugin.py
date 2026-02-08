@@ -12,6 +12,7 @@ from porringer.core.plugin_schema.environment import (
     PackageParameters,
     UninstallParameters,
 )
+from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import Package, PackageRef
 from porringer.utility.utility import async_run_command
 
@@ -37,7 +38,7 @@ def _get_pipx_venvs_dir() -> Path:
         return Path.home() / '.local' / 'pipx' / 'venvs'
 
 
-class PipxEnvironment(Environment):
+class PipxEnvironment(Environment, RuntimeConsumer):
     """Represents a Python environment managed by pipx.
 
     Provides methods to install, search, uninstall, upgrade, and list Python packages using
@@ -52,6 +53,12 @@ class PipxEnvironment(Environment):
     def package_backend() -> str:
         """Pipx manages the ``python-tool`` package backend."""
         return 'python-tool'
+
+    @classmethod
+    @override
+    def consumed_runtime_kind(cls) -> str:
+        """Pipx consumes a Python runtime."""
+        return 'python'
 
     @classmethod
     @override

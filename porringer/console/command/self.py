@@ -21,7 +21,7 @@ def self_check(context: typer.Context) -> None:
 
     api = API(configuration.local_configuration)
 
-    info = asyncio.run(api.porringer.check())
+    info = asyncio.run(api.updates.check())
 
     current = str(info.current_version) if info.current_version else 'unknown'
     latest = str(info.latest_version) if info.latest_version else 'unknown'

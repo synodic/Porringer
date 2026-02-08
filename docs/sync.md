@@ -26,15 +26,23 @@ Porringer looks for manifests in this order:
 
 The `state` object maps **backend identifiers** to lists of packages. Porringer resolves each backend to the best available installer plugin at runtime.
 
+Backends fall into two categories:
+
+- **Package backends** (e.g. `python`, `node`, `system`) install individual packages.
+- **Project backends** (e.g. `python-project`, `node-project`) synchronise an entire project's dependencies from its lock file.
+
 Well-known backends:
 
-| Backend          | Description                          | Default installers       |
-| ---------------- | ------------------------------------ | ------------------------ |
-| `python`         | Python packages                      | `uv`, `pip`              |
-| `python-tool`    | CLI tools in isolated environments   | `pipx`                   |
-| `system`         | OS-level packages                    | `brew`, `apt`, `winget`  |
-| `node`           | Node.js packages                     | `npm`                    |
-| `python-runtime` | Python runtimes                      | `pim`                    |
+| Backend            | Type    | Description                        | Default installers           |
+| ------------------ | ------- | ---------------------------------- | ----------------------------- |
+| `python`           | package | Python packages                    | `uv`, `pip`                   |
+| `python-tool`      | package | CLI tools in isolated environments | `pipx`                        |
+| `system`           | package | OS-level packages                  | `brew`, `apt`, `winget`       |
+| `node`             | package | Node.js packages                   | `npm`                         |
+| `python-runtime`   | package | Python runtimes                    | `pim`, `pyenv`                |
+| `python-project`   | project | Python project sync                | `uv`, `pdm`, `poetry`         |
+| `node-project`     | project | Node.js project sync               | `npm`, `pnpm`, `bun`          |
+| `deno-project`     | project | Deno project sync                  | `deno`                        |
 
 ### Preferences
 
@@ -94,6 +102,35 @@ Sync all cached directories:
 porringer sync --all
 ```
 
+## Project Directory Override
+
+By default, project-sync backends and post-sync commands run in the manifest's
+parent directory.  Use `--project-dir` to point them elsewhere:
+
+```shell
+porringer sync --path manifest.json --project-dir ./my-project
+```
+
+## Standalone Manifests (No Project)
+
+When consuming a manifest that has no associated project (e.g. a manifest
+downloaded from a URL), use the API with `project_directory=False` to install only
+package-level requirements and skip project backends:
+
+```python
+params = SetupParameters(paths=manifest_path, project_directory=False)
+preview = api.sync.preview_batch(params)
+results = execute_stream(preview, params)
+
+# Inspect which actions were skipped and why
+for skip in results.skips:
+    print(f"Skipped: {skip.action.description} — {skip.skip_reason.value}: {skip.message}")
+```
+
+Project-sync and post-sync actions are reported as *skipped* (not failed),
+so `results.success` remains `True`.  Use `results.skips` or
+`results.total_skipped` to detect and act on skipped actions.
+
 ## API Usage
 
 ```python
@@ -103,8 +140,16 @@ from porringer.schema import LocalConfiguration, SetupParameters
 
 api = API(LocalConfiguration())
 
-# Preview (dry run)
+# Full sync (project + packages)
 preview = api.sync.preview_batch(SetupParameters(paths=project_path))
+
+# Packages only — skip project backends and post-sync commands
+preview = api.sync.preview_batch(SetupParameters(paths=manifest_path, project_directory=False))
+
+# Override project directory (manifest and project in different locations)
+preview = api.sync.preview_batch(
+    SetupParameters(paths=manifest_path, project_directory=project_path)
+)
 
 # Execute with streaming progress
 async def run():

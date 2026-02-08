@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from porringer.api import API
-from porringer.schema import SetupActionType, SetupParameters
+from porringer.schema import SetupActionType, SetupParameters, SkipReason
 from tests.conftest import execute_via_stream
 
 # Absolute path to the example manifest directory
@@ -26,7 +26,7 @@ class TestExamplePresence:
 
     @staticmethod
     @pytest.fixture
-    def dry_run_results(test_api: API) -> list[tuple[str, bool, str | None]]:
+    def dry_run_results(test_api: API) -> list[tuple[str, bool, SkipReason | None]]:
         """Dry-run the example manifest and return (package, skipped, reason) tuples for pip actions."""
         setup_params = SetupParameters(paths=_EXAMPLE_DIR, dry_run=True)
         preview = test_api.sync.preview_batch(setup_params)

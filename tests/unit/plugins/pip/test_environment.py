@@ -109,8 +109,10 @@ class TestVenvWithPip:
 
 
 class TestVenvWithoutPip:
-    """Simulate a uv-created venv where ``python -m pip`` is absent but
-    ``importlib.metadata`` can enumerate installed distributions.
+    """Simulate a uv-created venv with no ``pip`` but ``importlib.metadata``.
+
+    This tests the fallback mechanism that uses importlib.metadata when
+    ``python -m pip`` is not available to enumerate installed distributions.
     """
 
     @staticmethod

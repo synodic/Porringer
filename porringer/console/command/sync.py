@@ -46,6 +46,7 @@ class ManifestOptions:
         timeout: Timeout in seconds for commands.
         fail_fast: Stop on first error.
         strategy: Sync strategy (minimal, latest, or exact).
+        project_directory: Working directory for project-sync and post-sync actions.
     """
 
     path: Path | None = None
@@ -54,6 +55,7 @@ class ManifestOptions:
     timeout: int = DEFAULT_TIMEOUT
     fail_fast: bool = True
     strategy: SyncStrategy = SyncStrategy.MINIMAL
+    project_directory: Path | None = None
 
 
 @dataclass
@@ -294,7 +296,8 @@ def _display_results(
             if result.skipped and result.skip_reason:
                 # Show skipped packages with reason (e.g., already installed)
                 configuration.console.print(f'  [dim]{ARROW} {command_str}[/dim]')
-                configuration.console.print(f'    [dim italic]{result.skip_reason}[/dim italic]')
+                if result.message:
+                    configuration.console.print(f'    [dim italic]{result.message}[/dim italic]')
             elif result.success:
                 if dry_run:
                     configuration.console.print(f'  [dim]{ARROW}[/dim] {command_str}')
@@ -331,6 +334,7 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
     if options.all_cached:
         setup_params = SetupParameters(
             paths=None,
+            project_directory=options.project_directory,
             timeout=options.timeout,
             fail_fast=options.fail_fast,
             dry_run=options.dry_run,
@@ -340,8 +344,10 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
         if not options.path.exists():
             configuration.console.print(f'[red]Error:[/red] Path does not exist: {options.path}')
             raise typer.Exit(EXIT_FAILURE)
+        resolved_path = options.path.resolve()
         setup_params = SetupParameters(
-            paths=options.path.resolve(),
+            paths=resolved_path,
+            project_directory=options.project_directory,
             timeout=options.timeout,
             fail_fast=options.fail_fast,
             dry_run=options.dry_run,
@@ -351,6 +357,7 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
         # Default to current directory
         setup_params = SetupParameters(
             paths=Path('.').resolve(),
+            project_directory=options.project_directory,
             timeout=options.timeout,
             fail_fast=options.fail_fast,
             dry_run=options.dry_run,
@@ -459,6 +466,14 @@ def sync_default(
             help='Path to manifest file (porringer.json) or directory containing one',
         ),
     ] = None,
+    project_dir: Annotated[
+        Path | None,
+        typer.Option(
+            '--project-dir',
+            '-d',
+            help='Working directory for project-sync and post-sync actions (inferred from --path by default)',
+        ),
+    ] = None,
     all_cached: Annotated[
         bool,
         typer.Option('--all', '-a', help='Run on all cached directories'),
@@ -489,6 +504,10 @@ def sync_default(
     Reads the manifest from the specified path (or current directory) and
     installs or upgrades packages according to the chosen strategy.
 
+    When --project-dir is omitted, project-sync and post-sync commands run in
+    the manifest's parent directory.  Pass --project-dir explicitly to override,
+    or use the API with ``project_directory=False`` to skip project backends.
+
     Strategies:
       minimal — Install packages that aren't already present (default).
       latest  — Upgrade all packages; fall back to install if not present.
@@ -502,6 +521,7 @@ def sync_default(
         porringer sync --strategy latest --all          # Upgrade all cached manifests
         porringer sync --strategy exact --path ./x      # Ensure exact in directory
         porringer sync --dry-run                        # Preview without executing
+        porringer sync --path m.json --project-dir ./p  # Separate manifest & project
     """
     configuration = context.ensure_object(Configuration)
 
@@ -519,6 +539,7 @@ def sync_default(
         timeout=timeout,
         fail_fast=fail_fast,
         strategy=sync_strategy,
+        project_directory=project_dir.resolve() if project_dir else None,
     )
 
     _handle_manifest(configuration, options)

@@ -42,6 +42,12 @@ class PimEnvironment(Environment, RuntimeProvider):
 
     @classmethod
     @override
+    def provided_runtime_kind(cls) -> str:
+        """PIM provides Python runtimes."""
+        return 'python'
+
+    @classmethod
+    @override
     def tool_name(cls) -> str:
         """PIM wraps the ``py`` CLI."""
         return 'py'
@@ -65,6 +71,7 @@ class PimEnvironment(Environment, RuntimeProvider):
             ),
         ]
 
+    @override
     def resolve_executable(self, tag: str) -> Path | None:
         """Return the path to the Python interpreter for a managed runtime.
 

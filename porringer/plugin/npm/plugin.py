@@ -1,5 +1,6 @@
 """Plugin implementation"""
 
+import json
 import logging
 import subprocess
 from typing import override
@@ -74,15 +75,18 @@ class NpmEnvironment(Environment):
 
     @override
     def search(self, package: PackageRef) -> Package | None:
-        """Searches the environment's sources for a package
+        """Searches the environment's sources for a package.
+
+        npm does not provide a reliable search CLI; returns ``None``
+        to indicate that search is not supported.
 
         Args:
             package: The package reference to search for
 
         Returns:
-            The package, or None if it doesn't exist
+            Always ``None``.
         """
-        raise NotImplementedError
+        return None
 
     @override
     def uninstall(self, params: UninstallParameters) -> list[Package | None]:
@@ -140,9 +144,29 @@ class NpmEnvironment(Environment):
 
     @override
     def packages(self) -> list[Package]:
-        """Gathers installed packages in the given environment
+        """Gathers globally installed npm packages.
+
+        Uses ``npm ls -g --json --depth=0`` to list top-level global
+        packages and parses the JSON output.
 
         Returns:
-            A list of packages
+            A list of installed packages.
         """
+        logger = logging.getLogger('porringer.npm.packages')
+        try:
+            result = subprocess.run(
+                ['npm', 'ls', '-g', '--json', '--depth=0'],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            data = json.loads(result.stdout)
+            deps = data.get('dependencies', {})
+            return [
+                Package(name=name, version=info.get('version')) for name, info in deps.items() if isinstance(info, dict)
+            ]
+        except FileNotFoundError:
+            logger.error('npm not found on PATH')
+        except (json.JSONDecodeError, subprocess.SubprocessError) as e:
+            logger.error('Failed to list npm packages: %s', e)
         return []

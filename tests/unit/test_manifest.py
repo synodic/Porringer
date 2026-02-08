@@ -17,6 +17,7 @@ from porringer.schema import (
     SetupActionType,
     SetupManifest,
     SetupParameters,
+    SkipReason,
     SyncStrategy,
 )
 from porringer.utility.exception import ManifestError
@@ -553,11 +554,11 @@ class TestManifestValidation:
 
     @staticmethod
     def test_invalid_package_name_warning(test_api: API) -> None:
-        """Invalid package specifier is caught at schema validation time.
+        """Invalid PEP 440 package specifier under a Python backend produces a warning.
 
-        Since PackageRef validates names on construction, invalid package
-        specifiers now fail during manifest loading (SCHEMA_INVALID) rather
-        than during the later package-name validity check.
+        Non-PEP-440 names are accepted by PackageRef (lenient parser) so the
+        manifest loads, but ``_validate_package_names`` flags them as
+        ``INVALID_PACKAGE_NAME`` warnings for Python backends.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -566,10 +567,9 @@ class TestManifestValidation:
 
             result = test_api.sync.validate_manifest(Path(tmpdir))
 
-            assert result.valid is False
-            schema_errors = [e for e in result.errors if e.code == ManifestValidationCode.SCHEMA_INVALID]
-            assert len(schema_errors) == 1
-            assert '!!!invalid!!!' in schema_errors[0].message
+            name_warnings = [w for w in result.warnings if w.code == ManifestValidationCode.INVALID_PACKAGE_NAME]
+            assert len(name_warnings) == 1
+            assert '!!!invalid!!!' in name_warnings[0].message
 
     @staticmethod
     def test_duplicate_packages_warning(test_api: API) -> None:
@@ -612,9 +612,10 @@ class TestManifestValidation:
     def test_multiple_errors_and_warnings(test_api: API) -> None:
         """Multiple issues are all reported in a single result.
 
-        Invalid package specifiers now fail at schema load time, so the
-        manifest with '!!!bad!!!' will produce a SCHEMA_INVALID error
-        before version/backend checks run.
+        With the lenient PackageRef parser, ``!!!bad!!!`` and
+        ``also-bad[>=`` are now accepted at schema-load time.  The
+        manifest still fails validation because version ``99`` is
+        unsupported and ``fake_backend`` is unknown.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -627,9 +628,13 @@ class TestManifestValidation:
             result = test_api.sync.validate_manifest(Path(tmpdir))
 
             assert result.valid is False
-            # Invalid packages now cause schema-load failure, so we get at least 1 error
             assert len(result.errors) >= 1
-            assert any(e.code == ManifestValidationCode.SCHEMA_INVALID for e in result.errors)
+            # Version 99 is unsupported or fake_backend is unknown
+            error_codes = {e.code for e in result.errors}
+            assert (
+                ManifestValidationCode.UNSUPPORTED_VERSION in error_codes
+                or ManifestValidationCode.UNKNOWN_PLUGIN in error_codes
+            )
 
 
 class TestManifestSchema:
@@ -675,8 +680,9 @@ class TestDryRunStateAware:
             action_result = results.manifest_results[0].results[0]
             assert action_result.success is True
             assert action_result.skipped is True
-            assert action_result.skip_reason is not None
-            assert 'packaging' in action_result.skip_reason
+            assert action_result.skip_reason == SkipReason.ALREADY_INSTALLED
+            assert action_result.message is not None
+            assert 'packaging' in action_result.message
 
     @staticmethod
     def test_dry_run_does_not_skip_missing_package(test_api: API) -> None:
@@ -714,8 +720,9 @@ class TestDryRunStateAware:
             action_result = results.manifest_results[0].results[0]
             assert action_result.success is True
             assert action_result.skipped is True
-            assert action_result.skip_reason is not None
-            assert 'satisfies' in action_result.skip_reason
+            assert action_result.skip_reason == SkipReason.ALREADY_INSTALLED
+            assert action_result.message is not None
+            assert 'satisfies' in action_result.message
 
     @staticmethod
     def test_dry_run_version_not_satisfied(test_api: API) -> None:
@@ -846,5 +853,5 @@ class TestSyncStrategyUpgrade:
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
             assert action_result.success is True
-            assert action_result.skip_reason is not None
-            assert 'install' in action_result.skip_reason.lower()
+            assert action_result.message is not None
+            assert 'install' in action_result.message.lower()

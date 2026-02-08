@@ -1,11 +1,15 @@
 """Schema for Porringer"""
 
+import re
 import sys
-from typing import Protocol, TypeVar
+from typing import Protocol
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator
+
+# Pattern for PEP 440 constraint operators at the start of a substring.
+_PEP440_CONSTRAINT_START = re.compile(r'[><=!~]')
 
 
 class PorringerModel(BaseModel):
@@ -54,7 +58,9 @@ class PackageRef(PorringerModel):
     model_config = {'frozen': True}
 
     name: str = Field(description='The bare, canonical package name')
-    constraint: str | None = Field(default=None, description='PEP 440 version specifier (e.g. ">=0.8.0")')
+    constraint: str | None = Field(
+        default=None, description='Version constraint string (PEP 440 or raw, e.g. ">=0.8.0", "^4.0.0")'
+    )
 
     @model_validator(mode='before')
     @classmethod
@@ -66,13 +72,77 @@ class PackageRef(PorringerModel):
 
     @staticmethod
     def _split_spec(spec: str) -> dict[str, str | None]:
-        """Decompose a specifier string into name and constraint components."""
+        """Decompose a specifier string into name and constraint components.
+
+        Tries PEP 440 parsing first (via :class:`packaging.requirements.Requirement`).
+        On failure, falls back to a lenient splitter that handles npm-style
+        specifiers such as ``@scope/name@^4.0.0`` or ``lodash@~4.18``.
+
+        The constraint is stored as a raw string — no semver interpretation.
+        Plugins and underlying tools are responsible for passing it to their
+        CLI in the correct format.
+        """
+        # 1. Try PEP 440 first
         try:
             req = Requirement(spec)
+            # Reject PEP 508 URL requirements (e.g. "lodash@^4.0.0" parsed as
+            # name=lodash url=^4.0.0) — fall through to the lenient parser
+            # which will correctly split on the '@'.
+            if req.url is not None:
+                raise InvalidRequirement('URL requirement')
             constraint = str(req.specifier) if req.specifier else None
             return {'name': req.name, 'constraint': constraint}
-        except InvalidRequirement as exc:
-            raise ValueError(f'Invalid package specifier: {spec!r}') from exc
+        except InvalidRequirement:
+            pass
+
+        # 2. Lenient fallback for non-PEP-440 specifiers (npm, etc.)
+        return PackageRef._split_spec_lenient(spec)
+
+    @staticmethod
+    def _split_spec_lenient(spec: str) -> dict[str, str | None]:
+        """Lenient parser for non-PEP-440 package specifiers.
+
+        Handles:
+        - ``@scope/name@constraint`` → name=``@scope/name``, constraint
+        - ``@scope/name``            → name=``@scope/name``, no constraint
+        - ``name@constraint``        → name, constraint
+        - ``name``                   → name, no constraint
+        """
+        spec = spec.strip()
+        if not spec:
+            raise ValueError('Empty package specifier')
+
+        # Scoped packages: @scope/name possibly followed by @constraint
+        if spec.startswith('@'):
+            # Find the slash that separates scope from name
+            slash_idx = spec.find('/')
+            if slash_idx == -1:
+                raise ValueError(f'Invalid scoped package specifier: {spec!r}')
+            # Look for a second @ after the slash (constraint separator)
+            at_idx = spec.find('@', slash_idx + 1)
+            if at_idx == -1:
+                # Check for PEP-440-style constraint operators after the name
+                match = _PEP440_CONSTRAINT_START.search(spec, slash_idx + 1)
+                if match:
+                    return {'name': spec[: match.start()], 'constraint': spec[match.start() :]}
+                return {'name': spec, 'constraint': None}
+            name = spec[:at_idx]
+            constraint = spec[at_idx + 1 :] or None
+            return {'name': name, 'constraint': constraint}
+
+        # Unscoped: check for PEP-440-style operators before trying @
+        match = _PEP440_CONSTRAINT_START.search(spec)
+        if match and match.start() > 0:
+            return {'name': spec[: match.start()], 'constraint': spec[match.start() :]}
+
+        # Unscoped: name@constraint
+        at_idx = spec.find('@')
+        if at_idx != -1:
+            name = spec[:at_idx]
+            constraint = spec[at_idx + 1 :] or None
+            return {'name': name, 'constraint': constraint}
+
+        return {'name': spec, 'constraint': None}
 
     @property
     def specifier(self) -> str:
@@ -145,6 +215,3 @@ class Plugin(Protocol):
             The plugin's information
         """
         return self._distribution
-
-
-PluginT = TypeVar('PluginT', bound=Plugin)

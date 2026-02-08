@@ -1,6 +1,7 @@
 """Tests for the Poetry project environment plugin."""
 
 import pytest
+
 from porringer.plugin.poetry.plugin import PoetryProjectEnvironment
 from porringer.test.pytest.tests import ProjectEnvironmentUnitTests
 

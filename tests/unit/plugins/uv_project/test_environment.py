@@ -1,6 +1,7 @@
 """Tests for the UV project environment plugin."""
 
 import pytest
+
 from porringer.plugin.uv_project.plugin import UvProjectEnvironment
 from porringer.test.pytest.tests import ProjectEnvironmentUnitTests
 

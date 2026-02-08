@@ -30,14 +30,6 @@ class BaseTests[T: Plugin](metaclass=ABCMeta):
         return 'porringer'
 
 
-class BaseIntegrationTests[T: Plugin](BaseTests[T], metaclass=ABCMeta):
-    """Integration testing information for all plugin test classes"""
-
-
-class BaseUnitTests[T: Plugin](BaseTests[T], metaclass=ABCMeta):
-    """Unit testing information for all plugin test classes"""
-
-
 class PluginTests[T: Plugin](BaseTests[T], metaclass=ABCMeta):
     """Testing information for basic plugin test classes."""
 
@@ -60,12 +52,12 @@ class PluginTests[T: Plugin](BaseTests[T], metaclass=ABCMeta):
         return plugin
 
 
-class PluginIntegrationTests[T: Plugin](BaseIntegrationTests[T], metaclass=ABCMeta):
-    """Integration testing information for basic plugin test classes"""
+class PluginIntegrationTests[T: Plugin](BaseTests[T], metaclass=ABCMeta):
+    """Integration testing information for plugin test classes"""
 
 
-class PluginUnitTests[T: Plugin](BaseUnitTests[T], metaclass=ABCMeta):
-    """Unit testing information for basic plugin test classes"""
+class PluginUnitTests[T: Plugin](BaseTests[T], metaclass=ABCMeta):
+    """Unit testing information for plugin test classes"""
 
 
 class EnvironmentTests[T: Environment](PluginTests[T], metaclass=ABCMeta):

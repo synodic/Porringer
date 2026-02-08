@@ -58,7 +58,10 @@ DEFAULT_PREFERENCE_ORDER: dict[str, list[str]] = {
     'python-tool': ['pipx'],
     'python-project': ['uv-project', 'pdm', 'poetry'],
     'system': _platform_system_order(),
-    'node': ['npm'],
+    'node': ['pnpm', 'npm', 'bun'],
+    'node-project': ['pnpm-project', 'npm-project', 'yarn-project', 'bun-project'],
+    'deno': ['deno'],
+    'deno-project': ['deno-project'],
     'python-runtime': _platform_runtime_order(),
 }
 
