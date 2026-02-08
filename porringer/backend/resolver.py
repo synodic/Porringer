@@ -44,10 +44,13 @@ def resolve_list_plugins_parameters(environment: list[Environment]) -> list[List
     for plugin in environment:
         canonicalized = canonicalize_type(type(plugin))
 
+        installed = type(plugin).is_available()
+
         resolved_metadata = ListPluginResults(
             name=canonicalized.name,
             version=plugin.distribution.version,
-            installed=type(plugin).is_available(),
+            installed=installed,
+            tool_version=type(plugin).tool_version() if installed else None,
         )
         plugin_metadata.append(resolved_metadata)
 

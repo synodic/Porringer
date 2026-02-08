@@ -392,11 +392,14 @@ class ListPluginResults:
         name: The name of the plugin.
         version: The version of the plugin.
         installed: Whether the underlying package manager is available on the system.
+        tool_version: The PEP 440 version of the underlying CLI tool, or ``None``
+            if the tool is unavailable or its version could not be determined.
     """
 
     name: str
     version: Version
     installed: bool
+    tool_version: Version | None
 
 
 @dataclass
