@@ -48,23 +48,21 @@ class UvEnvironment(Environment):
         """UV wraps the ``uv`` CLI."""
         return 'uv'
 
-    @staticmethod
     @override
-    def install_command(package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via uv."""
-        return ['uv', 'pip', 'install', package.specifier]
+        return ['uv', 'pip', 'install', *self._python_args(), package.specifier]
 
-    @staticmethod
     @override
-    def upgrade_command(package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via uv."""
-        return ['uv', 'pip', 'install', '--upgrade', package.specifier]
+        return ['uv', 'pip', 'install', '--upgrade', *self._python_args(), package.specifier]
 
     @override
     def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using uv."""
         logger = logging.getLogger('porringer.uv.install')
-        args = ['uv', 'pip', 'install', *self._python_args(), params.package.specifier]
+        args = list(self.install_command(params.package))
         if params.dry:
             args.append('--dry-run')
         try:
@@ -129,7 +127,7 @@ class UvEnvironment(Environment):
         """Upgrades the given package using uv."""
         logger = logging.getLogger('porringer.uv.upgrade')
         pkg = params.package
-        args = ['uv', 'pip', 'install', '--upgrade', *self._python_args(), pkg.specifier]
+        args = list(self.upgrade_command(pkg))
         if params.dry:
             args.append('--dry-run')
         try:

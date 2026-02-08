@@ -97,15 +97,13 @@ class PimEnvironment(Environment, RuntimeProvider):
             logger.debug('resolve_executable failed for tag %s: %s', tag, e)
         return None
 
-    @staticmethod
     @override
-    def install_command(package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a Python runtime via pymanager."""
         return ['py', 'install', package.name]
 
-    @staticmethod
     @override
-    def upgrade_command(package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a Python runtime via pymanager."""
         return ['py', 'install', '--update', package.name]
 

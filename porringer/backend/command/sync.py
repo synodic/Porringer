@@ -21,6 +21,7 @@ from porringer.backend.backend import BackendResolver
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectSyncParameters
 from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Package, PackageRef
 from porringer.schema import (
@@ -186,7 +187,8 @@ class SyncCommands:
     ) -> None:
         """Validate that each backend in ``state`` can be resolved to a plugin."""
         environments = SyncCommands._get_available_environments()
-        resolver = BackendResolver(environments, manifest.preferences)
+        project_environments = SyncCommands._get_available_project_environments()
+        resolver = BackendResolver(environments, manifest.preferences, project_environments)
 
         for backend_name in manifest.state:
             installer = resolver.resolve(backend_name)
@@ -382,8 +384,29 @@ class SyncCommands:
         return result
 
     @staticmethod
+    def _get_available_project_environments() -> dict[str, ProjectEnvironment]:
+        """Gets all available project-environment plugins as a dict.
+
+        Returns:
+            Dict mapping plugin name to instantiated project environment.
+        """
+        builder = Builder()
+        plugin_infos = builder.find_project_environments()
+        project_environments = builder.build_project_environments(plugin_infos)
+
+        result: dict[str, ProjectEnvironment] = {}
+        for proj_env in project_environments:
+            canonicalized = canonicalize_type(type(proj_env))
+            result[canonicalized.name] = proj_env
+
+        return result
+
+    @staticmethod
     def _get_cli_command(
-        action: SetupAction, environments: dict[str, Environment], strategy: SyncStrategy = SyncStrategy.MINIMAL
+        action: SetupAction,
+        environments: dict[str, Environment],
+        strategy: SyncStrategy = SyncStrategy.MINIMAL,
+        project_environments: dict[str, ProjectEnvironment] | None = None,
     ) -> list[str]:
         """Gets the CLI command string for an action.
 
@@ -391,6 +414,7 @@ class SyncCommands:
             action: The action to get the command for.
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (determines install vs upgrade command).
+            project_environments: Dict of project-environment plugins.
 
         Returns:
             The CLI command as a list of strings, or empty list if not applicable.
@@ -403,6 +427,11 @@ class SyncCommands:
                         return env.upgrade_command(action.package)
                     return env.install_command(action.package)
                 return []
+            case SetupActionType.PROJECT_SYNC:
+                proj_envs = project_environments or {}
+                if action.installer and action.installer in proj_envs:
+                    return proj_envs[action.installer].sync_command()
+                return []
             case SetupActionType.RUN_COMMAND:
                 return action.command or []
             case _:
@@ -413,12 +442,15 @@ class SyncCommands:
         manifest: SetupManifest,
         environments: dict[str, Environment],
         strategy: SyncStrategy = SyncStrategy.MINIMAL,
+        project_environments: dict[str, ProjectEnvironment] | None = None,
     ) -> list[SetupAction]:
         """Builds the list of actions from a manifest.
 
-        All package entries become ``PACKAGE`` actions.  The ``strategy``
-        parameter controls only the human-readable description verb; the
-        execution layer uses the strategy on ``SetupParameters`` to decide
+        All package entries become ``PACKAGE`` actions.  Backends that
+        resolve to a :class:`ProjectEnvironment` plugin produce a single
+        ``PROJECT_SYNC`` action instead.  The ``strategy`` parameter
+        controls only the human-readable description verb; the execution
+        layer uses the strategy on ``SetupParameters`` to decide
         install-vs-upgrade behaviour at runtime.
 
         Each backend key in ``manifest.state`` is resolved to an installer
@@ -428,13 +460,15 @@ class SyncCommands:
             manifest: The parsed setup manifest.
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (used for description text).
+            project_environments: Dict of project-environment plugins.
 
         Returns:
             List of actions to perform.
         """
         actions: list[SetupAction] = []
+        proj_envs = project_environments or {}
 
-        resolver = BackendResolver(environments, manifest.preferences)
+        resolver = BackendResolver(environments, manifest.preferences, proj_envs)
 
         # Determine description verb based on strategy
         verb_map = {
@@ -449,6 +483,18 @@ class SyncCommands:
             installer = resolver.resolve(backend_name)
             if installer is None:
                 logger.warning("No installer available for backend '%s'; skipping its packages", backend_name)
+                continue
+
+            # Project-environment backends produce a single PROJECT_SYNC action
+            if installer in proj_envs:
+                actions.append(
+                    SetupAction(
+                        action_type=SetupActionType.PROJECT_SYNC,
+                        description=f'Sync project via {installer}',
+                        backend=backend_name,
+                        installer=installer,
+                    )
+                )
                 continue
 
             for package in packages:
@@ -496,7 +542,8 @@ class SyncCommands:
 
         manifest_path, manifest = SyncCommands._find_manifest(path)
         environments = SyncCommands._get_available_environments()
-        actions = SyncCommands._build_actions(manifest, environments, strategy)
+        project_environments = SyncCommands._get_available_project_environments()
+        actions = SyncCommands._build_actions(manifest, environments, strategy, project_environments)
         metadata = ManifestMetadata(
             name=manifest.name,
             description=manifest.description,
@@ -555,6 +602,8 @@ class SyncCommands:
         """
         if action.action_type == SetupActionType.PACKAGE:
             return SyncCommands._dry_run_package_action(action, environments, strategy)
+        if action.action_type == SetupActionType.PROJECT_SYNC:
+            return SetupActionResult(action=action, success=True)
         if action.action_type == SetupActionType.RUN_COMMAND:
             return SetupActionResult(action=action, success=True)
         return SetupActionResult(action=action, success=False, message=f'Unknown action type: {action.action_type}')
@@ -1022,15 +1071,19 @@ class SyncCommands:
         logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
         environments = self._get_available_environments()
-        available_plugins = set(environments.keys())
+        project_environments = self._get_available_project_environments()
+        available_plugins = set(environments.keys()) | set(project_environments.keys())
         working_dir = path if path.is_dir() else path.parent
 
         # Populate CLI commands for all actions
         for action in actions:
-            action.cli_command = SyncCommands._get_cli_command(action, environments, parameters.strategy)
+            action.cli_command = SyncCommands._get_cli_command(
+                action, environments, parameters.strategy, project_environments
+            )
 
         # Separate actions by type
         package_actions = [a for a in actions if a.action_type == SetupActionType.PACKAGE]
+        project_sync_actions = [a for a in actions if a.action_type == SetupActionType.PROJECT_SYNC]
         command_actions = [a for a in actions if a.action_type == SetupActionType.RUN_COMMAND]
 
         results: list[SetupActionResult] = []
@@ -1052,7 +1105,7 @@ class SyncCommands:
                 return SetupResults(actions=actions, results=results)
 
             # Resolve interpreter and propagate to downstream plugins
-            self._propagate_runtime_executable(runtime_actions, environments)
+            self._propagate_runtime_executable(runtime_actions, environments, project_environments)
 
         # --- Phase 2: remaining package actions --------------------------
         if dependent_actions:
@@ -1066,6 +1119,17 @@ class SyncCommands:
             results.extend(package_results)
             if not should_continue:
                 return SetupResults(actions=actions, results=results)
+
+        # --- Phase 2.5: PROJECT_SYNC actions (pdm / poetry / uv-project) -
+        if project_sync_actions:
+            project_results = await self._execute_project_sync_actions(
+                project_sync_actions,
+                project_environments,
+                working_dir,
+                parameters,
+                event_queue,
+            )
+            results.extend(project_results)
 
         # --- Phase 3: RUN_COMMAND actions --------------------------------
         command_context = _CommandExecutionContext(
@@ -1084,13 +1148,17 @@ class SyncCommands:
     def _propagate_runtime_executable(
         runtime_actions: list[SetupAction],
         environments: dict[str, Environment],
+        project_environments: dict[str, ProjectEnvironment] | None = None,
     ) -> None:
         """After python-runtime actions complete, resolve the interpreter path
-        and set it on downstream python/python-tool environment plugins.
+        and set it on downstream python/python-tool environment plugins and
+        project-environment plugins.
 
         This enables pip/uv to operate against a specific managed Python
         rather than whichever ``python`` happens to be on PATH.
         """
+        proj_envs = project_environments or {}
+
         # Find a RuntimeProvider among the runtime action installers
         for action in runtime_actions:
             if action.installer is None or action.package is None:
@@ -1113,8 +1181,95 @@ class SyncCommands:
                     downstream.python_executable = executable
                     logger.debug('Set python_executable on %s to %s', name, executable)
 
+            # Propagate to all project-environment plugins
+            for name, proj_downstream in proj_envs.items():
+                proj_downstream.python_executable = executable
+                logger.debug('Set python_executable on project plugin %s to %s', name, executable)
+
             # Use only the first successfully resolved runtime
             break
+
+    async def _execute_project_sync_actions(
+        self,
+        project_sync_actions: list[SetupAction],
+        project_environments: dict[str, ProjectEnvironment],
+        working_dir: Path,
+        parameters: SetupParameters,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
+    ) -> list[SetupActionResult]:
+        """Execute PROJECT_SYNC actions sequentially.
+
+        Each action invokes the resolved project-environment plugin's
+        :meth:`~ProjectEnvironment.sync` method in the manifest directory.
+
+        Args:
+            project_sync_actions: The project sync actions.
+            project_environments: Dict of project-environment plugins.
+            working_dir: Working directory (manifest location).
+            parameters: Setup parameters (dry-run, etc.).
+            event_queue: Optional queue for progress events.
+
+        Returns:
+            List of action results.
+        """
+        results: list[SetupActionResult] = []
+
+        for action in project_sync_actions:
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+
+            if parameters.dry_run:
+                result = SetupActionResult(action=action, success=True)
+            else:
+                result = await self._execute_project_sync(action, project_environments, working_dir, parameters)
+
+            results.append(result)
+            if event_queue is not None:
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                )
+            if not result.success and parameters.fail_fast:
+                logger.error(f'Project sync failed: {action.description} - {result.message}')
+                break
+
+        return results
+
+    @staticmethod
+    async def _execute_project_sync(
+        action: SetupAction,
+        project_environments: dict[str, ProjectEnvironment],
+        working_dir: Path,
+        parameters: SetupParameters,
+    ) -> SetupActionResult:
+        """Execute a single PROJECT_SYNC action.
+
+        Args:
+            action: The project sync action.
+            project_environments: Dict of project-environment plugins.
+            working_dir: Working directory.
+            parameters: Setup parameters.
+
+        Returns:
+            The result of the sync operation.
+        """
+        if action.installer is None or action.installer not in project_environments:
+            return SetupActionResult(
+                action=action, success=False, message=f"Project environment '{action.installer}' is not available"
+            )
+
+        proj_env = project_environments[action.installer]
+        params = ProjectSyncParameters(directory=working_dir, dry=parameters.dry_run)
+
+        try:
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(None, proj_env.sync, params)
+            if success:
+                return SetupActionResult(action=action, success=True, message=f'Synced project via {action.installer}')
+            return SetupActionResult(
+                action=action, success=False, message=f'Project sync failed via {action.installer}'
+            )
+        except Exception as e:
+            return SetupActionResult(action=action, success=False, message=str(e))
 
     async def execute_stream(
         self,

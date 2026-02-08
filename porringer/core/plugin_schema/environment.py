@@ -87,6 +87,7 @@ class Environment(Plugin):
 
         - ``"python"``        — Python packages (pip, uv)
         - ``"python-tool"``   — CLI tools installed as Python packages (pipx)
+        - ``"python-project"``— Project-scoped dependency sync (pdm, poetry, uv)
         - ``"system"``        — OS-level packages (apt, brew, winget)
         - ``"node"``          — Node.js packages (npm)
         - ``"python-runtime"``— Python runtimes themselves (pim)
@@ -99,30 +100,31 @@ class Environment(Plugin):
         """
         return None
 
-    @staticmethod
-    def install_command(package: PackageRef) -> list[str]:
+    @abstractmethod
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command that would install a package.
 
         Override this method to provide the actual command line arguments
-        that would be used to install a package. This is used for displaying
-        commands in dry-run mode.
+        that would be used to install a package.  This is used for
+        displaying commands in dry-run / preview mode and should reflect
+        instance state such as :attr:`python_executable`.
 
         Args:
             package: The package reference (may include a version constraint).
 
         Returns:
             A list of command arguments (e.g., ['pip', 'install', 'requests>=1.0']).
-            Returns an empty list if the command cannot be determined.
         """
-        return []
+        ...
 
-    @staticmethod
-    def upgrade_command(package: PackageRef) -> list[str]:
+    @abstractmethod
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command that would upgrade a package.
 
         Override this method to provide the actual command line arguments
-        that would be used to upgrade a package. This is used for displaying
-        commands in dry-run mode.
+        that would be used to upgrade a package.  This is used for
+        displaying commands in dry-run / preview mode and should reflect
+        instance state such as :attr:`python_executable`.
 
         Args:
             package: The package reference (may include a version constraint).
@@ -130,7 +132,7 @@ class Environment(Plugin):
         Returns:
             A list of command arguments (e.g., ['pip', 'install', '--upgrade', 'requests']).
         """
-        return []
+        ...
 
     @classmethod
     def tool_name(cls) -> str | None:

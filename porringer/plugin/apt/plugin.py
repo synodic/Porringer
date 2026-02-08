@@ -49,18 +49,16 @@ class AptEnvironment(Environment):
         """APT wraps the ``apt`` CLI."""
         return 'apt'
 
-    @staticmethod
     @override
-    def install_command(package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via apt."""
         # apt uses name=version for exact pinning
         if package.constraint:
             return ['apt', 'install', f'{package.name}={package.constraint}']
         return ['apt', 'install', package.name]
 
-    @staticmethod
     @override
-    def upgrade_command(package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via apt."""
         if package.constraint:
             return ['apt', 'install', '--only-upgrade', f'{package.name}={package.constraint}']

@@ -107,6 +107,7 @@ class SetupActionType(Enum):
     """The type of action to perform during setup."""
 
     PACKAGE = auto()
+    PROJECT_SYNC = auto()
     RUN_COMMAND = auto()
 
 
@@ -261,9 +262,9 @@ class SetupManifest(BaseModel):
     """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer].
 
     Manifest keys under ``state`` are **backend** identifiers (e.g.
-    ``"python"``, ``"system"``, ``"node"``) rather than specific tool
-    names.  The ``BackendResolver`` maps each backend to the best
-    available installer plugin at runtime.
+    ``"python"``, ``"python-project"``, ``"system"``, ``"node"``) rather
+    than specific tool names.  The ``BackendResolver`` maps each backend
+    to the best available installer plugin at runtime.
     """
 
     version: str = Field(default='1', description='Manifest schema version')

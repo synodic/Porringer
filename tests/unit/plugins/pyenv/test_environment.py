@@ -31,13 +31,13 @@ class TestPyenvBasics:
     def test_tool_name(self) -> None:
         assert PyenvEnvironment.tool_name() == 'pyenv'
 
-    def test_install_command(self) -> None:
+    def test_install_command(self, environment: PyenvEnvironment) -> None:
         ref = PackageRef(name='3.14.0')
-        assert PyenvEnvironment.install_command(ref) == ['pyenv', 'install', '3.14.0']
+        assert environment.install_command(ref) == ['pyenv', 'install', '3.14.0']
 
-    def test_upgrade_command(self) -> None:
+    def test_upgrade_command(self, environment: PyenvEnvironment) -> None:
         ref = PackageRef(name='3.14.0')
-        assert PyenvEnvironment.upgrade_command(ref) == ['pyenv', 'install', '--skip-existing', '3.14.0']
+        assert environment.upgrade_command(ref) == ['pyenv', 'install', '--skip-existing', '3.14.0']
 
     def test_implements_runtime_provider(self, environment: PyenvEnvironment) -> None:
         assert isinstance(environment, RuntimeProvider)

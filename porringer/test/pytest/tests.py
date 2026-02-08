@@ -3,12 +3,17 @@
 import shutil
 from abc import ABCMeta
 
+from packaging.version import Version
+
 import pytest
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.schema import Distribution, PluginParameters
 from porringer.test.pytest.shared import (
     EnvironmentTests,
     PluginIntegrationTests,
     PluginUnitTests,
+    ProjectEnvironmentTests,
 )
 from porringer.utility.utility import canonicalize_type
 
@@ -53,3 +58,41 @@ class EnvironmentUnitTests[T: Environment](PluginUnitTests[T], EnvironmentTests[
             return
         monkeypatch.setattr(shutil, 'which', lambda cmd: None)
         assert plugin_type.is_available() is False
+
+
+class ProjectEnvironmentUnitTests[T: ProjectEnvironment](
+    PluginUnitTests[T], ProjectEnvironmentTests[T], metaclass=ABCMeta
+):
+    """Base class for all project-environment unit tests.
+
+    Custom implementations of :class:`ProjectEnvironment` should inherit
+    from this class for their tests.
+    """
+
+    @staticmethod
+    def test_is_available_returns_true(monkeypatch: pytest.MonkeyPatch, plugin_type: type[T]) -> None:
+        """is_available() should return True when the tool is found on PATH."""
+        tool = plugin_type.tool_name()
+        monkeypatch.setattr(shutil, 'which', lambda cmd: f'/usr/bin/{tool}' if cmd == tool else None)
+        assert plugin_type.is_available() is True
+
+    @staticmethod
+    def test_is_available_returns_false(monkeypatch: pytest.MonkeyPatch, plugin_type: type[T]) -> None:
+        """is_available() should return False when the tool is not on PATH."""
+        monkeypatch.setattr(shutil, 'which', lambda cmd: None)
+        assert plugin_type.is_available() is False
+
+    @staticmethod
+    def test_sync_command_returns_list(plugin_type: type[T]) -> None:
+        """sync_command() should return a non-empty list of strings."""
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        instance = plugin_type(params)
+        cmd = instance.sync_command()
+        assert isinstance(cmd, list)
+        assert len(cmd) > 0
+        assert all(isinstance(part, str) for part in cmd)
+
+    @staticmethod
+    def test_package_backend_is_python_project(plugin_type: type[T]) -> None:
+        """package_backend() should return 'python-project'."""
+        assert plugin_type.package_backend() == 'python-project'

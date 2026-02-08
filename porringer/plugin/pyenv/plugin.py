@@ -40,15 +40,13 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         """Pyenv wraps the ``pyenv`` CLI."""
         return 'pyenv'
 
-    @staticmethod
     @override
-    def install_command(package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a Python runtime via pyenv."""
         return ['pyenv', 'install', package.name]
 
-    @staticmethod
     @override
-    def upgrade_command(package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade (reinstall) a Python runtime via pyenv."""
         return ['pyenv', 'install', '--skip-existing', package.name]
 

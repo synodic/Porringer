@@ -46,6 +46,11 @@ pyenv = "porringer.plugin.pyenv.plugin:PyenvEnvironment"
 brew = "porringer.plugin.brew.plugin:BrewEnvironment"
 apt = "porringer.plugin.apt.plugin:AptEnvironment"
 
+[project.entry-points."porringer.project_environment"]
+uv-project = "porringer.plugin.uv_project.plugin:UvProjectEnvironment"
+pdm = "porringer.plugin.pdm.plugin:PdmProjectEnvironment"
+poetry = "porringer.plugin.poetry.plugin:PoetryProjectEnvironment"
+
 [project.scripts]
 porringer = "porringer.console.entry:app"
 
