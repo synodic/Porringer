@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from porringer.api import API
+from porringer.core.schema import PluginKind
 from porringer.schema import (
     BatchSetupResults,
     SetupAction,
@@ -32,7 +33,7 @@ class TestProjectDirectorySkip:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            params = SetupParameters(paths=Path(tmpdir), project_directory=False)
+            params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
             preview = test_api.sync.preview_batch(params)
 
             # Preview should still show all actions (2: 1 package + 1 command)
@@ -59,7 +60,7 @@ class TestProjectDirectorySkip:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            params = SetupParameters(paths=Path(tmpdir), project_directory=False)
+            params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
             preview = test_api.sync.preview_batch(params)
             results = execute_via_stream(test_api, preview, params)
 
@@ -88,7 +89,7 @@ class TestProjectDirectorySkip:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            params = SetupParameters(paths=Path(tmpdir))
+            params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             assert params.project_directory is None
 
             preview = test_api.sync.preview_batch(params)
@@ -181,8 +182,6 @@ class TestBatchSetupResultsSkips:
 
     def test_skips_carries_action_metadata(self) -> None:
         """Each skipped result carries full action metadata."""
-        from porringer.core.schema import PluginKind
-
         action = SetupAction(
             action_type=SetupActionType.PROJECT_SYNC,
             description='Sync project via uv',

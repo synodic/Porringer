@@ -48,6 +48,13 @@ class BackendResolver:
         preferences: Mapping[str, str] | None = None,
         project_environments: Mapping[str, ProjectEnvironment] | None = None,
     ) -> None:
+        """Initialize the backend resolver with available plugins and preferences.
+
+        Args:
+            environments: Instantiated environment plugins keyed by name.
+            preferences: Optional ecosystem → plugin-name preference mapping.
+            project_environments: Optional instantiated project-environment plugins.
+        """
         self._environments = environments
         self._project_environments: Mapping[str, ProjectEnvironment] = project_environments or {}
         self._preferences = preferences or {}

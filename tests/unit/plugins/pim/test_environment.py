@@ -8,7 +8,7 @@ import pytest
 from packaging.version import Version
 
 from porringer.core.plugin_schema.runtime import RuntimeProvider
-from porringer.core.schema import Distribution, PluginParameters
+from porringer.core.schema import Distribution, PluginKind, PluginParameters
 from porringer.plugin.pim.plugin import PimEnvironment
 from porringer.test.pytest.tests import EnvironmentUnitTests
 
@@ -28,8 +28,6 @@ class TestPimBasics:
         assert PimEnvironment.ecosystem() == 'python'
 
     def test_plugin_kind(self) -> None:
-        from porringer.core.schema import PluginKind
-
         assert PimEnvironment.plugin_kind() == PluginKind.RUNTIME
 
     def test_tool_name(self) -> None:

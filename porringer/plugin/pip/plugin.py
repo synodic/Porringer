@@ -6,6 +6,7 @@ import logging
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from typing import override
 
@@ -58,11 +59,11 @@ class PipEnvironment(Environment, RuntimeConsumer):
         """The Python interpreter command to use in subprocesses.
 
         Returns the override path when a runtime provider has resolved one,
-        otherwise falls back to the bare ``python`` found on PATH.
+        otherwise falls back to the running interpreter (``sys.executable``).
         """
         if self.runtime_executable is not None:
             return str(self.runtime_executable)
-        return 'python'
+        return sys.executable
 
     @staticmethod
     @override
