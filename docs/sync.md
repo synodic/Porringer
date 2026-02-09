@@ -14,39 +14,43 @@ Porringer looks for manifests in this order:
 | Field         | Type   | Description                                                                   |
 | ------------- | ------ | ----------------------------------------------------------------------------- |
 | `version`     | string | Schema version (currently `"1"`)                                              |
-| `state`       | object | Desired package state per backend (backend name → package list)               |
-| `preferences` | object | Optional installer overrides per backend (e.g. `{"python": "uv"}`)           |
+| `packages`    | object | Packages to install per ecosystem (e.g. `{"python": ["requests"]}`)           |
+| `tools`       | object | CLI tools to install per ecosystem (e.g. `{"python": ["pdm"]}`)               |
+| `projects`    | object | Project sync targets per ecosystem (e.g. `{"python": []}`)                    |
+| `runtimes`    | object | Language runtimes per ecosystem (e.g. `{"python": ["3.12"]}`)                 |
+| `preferences` | object | Optional installer overrides per ecosystem (e.g. `{"python": "uv"}`)          |
 | `post_sync`   | array  | Commands to run after synchronisation                                         |
 | `name`        | string | Optional human-readable project name                                          |
 | `description` | string | Optional short description                                                    |
 | `author`      | string | Optional author or organisation name                                          |
 | `url`         | string | Optional project URL                                                          |
 
-### State
+### Kind Sections
 
-The `state` object maps **backend identifiers** to lists of packages. Porringer resolves each backend to the best available installer plugin at runtime.
+The manifest groups entries by **kind** (`packages`, `tools`, `projects`, `runtimes`), each containing a dict keyed by **ecosystem** (e.g. `"python"`, `"node"`, `"system"`). Ecosystem names are free-form strings declared by plugins — adding a new ecosystem requires zero core changes.
 
-Backends fall into two categories:
+- **`packages`** — install individual packages (e.g. `ruff`, `typescript`).
+- **`tools`** — install CLI tools in isolated environments (e.g. `pdm` via `pipx`).
+- **`projects`** — synchronise an entire project's dependencies from its lock file.
+- **`runtimes`** — install language runtimes (e.g. Python 3.12 via `pim`/`pyenv`).
 
-- **Package backends** (e.g. `python`, `node`, `system`) install individual packages.
-- **Project backends** (e.g. `python-project`, `node-project`) synchronise an entire project's dependencies from its lock file.
+Well-known ecosystems and their default installers:
 
-Well-known backends:
-
-| Backend            | Type    | Description                        | Default installers           |
-| ------------------ | ------- | ---------------------------------- | ----------------------------- |
-| `python`           | package | Python packages                    | `uv`, `pip`                   |
-| `python-tool`      | package | CLI tools in isolated environments | `pipx`                        |
-| `system`           | package | OS-level packages                  | `brew`, `apt`, `winget`       |
-| `node`             | package | Node.js packages                   | `npm`                         |
-| `python-runtime`   | package | Python runtimes                    | `pim`, `pyenv`                |
-| `python-project`   | project | Python project sync                | `uv`, `pdm`, `poetry`         |
-| `node-project`     | project | Node.js project sync               | `npm`, `pnpm`, `bun`          |
-| `deno-project`     | project | Deno project sync                  | `deno`                        |
+| Ecosystem | Kind      | Description                        | Default installers            |
+| --------- | --------- | ---------------------------------- | ----------------------------- |
+| `python`  | packages  | Python packages                    | `uv`, `pip`                   |
+| `python`  | tools     | Python CLI tools                   | `pipx`                        |
+| `python`  | runtimes  | Python runtimes                    | `pim`, `pyenv`                |
+| `python`  | projects  | Python project sync                | `uv`, `pdm`, `poetry`         |
+| `system`  | packages  | OS-level packages                  | `brew`, `apt`, `winget`       |
+| `node`    | packages  | Node.js packages                   | `npm`, `pnpm`, `bun`          |
+| `node`    | projects  | Node.js project sync               | `npm`, `pnpm`, `yarn`, `bun`  |
+| `deno`    | packages  | Deno packages                      | `deno`                        |
+| `deno`    | projects  | Deno project sync                  | `deno`                        |
 
 ### Preferences
 
-Override the default installer selection per backend:
+Override the default installer selection per ecosystem:
 
 ```json
 {

@@ -1,7 +1,7 @@
 """Schema"""
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from importlib.metadata import Distribution
@@ -12,7 +12,7 @@ from packaging.version import Version
 from platformdirs import user_cache_dir
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
-from porringer.core.schema import PackageRef, PlatformScoped
+from porringer.core.schema import PackageRef, PlatformScoped, PluginKind
 
 # --- Directory Cache Schemas ---
 
@@ -66,7 +66,7 @@ class ManifestDiagnostic:
     """A single diagnostic produced by manifest validation.
 
     Args:
-        field: Dot-path to the relevant field (e.g. ``"state.python"``, ``"preferences.python"``).
+        field: Dot-path to the relevant field (e.g. ``"packages.python"``, ``"preferences.python"``).
         message: Human-readable description of the problem or concern.
         code: Machine-readable diagnostic code.
         severity: Whether this diagnostic is an error or a warning.
@@ -128,8 +128,10 @@ class SetupAction:
 
     Args:
         action_type: The type of action.
-        plugin: The plugin name (for PACKAGE).
-        package: The package name (for PACKAGE).
+        kind: The plugin kind (PACKAGE, TOOL, PROJECT, RUNTIME).
+        ecosystem: The ecosystem identifier (e.g. ``"python"``, ``"node"``).
+        installer: The plugin name (for PACKAGE/TOOL/RUNTIME).
+        package: The package reference (for PACKAGE/TOOL/RUNTIME).
         command: The command to run (for RUN_COMMAND).
         description: Human-readable description of the action.
         cli_command: The actual CLI command (for display purposes).
@@ -138,7 +140,8 @@ class SetupAction:
 
     action_type: SetupActionType
     description: str
-    backend: str | None = None
+    kind: PluginKind | None = None
+    ecosystem: str | None = None
     installer: str | None = None
     package: PackageRef | None = None
     command: list[str] | None = None
@@ -272,10 +275,14 @@ class PackageSpec(PlatformScoped):
 class SetupManifest(BaseModel):
     """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer].
 
-    Manifest keys under ``state`` are **backend** identifiers (e.g.
-    ``"python"``, ``"python-project"``, ``"system"``, ``"node"``) rather
-    than specific tool names.  The ``BackendResolver`` maps each backend
-    to the best available installer plugin at runtime.
+    Manifest entries are grouped by **kind** (``packages``, ``tools``,
+    ``projects``, ``runtimes``), each containing a dict keyed by
+    **ecosystem** (e.g. ``"python"``, ``"node"``, ``"system"``).
+
+    Ecosystem names are free-form strings declared by plugins — the core
+    schema does not enumerate them.  A third-party Cargo plugin declaring
+    ``ecosystem() = "rust"`` "just works" with
+    ``"packages": {"rust": ["serde"]}`` — zero core changes required.
     """
 
     version: str = Field(default='1', description='Manifest schema version')
@@ -283,18 +290,38 @@ class SetupManifest(BaseModel):
     description: str | None = Field(default=None, description='Short description shown in the install preview header')
     author: str | None = Field(default=None, description='Author or organization name')
     url: HttpUrl | None = Field(default=None, description='Project URL for reference')
-    state: dict[str, list[PackageSpec]] = Field(
-        default_factory=dict, description='Desired package state per backend (backend name -> package list)'
+    packages: dict[str, list[PackageSpec]] = Field(
+        default_factory=dict, description='Packages to install per ecosystem (e.g. {"python": ["requests"]})'
+    )
+    tools: dict[str, list[PackageSpec]] = Field(
+        default_factory=dict, description='CLI tools to install per ecosystem (e.g. {"python": ["pdm"]})'
+    )
+    projects: dict[str, list[PackageSpec]] = Field(
+        default_factory=dict, description='Project sync targets per ecosystem (e.g. {"python": []})'
+    )
+    runtimes: dict[str, list[PackageSpec]] = Field(
+        default_factory=dict, description='Language runtimes to install per ecosystem (e.g. {"python": ["3.12"]})'
     )
     preferences: dict[str, str] = Field(
         default_factory=dict,
-        description='Preferred installer for each backend (e.g. {"python": "uv"})',
+        description='Preferred installer per ecosystem (e.g. {"python": "uv"})',
     )
     extends: list[str] = Field(
         default_factory=list,
         description='Paths to other manifests whose state is merged (base layers)',
     )
     post_sync: list[str] = Field(default_factory=list, description='Commands to run after state synchronisation')
+
+    def iter_sections(self) -> Iterator[tuple[PluginKind, str, list[PackageSpec]]]:
+        """Yield ``(kind, ecosystem, packages)`` for every non-empty section.
+
+        Replaces the repeated ``for kind in PluginKind: getattr(…)``
+        pattern used throughout the sync engine.
+        """
+        for kind in PluginKind:
+            section: dict[str, list[PackageSpec]] = getattr(self, kind.value, {})
+            for ecosystem, packages in section.items():
+                yield kind, ecosystem, packages
 
 
 class SyncStrategy(Enum):
@@ -415,7 +442,7 @@ class BatchSetupResults:
 
         Each result carries ``skip_reason`` (:class:`SkipReason` enum),
         ``message`` (human-readable detail), and ``action`` (with
-        ``action_type``, ``backend``, ``installer``) for programmatic
+        ``action_type``, ``kind``, ``ecosystem``, ``installer``) for programmatic
         inspection.
         """
         return [r for m in self.manifest_results for r in m.results if r.skipped]

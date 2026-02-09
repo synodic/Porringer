@@ -16,9 +16,15 @@ class NpmProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Npm project manages the ``node-project`` backend."""
-        return 'node-project'
+    def ecosystem() -> str:
+        """Npm project belongs to the ``node`` ecosystem."""
+        return 'node'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Npm project is a secondary Node project manager (priority 20)."""
+        return 20
 
     @classmethod
     @override

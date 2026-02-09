@@ -23,9 +23,15 @@ class BunEnvironment(Environment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Bun manages the ``node`` package backend."""
+    def ecosystem() -> str:
+        """Bun belongs to the ``node`` ecosystem."""
         return 'node'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Bun is a lower-priority Node installer (priority 30)."""
+        return 30
 
     @classmethod
     @override

@@ -16,9 +16,15 @@ class UvProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """UV project manages the ``python-project`` backend."""
-        return 'python-project'
+    def ecosystem() -> str:
+        """UV project belongs to the ``python`` ecosystem."""
+        return 'python'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """UV is the preferred Python project manager (priority 10)."""
+        return 10
 
     @classmethod
     @override

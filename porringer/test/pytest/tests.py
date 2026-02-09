@@ -93,8 +93,8 @@ class ProjectEnvironmentUnitTests[T: ProjectEnvironment](
         assert all(isinstance(part, str) for part in cmd)
 
     @staticmethod
-    def test_package_backend_returns_string(plugin_type: type[T]) -> None:
-        """package_backend() should return a non-empty string identifier."""
-        backend = plugin_type.package_backend()
-        assert isinstance(backend, str)
-        assert len(backend) > 0
+    def test_ecosystem_returns_string(plugin_type: type[T]) -> None:
+        """ecosystem() should return a non-empty string identifier."""
+        eco = plugin_type.ecosystem()
+        assert isinstance(eco, str)
+        assert len(eco) > 0

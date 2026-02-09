@@ -29,10 +29,13 @@ MIN_STREAM_EVENTS = 2
 
 def _make_action(package: str = 'requests') -> SetupAction:
     """Create a test SetupAction."""
+    from porringer.core.schema import PluginKind
+
     return SetupAction(
         action_type=SetupActionType.PACKAGE,
         description=f'Install {package}',
-        backend='python',
+        kind=PluginKind.PACKAGE,
+        ecosystem='python',
         installer='pip',
         package=PackageRef(name=package),
     )

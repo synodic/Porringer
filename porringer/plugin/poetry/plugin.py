@@ -21,9 +21,15 @@ class PoetryProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Poetry manages the ``python-project`` backend."""
-        return 'python-project'
+    def ecosystem() -> str:
+        """Poetry belongs to the ``python`` ecosystem."""
+        return 'python'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Poetry is a lower-priority Python project manager (priority 30)."""
+        return 30
 
     @classmethod
     @override

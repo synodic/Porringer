@@ -29,9 +29,15 @@ class YarnProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Yarn project manages the ``node-project`` backend."""
-        return 'node-project'
+    def ecosystem() -> str:
+        """Yarn project belongs to the ``node`` ecosystem."""
+        return 'node'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Yarn project is a lower-priority Node project manager (priority 30)."""
+        return 30
 
     @classmethod
     @override

@@ -12,9 +12,9 @@ class MockProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Mock manages the ``python-project`` backend."""
-        return 'python-project'
+    def ecosystem() -> str:
+        """Mock manages the ``python`` ecosystem."""
+        return 'python'
 
     @classmethod
     @override

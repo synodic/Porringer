@@ -1,18 +1,19 @@
-"""Backend resolution for mapping package backends to installer plugins.
+"""Backend resolution for mapping (kind, ecosystem) pairs to installer plugins.
 
-The ``BackendResolver`` determines which plugin should handle each package
-backend declared in a manifest.  For example, ``"python"`` might resolve to
-``pip`` or ``uv`` depending on availability and user preferences.
+The ``BackendResolver`` determines which plugin should handle each
+``(PluginKind, ecosystem)`` pair declared in a manifest.  For example,
+``(PACKAGE, "python")`` might resolve to ``uv`` or ``pip`` depending
+on availability and user preferences.
 """
 
 from __future__ import annotations
 
 import logging
-import sys
 from collections.abc import Mapping
 
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.schema import PluginKind
 
 logger = logging.getLogger(__name__)
 
@@ -20,54 +21,8 @@ logger = logging.getLogger(__name__)
 BackendPlugin = Environment | ProjectEnvironment
 
 
-def _platform_system_order() -> list[str]:
-    """Return the preferred system-backend plugin order for the current platform.
-
-    On Windows ``winget`` is the native package manager and is tried first.
-    On macOS ``brew`` is the de-facto standard.
-    On Linux the distribution package manager (``apt``) is preferred with
-    ``brew`` (linuxbrew) as a fallback.
-    """
-    if sys.platform == 'win32':
-        return ['winget']
-    if sys.platform == 'darwin':
-        return ['brew']
-    # Linux / other POSIX
-    return ['apt', 'brew']
-
-
-def _platform_runtime_order() -> list[str]:
-    """Return the preferred python-runtime plugin order for the current platform.
-
-    On Windows, ``pim`` (Python Install Manager / pymanager) is the
-    recommended tool.  On Linux and macOS, ``pyenv`` is the de-facto
-    standard.
-    """
-    if sys.platform == 'win32':
-        return ['pim']
-    return ['pyenv']
-
-
-# Centralized default preference order per backend.
-#
-# When no explicit ``preferences`` are provided in the manifest, the
-# resolver walks this list in order and picks the first plugin that is
-# both installed **and** available (``is_available() == True``).
-DEFAULT_PREFERENCE_ORDER: dict[str, list[str]] = {
-    'python': ['uv', 'pip'],
-    'python-tool': ['pipx'],
-    'python-project': ['uv-project', 'pdm', 'poetry'],
-    'system': _platform_system_order(),
-    'node': ['pnpm', 'npm', 'bun'],
-    'node-project': ['pnpm-project', 'npm-project', 'yarn-project', 'bun-project'],
-    'deno': ['deno'],
-    'deno-project': ['deno-project'],
-    'python-runtime': _platform_runtime_order(),
-}
-
-
 class BackendResolver:
-    """Maps backend identifiers to the best available installer plugin.
+    """Maps ``(PluginKind, ecosystem)`` pairs to the best available plugin.
 
     Construction requires two inputs:
 
@@ -77,9 +32,14 @@ class BackendResolver:
       ``preferences`` field (e.g. ``{"python": "uv"}``).
 
     Optionally accepts *project_environments* for project-scoped plugins.
-    The resolver builds a mapping from every declared backend to the
-    chosen plugin name, falling back to :data:`DEFAULT_PREFERENCE_ORDER`
-    for backends without an explicit preference.
+
+    Resolution algorithm per ``(kind, ecosystem)`` pair:
+
+    1. If the user gave an explicit **preference** for the ecosystem and
+       the named plugin is available, use it.
+    2. Otherwise sort all registered candidates by
+       :meth:`~Plugin.default_priority` ascending and pick the first one
+       whose ``is_available()`` returns ``True``.
     """
 
     def __init__(
@@ -88,92 +48,97 @@ class BackendResolver:
         preferences: Mapping[str, str] | None = None,
         project_environments: Mapping[str, ProjectEnvironment] | None = None,
     ) -> None:
-        """Initialise the resolver with available environment plugins.
-
-        Args:
-            environments: Mapping of plugin name to Environment instance.
-            preferences: Optional explicit backend-to-installer overrides.
-            project_environments: Optional mapping of project-environment plugins.
-        """
         self._environments = environments
         self._project_environments: Mapping[str, ProjectEnvironment] = project_environments or {}
         self._preferences = preferences or {}
 
-        # Merged view for backend indexing and availability checks
+        # Merged view for indexing and availability checks
         self._all_plugins: dict[str, BackendPlugin] = dict(environments)
         self._all_plugins.update(self._project_environments)
 
-        # Index: backend -> [plugin_name, ...] ordered by pref
-        self._backend_plugins: dict[str, list[str]] = {}
+        # Index: (kind, ecosystem) -> [plugin_name, ...]
+        self._backend_plugins: dict[tuple[PluginKind, str], list[str]] = {}
         for name, plugin in self._all_plugins.items():
-            backend = type(plugin).package_backend()
-            if backend is not None:
-                self._backend_plugins.setdefault(backend, []).append(name)
+            ecosystem = type(plugin).ecosystem()
+            if ecosystem is not None:
+                kind = type(plugin).plugin_kind()
+                key = (kind, ecosystem)
+                self._backend_plugins.setdefault(key, []).append(name)
 
         # Resolve once and cache
-        self._resolved: dict[str, str | None] = {}
-        for backend in self._backend_plugins:
-            self._resolved[backend] = self._resolve(backend)
+        self._resolved: dict[tuple[PluginKind, str], str | None] = {}
+        for key in self._backend_plugins:
+            self._resolved[key] = self._resolve(key)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def resolve(self, backend: str) -> str | None:
-        """Return the chosen plugin name for *backend*, or ``None``."""
-        if backend not in self._resolved:
-            logger.warning("No plugins registered for backend '%s'", backend)
+    def resolve(self, kind: PluginKind, ecosystem: str) -> str | None:
+        """Return the chosen plugin name for *(kind, ecosystem)*, or ``None``."""
+        key = (kind, ecosystem)
+        if key not in self._resolved:
+            logger.warning("No plugins registered for (%s, '%s')", kind.value, ecosystem)
             return None
-        return self._resolved[backend]
+        return self._resolved[key]
 
-    def available_backends(self) -> set[str]:
-        """Return the set of backends that have at least one plugin."""
-        return set(self._backend_plugins)
+    def validator_for(self, kind: PluginKind, ecosystem: str) -> str | None:
+        """Return the ``package_name_validator()`` tag for the resolved plugin.
 
-    def plugins_for_backend(self, backend: str) -> list[str]:
-        """Return all plugin names registered for *backend*."""
-        return list(self._backend_plugins.get(backend, []))
+        Returns ``None`` when no plugin is resolved or the plugin
+        declares no validator.
+        """
+        name = self.resolve(kind, ecosystem)
+        if name is None:
+            return None
+        plugin = self._all_plugins.get(name)
+        if plugin is None:
+            return None
+        return type(plugin).package_name_validator()
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
-    def _resolve(self, backend: str) -> str | None:
-        """Pick the best plugin for *backend*.
+    def _resolve(self, key: tuple[PluginKind, str]) -> str | None:
+        """Pick the best plugin for *(kind, ecosystem)*.
 
-        1. If the user gave an explicit preference **and** the plugin is
-           available, use it.
-        2. Otherwise walk ``DEFAULT_PREFERENCE_ORDER[backend]`` (or the
-           fallback list of registered plugins) and pick the first one
-           whose ``is_available()`` returns ``True``.
+        1. Explicit preference (if available).
+        2. Sort candidates by ``default_priority()`` ascending, pick first available.
         """
-        candidates = self._backend_plugins.get(backend, [])
+        kind, ecosystem = key
+        candidates = self._backend_plugins.get(key, [])
         if not candidates:
             return None
 
         # 1. Explicit preference
-        if backend in self._preferences:
-            preferred = self._preferences[backend]
+        if ecosystem in self._preferences:
+            preferred = self._preferences[ecosystem]
             if preferred in candidates and self._is_available(preferred):
                 return preferred
             logger.warning(
-                "Preferred plugin '%s' for backend '%s' is not available; falling back",
+                "Preferred plugin '%s' for (%s, '%s') is not available; falling back",
                 preferred,
-                backend,
+                kind.value,
+                ecosystem,
             )
 
-        # 2. Default preference order
-        order = DEFAULT_PREFERENCE_ORDER.get(backend, candidates)
-        for name in order:
-            if name in candidates and self._is_available(name):
-                return name
+        # 2. Sort by default_priority ascending
+        def _priority(name: str) -> int:
+            plugin = self._all_plugins.get(name)
+            if plugin is None:
+                return 9999
+            try:
+                return type(plugin).default_priority()
+            except Exception:
+                return 9999
 
-        # 3. Fallback: any registered candidate that is available
-        for name in candidates:
+        sorted_candidates = sorted(candidates, key=_priority)
+        for name in sorted_candidates:
             if self._is_available(name):
                 return name
 
-        logger.warning("No available plugin for backend '%s'", backend)
+        logger.warning("No available plugin for (%s, '%s')", kind.value, ecosystem)
         return None
 
     def _is_available(self, plugin_name: str) -> bool:

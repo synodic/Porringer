@@ -18,9 +18,15 @@ class BunProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Bun project manages the ``node-project`` backend."""
-        return 'node-project'
+    def ecosystem() -> str:
+        """Bun project belongs to the ``node`` ecosystem."""
+        return 'node'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Bun project is the lowest-priority Node project manager (priority 40)."""
+        return 40
 
     @classmethod
     @override

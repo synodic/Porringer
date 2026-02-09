@@ -4,16 +4,16 @@ This example demonstrates using Porringer to set up a Node.js / Deno development
 
 ## Manifest Overview
 
-The `porringer.json` manifest declares the desired **state** using backend identifiers. Porringer resolves each backend to the best available installer at runtime.
+The `porringer.json` manifest declares the desired environment using kind sections (`packages`, `projects`), each keyed by ecosystem. Porringer resolves each ecosystem to the best available installer at runtime.
 
-- **`node` backend** (resolved to `pnpm`, `npm`, or `bun`): Global npm packages
+- **`packages.node`** (resolved to `pnpm`, `npm`, or `bun`): Global npm packages
   - `typescript` – TypeScript compiler
   - `@biomejs/biome` – Fast linter and formatter for JS/TS
   - `tsx` – TypeScript execution engine
-- **`node-project` backend** (resolved to `pnpm-project`, `npm-project`, `yarn-project`, or `bun-project`): Project dependency sync (`install`)
-- **`deno` backend** (resolved to `deno`): Globally installed Deno scripts/tools
+- **`packages.deno`** (resolved to `deno`): Globally installed Deno scripts/tools
   - `jsr:@std/cli` – Deno standard-library CLI helpers
-- **`deno-project` backend** (resolved to `deno-project`): Project dependency sync for Deno projects
+- **`projects.node`** (resolved to `pnpm`, `npm`, `yarn`, or `bun`): Project dependency sync (`install`)
+- **`projects.deno`** (resolved to `deno`): Project dependency sync for Deno projects
 
 ## Usage
 

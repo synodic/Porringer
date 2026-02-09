@@ -2,11 +2,35 @@
 
 import re
 import sys
+from enum import Enum
 from typing import Protocol
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator
+
+
+class PluginKind(Enum):
+    """Fixed set of generic plugin operation types.
+
+    Plugins declare their kind so the manifest can group entries by
+    operation type rather than by ecosystem.  New ecosystems require
+    zero changes to this enum — only a new ``ecosystem()`` string
+    from the plugin.
+    """
+
+    PACKAGE = 'packages'
+    """Install individual packages into an environment."""
+
+    TOOL = 'tools'
+    """Install CLI tools in isolated environments."""
+
+    PROJECT = 'projects'
+    """Synchronise a project's dependency lock-file / venv."""
+
+    RUNTIME = 'runtimes'
+    """Manage language runtime installations."""
+
 
 # Pattern for PEP 440 constraint operators at the start of a substring.
 _PEP440_CONSTRAINT_START = re.compile(r'[><=!~]')
@@ -194,6 +218,63 @@ class Plugin(Protocol):
     def __init__(self, parameters: PluginParameters) -> None:
         """Initializes the plugin"""
         self._distribution = parameters.distribution
+
+    @staticmethod
+    def ecosystem() -> str:
+        """Return the ecosystem this plugin belongs to.
+
+        A free-form identifier such as ``"python"``, ``"node"``,
+        ``"system"``, or ``"deno"``.  New ecosystems (e.g. ``"rust"``)
+        can be introduced by third-party plugins without any changes to
+        the core.
+
+        Returns:
+            The ecosystem identifier string.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def plugin_kind() -> PluginKind:
+        """Return the kind of operation this plugin performs.
+
+        Defaults to :attr:`PluginKind.PACKAGE`.  Override in subclasses
+        for tools, projects, or runtimes.
+
+        Returns:
+            The plugin kind.
+        """
+        return PluginKind.PACKAGE
+
+    @staticmethod
+    def default_priority() -> int:
+        """Return the default priority for resolver ordering.
+
+        Lower values are preferred.  When multiple plugins share the same
+        ``(plugin_kind, ecosystem)`` pair the resolver picks the first
+        available one sorted by this value ascending.
+
+        Platform-specific plugins should return a high value (e.g. 999)
+        on platforms they do not target so that they rank below native
+        alternatives.
+
+        Returns:
+            An integer priority (lower = preferred).
+        """
+        return 100
+
+    @staticmethod
+    def package_name_validator() -> str | None:
+        """Return the validation scheme for package names, or ``None``.
+
+        Well-known values:
+
+        * ``"pep440"`` — validate via :class:`packaging.requirements.Requirement`
+        * ``None`` — accept any non-empty name (the default)
+
+        Returns:
+            A validation scheme identifier, or ``None``.
+        """
+        return None
 
     @staticmethod
     def dependencies() -> list[PluginDependency]:

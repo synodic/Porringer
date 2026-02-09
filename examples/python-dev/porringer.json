@@ -4,7 +4,7 @@
     "description": "Common linting, formatting, and testing tools for Python development",
     "author": "Synodic Software",
     "url": "https://github.com/synodic/porringer",
-    "state": {
+    "packages": {
         "python": [
             {
                 "name": "ruff",
@@ -16,13 +16,17 @@
             },
             "pytest",
             "pytest-cov"
-        ],
-        "python-tool": [
+        ]
+    },
+    "tools": {
+        "python": [
             {
                 "name": "pdm",
                 "description": "Python package and dependency manager"
             }
-        ],
-        "python-project": []
+        ]
+    },
+    "projects": {
+        "python": []
     }
 }

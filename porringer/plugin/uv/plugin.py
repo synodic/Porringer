@@ -39,9 +39,21 @@ class UvEnvironment(Environment, RuntimeConsumer):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """UV manages the ``python`` package backend."""
+    def ecosystem() -> str:
+        """UV belongs to the ``python`` ecosystem."""
         return 'python'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """UV is the preferred Python installer (priority 10)."""
+        return 10
+
+    @staticmethod
+    @override
+    def package_name_validator() -> str:
+        """Python packages use PEP 440 validation."""
+        return 'pep440'
 
     @classmethod
     @override

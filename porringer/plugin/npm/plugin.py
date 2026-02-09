@@ -22,9 +22,15 @@ class NpmEnvironment(Environment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Npm manages the ``node`` package backend."""
+    def ecosystem() -> str:
+        """Npm belongs to the ``node`` ecosystem."""
         return 'node'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Npm is a standard Node installer (priority 20)."""
+        return 20
 
     @classmethod
     @override

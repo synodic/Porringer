@@ -27,9 +27,15 @@ class DenoProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Deno project manages the ``deno-project`` backend."""
-        return 'deno-project'
+    def ecosystem() -> str:
+        """Deno project belongs to the ``deno`` ecosystem."""
+        return 'deno'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Deno project is the sole Deno project manager (priority 10)."""
+        return 10
 
     @classmethod
     @override

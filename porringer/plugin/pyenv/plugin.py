@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+import sys
 from pathlib import Path
 from typing import override
 
@@ -11,7 +12,7 @@ from porringer.core.plugin_schema.environment import (
     UninstallParameters,
 )
 from porringer.core.plugin_schema.runtime import RuntimeProvider
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Package, PackageRef, PluginKind
 
 
 class PyenvEnvironment(Environment, RuntimeProvider):
@@ -30,9 +31,29 @@ class PyenvEnvironment(Environment, RuntimeProvider):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Pyenv manages the ``python-runtime`` package backend."""
-        return 'python-runtime'
+    def ecosystem() -> str:
+        """Pyenv belongs to the ``python`` ecosystem."""
+        return 'python'
+
+    @staticmethod
+    @override
+    def plugin_kind() -> PluginKind:
+        """Pyenv manages language runtimes."""
+        return PluginKind.RUNTIME
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Preferred on Unix (10), unavailable on Windows (999)."""
+        if sys.platform == 'win32':
+            return 999
+        return 10
+
+    @staticmethod
+    @override
+    def package_name_validator() -> str:
+        """Python runtimes use PEP 440 validation."""
+        return 'pep440'
 
     @classmethod
     @override

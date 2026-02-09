@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+import sys
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -21,9 +22,17 @@ class WingetEnvironment(Environment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Winget manages the ``system`` package backend."""
+    def ecosystem() -> str:
+        """Winget belongs to the ``system`` ecosystem."""
         return 'system'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Preferred on Windows (10), unavailable elsewhere (999)."""
+        if sys.platform == 'win32':
+            return 10
+        return 999
 
     @classmethod
     @override

@@ -15,6 +15,7 @@ from porringer.core.schema import (
     Package,
     PackageRef,
     Plugin,
+    PluginKind,
     PluginParameters,
     PorringerModel,
 )
@@ -76,28 +77,61 @@ class Environment(Plugin):
         self.runtime_executable = None
 
     @staticmethod
-    def package_backend() -> str | None:
-        """Declares which package backend (store) this plugin manages.
+    def ecosystem() -> str | None:
+        """Declares which ecosystem this plugin belongs to.
 
-        Plugins that manage the same backend are interchangeable installers.
-        For example, ``pip`` and ``uv`` both return ``"python"`` because they
-        manage the same Python package store.  The ``BackendResolver`` picks
-        the best available installer for each backend.
-
-        Well-known backends:
-
-        - ``"python"``        — Python packages (pip, uv)
-        - ``"python-tool"``   — CLI tools installed as Python packages (pipx)
-        - ``"python-project"``— Project-scoped dependency sync (pdm, poetry, uv)
-        - ``"system"``        — OS-level packages (apt, brew, winget)
-        - ``"node"``          — Node.js packages (npm)
-        - ``"python-runtime"``— Python runtimes themselves (pim)
+        A free-form identifier such as ``"python"``, ``"node"``,
+        ``"system"``, or ``"deno"``.  All plugins that manage the same
+        ecosystem are interchangeable within their
+        :meth:`plugin_kind`.  The ``BackendResolver`` picks the best
+        available installer for each ``(kind, ecosystem)`` pair.
 
         Returns ``None`` for plugins that don't participate in backend
         resolution (e.g. pure provider plugins).
 
         Returns:
-            The backend identifier, or ``None``.
+            The ecosystem identifier, or ``None``.
+        """
+        return None
+
+    @staticmethod
+    def plugin_kind() -> PluginKind:
+        """Return the kind of operation this plugin performs.
+
+        Defaults to :attr:`PluginKind.PACKAGE`.  Override to
+        :attr:`PluginKind.TOOL` or :attr:`PluginKind.RUNTIME` as
+        appropriate.
+
+        Returns:
+            The plugin kind.
+        """
+        return PluginKind.PACKAGE
+
+    @staticmethod
+    def default_priority() -> int:
+        """Return the default priority for resolver ordering.
+
+        Lower values are preferred.  When multiple plugins share the
+        same ``(plugin_kind, ecosystem)`` pair the resolver picks
+        the first available one sorted by this value ascending.
+
+        Returns:
+            An integer priority (lower = preferred).
+        """
+        return 100
+
+    @staticmethod
+    def package_name_validator() -> str | None:
+        """Return the validation scheme for package names, or ``None``.
+
+        Well-known values:
+
+        * ``"pep440"`` — validate via
+          :class:`packaging.requirements.Requirement`
+        * ``None`` — accept any non-empty name (the default)
+
+        Returns:
+            A validation scheme identifier, or ``None``.
         """
         return None
 
