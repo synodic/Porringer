@@ -11,10 +11,10 @@ from typer.testing import CliRunner
 from porringer.api import API
 from porringer.backend.command.sync import SyncCommands
 from porringer.console.entry import app
+from porringer.core.schema import PluginKind
 from porringer.schema import (
     ManifestValidationCode,
     PackageSpec,
-    SetupActionType,
     SetupManifest,
     SetupParameters,
     SkipReason,
@@ -112,10 +112,10 @@ class TestSetupPreview:
             # 2 packages + 1 command = 3 actions
             assert len(results.actions) == THREE_ACTIONS
 
-            action_types = [a.action_type for a in results.actions]
-            assert action_types[FIRST_ACTION_INDEX] == SetupActionType.PACKAGE
-            assert action_types[SECOND_ACTION_INDEX] == SetupActionType.PACKAGE
-            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.RUN_COMMAND
+            action_kinds = [a.kind for a in results.actions]
+            assert action_kinds[FIRST_ACTION_INDEX] == PluginKind.PACKAGE
+            assert action_kinds[SECOND_ACTION_INDEX] == PluginKind.PACKAGE
+            assert action_kinds[THIRD_ACTION_INDEX] is None
 
     @staticmethod
     def test_preview_excludes_filtered_packages(test_api: API) -> None:
@@ -768,10 +768,10 @@ class TestSyncStrategyUpgrade:
             # 2 packages + 1 command = 3 actions
             assert len(results.actions) == THREE_ACTIONS
 
-            action_types = [a.action_type for a in results.actions]
-            assert action_types[FIRST_ACTION_INDEX] == SetupActionType.PACKAGE
-            assert action_types[SECOND_ACTION_INDEX] == SetupActionType.PACKAGE
-            assert action_types[THIRD_ACTION_INDEX] == SetupActionType.RUN_COMMAND
+            action_kinds = [a.kind for a in results.actions]
+            assert action_kinds[FIRST_ACTION_INDEX] == PluginKind.PACKAGE
+            assert action_kinds[SECOND_ACTION_INDEX] == PluginKind.PACKAGE
+            assert action_kinds[THIRD_ACTION_INDEX] is None
 
     @staticmethod
     def test_preview_exact_strategy_produces_package_actions(test_api: API) -> None:
@@ -784,7 +784,7 @@ class TestSyncStrategyUpgrade:
             results = test_api.sync.preview_single(Path(tmpdir), strategy=SyncStrategy.EXACT)
 
             assert len(results.actions) == 1
-            assert results.actions[0].action_type == SetupActionType.PACKAGE
+            assert results.actions[0].kind == PluginKind.PACKAGE
 
     @staticmethod
     def test_preview_batch_latest_strategy(test_api: API) -> None:
@@ -798,7 +798,7 @@ class TestSyncStrategyUpgrade:
             results = test_api.sync.preview_batch(params)
 
             assert len(results.manifest_results) == 1
-            assert results.manifest_results[0].actions[0].action_type == SetupActionType.PACKAGE
+            assert results.manifest_results[0].actions[0].kind == PluginKind.PACKAGE
 
     @staticmethod
     def test_default_strategy_is_minimal(test_api: API) -> None:
@@ -810,7 +810,7 @@ class TestSyncStrategyUpgrade:
 
             results = test_api.sync.preview_single(Path(tmpdir))
 
-            assert results.actions[0].action_type == SetupActionType.PACKAGE
+            assert results.actions[0].kind == PluginKind.PACKAGE
 
     @staticmethod
     def test_upgrade_action_description(test_api: API) -> None:

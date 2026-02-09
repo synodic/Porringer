@@ -24,7 +24,8 @@ from porringer.backend.cache import DirectoryCacheManager
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectSyncParameters
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
-from porringer.core.schema import Package, PackageRef, PluginKind
+from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.schema import Package, PackageRef, Plugin, PluginKind
 from porringer.schema import (
     BatchSetupResults,
     DownloadParameters,
@@ -34,13 +35,11 @@ from porringer.schema import (
     ManifestMetadata,
     ManifestValidationCode,
     ManifestValidationResult,
-    PluginInformation,
     ProgressCallback,
     ProgressEvent,
     ProgressEventKind,
     SetupAction,
     SetupActionResult,
-    SetupActionType,
     SetupManifest,
     SetupParameters,
     SetupResults,
@@ -53,6 +52,17 @@ from porringer.utility.exception import ManifestError, PluginError
 from porringer.utility.utility import canonicalize_type
 
 logger = logging.getLogger(__name__)
+
+
+# Execution order for phased setup.  ``None`` represents post-sync commands.
+_PHASE_ORDER: list[PluginKind | None] = [
+    PluginKind.RUNTIME,
+    PluginKind.PACKAGE,
+    PluginKind.TOOL,
+    PluginKind.PROJECT,
+    PluginKind.SCM,
+    None,
+]
 
 
 # Maps SyncStrategy to the human-readable verb used in action descriptions.
@@ -133,9 +143,11 @@ class SyncCommands:
 
         SyncCommands._validate_schema_version(manifest, _error)
 
-        environments = SyncCommands._get_available_environments()
-        project_environments = SyncCommands._get_available_project_environments()
-        resolver = BackendResolver(environments, manifest.preferences, project_environments)
+        environments = SyncCommands._discover_plugins('environment', Environment, check_dependencies=True)
+        project_environments = SyncCommands._discover_plugins('project_environment', ProjectEnvironment)
+        scm_environments = SyncCommands._discover_plugins('scm', ScmEnvironment)
+        all_plugins = {**environments, **project_environments, **scm_environments}
+        resolver = BackendResolver(all_plugins, manifest.preferences)
 
         SyncCommands._validate_backends(manifest, resolver, _error)
         SyncCommands._validate_package_names(manifest, resolver, _warning)
@@ -387,37 +399,20 @@ class SyncCommands:
             raise ManifestError(f'Failed to load pyproject.toml manifest {path}: {e}') from e
 
     @staticmethod
-    def _get_available_environments() -> dict[str, Environment]:
-        """Gets all available environment plugins as a dict.
+    def _discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> dict[str, T]:
+        """Discover and instantiate plugins, returning a name-keyed dict.
+
+        Args:
+            group: Entry-point group suffix (e.g. ``'environment'``).
+            base_class: Expected base class for the plugins.
+            **kwargs: Forwarded to :meth:`Builder.find_plugins`
+                (e.g. ``check_dependencies=True``).
 
         Returns:
-            Dict mapping plugin name to instantiated environment.
+            Dict mapping canonical plugin name to instantiated plugin.
         """
-        return SyncCommands._build_plugin_dict(
-            Builder().find_environments,
-            Builder.build_environments,
-        )
-
-    @staticmethod
-    def _get_available_project_environments() -> dict[str, ProjectEnvironment]:
-        """Gets all available project-environment plugins as a dict.
-
-        Returns:
-            Dict mapping plugin name to instantiated project environment.
-        """
-        return SyncCommands._build_plugin_dict(
-            Builder().find_project_environments,
-            Builder.build_project_environments,
-        )
-
-    @staticmethod
-    def _build_plugin_dict[T](
-        find_fn: Callable[[], list[PluginInformation[T]]],
-        build_fn: Callable[[list[PluginInformation[T]]], list[T]],
-    ) -> dict[str, T]:
-        """Discover and instantiate plugins, returning a name-keyed dict."""
-        infos = find_fn()
-        instances = build_fn(infos)
+        infos = Builder.find_plugins(group, base_class, **kwargs)
+        instances = Builder.build_plugins(infos)
         return {canonicalize_type(type(inst)).name: inst for inst in instances}
 
     @staticmethod
@@ -426,6 +421,7 @@ class SyncCommands:
         environments: dict[str, Environment],
         strategy: SyncStrategy = SyncStrategy.MINIMAL,
         project_environments: dict[str, ProjectEnvironment] | None = None,
+        scm_environments: dict[str, ScmEnvironment] | None = None,
     ) -> list[str]:
         """Gets the CLI command string for an action.
 
@@ -434,24 +430,30 @@ class SyncCommands:
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (determines install vs upgrade command).
             project_environments: Dict of project-environment plugins.
+            scm_environments: Dict of SCM-environment plugins.
 
         Returns:
             The CLI command as a list of strings, or empty list if not applicable.
         """
         cmd: list[str] = []
-        match action.action_type:
-            case SetupActionType.PACKAGE:
+        match action.kind:
+            case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
                 if action.installer and action.package and action.installer in environments:
                     env = environments[action.installer]
                     if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
                         cmd = env.upgrade_command(action.package)
                     else:
                         cmd = env.install_command(action.package)
-            case SetupActionType.PROJECT_SYNC:
+            case PluginKind.PROJECT:
                 proj_envs = project_environments or {}
                 if action.installer and action.installer in proj_envs:
                     cmd = proj_envs[action.installer].sync_command()
-            case SetupActionType.RUN_COMMAND:
+            case PluginKind.SCM:
+                scm_envs = scm_environments or {}
+                if action.installer and action.package and action.installer in scm_envs:
+                    scm_env = scm_envs[action.installer]
+                    cmd = scm_env.clone_command(action.package.name, Path('.'))
+            case None:
                 cmd = action.command or []
         return cmd
 
@@ -461,29 +463,33 @@ class SyncCommands:
         environments: dict[str, Environment],
         strategy: SyncStrategy = SyncStrategy.MINIMAL,
         project_environments: dict[str, ProjectEnvironment] | None = None,
+        scm_environments: dict[str, ScmEnvironment] | None = None,
     ) -> list[SetupAction]:
         """Builds the list of actions from a manifest.
 
-        Iterates each kind section (``packages``, ``tools``, ``projects``,
-        ``runtimes``) in the manifest.  Package/tool/runtime entries become
-        ``PACKAGE`` actions.  Project entries produce a single
-        ``PROJECT_SYNC`` action per ecosystem.  The ``strategy`` parameter
-        controls only the human-readable description verb; the execution
-        layer decides install-vs-upgrade behaviour at runtime.
+        Iterates each kind section in the manifest.  Package/tool/runtime
+        entries produce one action per package.  Project entries produce a
+        single action per ecosystem.  SCM entries produce one action per
+        repository URL.  The ``strategy`` parameter controls only the
+        human-readable description verb; the execution layer decides
+        install-vs-upgrade behaviour at runtime.
 
         Args:
             manifest: The parsed setup manifest.
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (used for description text).
             project_environments: Dict of project-environment plugins.
+            scm_environments: Dict of SCM-environment plugins.
 
         Returns:
             List of actions to perform.
         """
         actions: list[SetupAction] = []
         proj_envs = project_environments or {}
+        scm_envs = scm_environments or {}
 
-        resolver = BackendResolver(environments, manifest.preferences, proj_envs)
+        all_plugins = {**environments, **proj_envs, **scm_envs}
+        resolver = BackendResolver(all_plugins, manifest.preferences)
 
         verb = _STRATEGY_VERB[strategy]
 
@@ -502,17 +508,33 @@ class SyncCommands:
                 )
                 continue
 
-            # Project kind produces a single PROJECT_SYNC action
+            # Project kind produces a single sync action
             if kind == PluginKind.PROJECT:
                 actions.append(
                     SetupAction(
-                        action_type=SetupActionType.PROJECT_SYNC,
                         description=f'Sync project via {installer}',
                         kind=kind,
                         ecosystem=ecosystem,
                         installer=installer,
                     )
                 )
+                continue
+
+            # SCM kind produces one clone action per repository URL
+            if kind == PluginKind.SCM:
+                for package in packages:
+                    if not package.is_applicable():
+                        continue
+                    actions.append(
+                        SetupAction(
+                            description=f"Clone '{package.name}' via {installer}",
+                            kind=kind,
+                            ecosystem=ecosystem,
+                            installer=installer,
+                            package=package.name,
+                            package_description=package.description,
+                        )
+                    )
                 continue
 
             for package in packages:
@@ -523,7 +545,6 @@ class SyncCommands:
                 )
                 actions.append(
                     SetupAction(
-                        action_type=SetupActionType.PACKAGE,
                         description=desc,
                         kind=kind,
                         ecosystem=ecosystem,
@@ -533,12 +554,11 @@ class SyncCommands:
                     )
                 )
 
-        # Add post-sync command actions
+        # Add post-sync command actions (kind=None)
         for command_str in manifest.post_sync:
             command_parts = shlex.split(command_str)
             actions.append(
                 SetupAction(
-                    action_type=SetupActionType.RUN_COMMAND,
                     description=f'Run: {command_str}',
                     command=command_parts,
                 )
@@ -563,9 +583,10 @@ class SyncCommands:
         logger.info(f'Previewing setup from: {path}')
 
         manifest_path, manifest = SyncCommands._find_manifest(path)
-        environments = SyncCommands._get_available_environments()
-        project_environments = SyncCommands._get_available_project_environments()
-        actions = SyncCommands._build_actions(manifest, environments, strategy, project_environments)
+        environments = SyncCommands._discover_plugins('environment', Environment, check_dependencies=True)
+        project_environments = SyncCommands._discover_plugins('project_environment', ProjectEnvironment)
+        scm_environments = SyncCommands._discover_plugins('scm', ScmEnvironment)
+        actions = SyncCommands._build_actions(manifest, environments, strategy, project_environments, scm_environments)
         metadata = ManifestMetadata(
             name=manifest.name,
             description=manifest.description,
@@ -611,37 +632,40 @@ class SyncCommands:
     ) -> SetupActionResult:
         """Simulates executing an action in dry-run mode.
 
-        For PACKAGE actions, real system state is checked so that the result
-        accurately reflects whether the action would be skipped.
+        For package/tool/runtime actions, real system state is checked so
+        that the result accurately reflects whether the action would be
+        skipped.
 
-        For RUN_COMMAND actions, the command is skipped when all prior
-        results were themselves skipped (nothing changed, so the
-        post-sync command has nothing to do).
+        For post-sync commands (``kind is None``), the command is skipped
+        when all prior results were themselves skipped (nothing changed).
 
         Args:
             action: The action to simulate.
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (affects skip logic for packages).
-            prior_results: Results from earlier phases (used by RUN_COMMAND).
+            prior_results: Results from earlier phases (used by commands).
 
         Returns:
             The simulated result.
         """
-        if action.action_type == SetupActionType.PACKAGE:
-            return SyncCommands._dry_run_package_action(action, environments, strategy)
-        if action.action_type == SetupActionType.PROJECT_SYNC:
-            return SetupActionResult(action=action, success=True)
-        if action.action_type == SetupActionType.RUN_COMMAND:
-            if prior_results and all(r.skipped for r in prior_results):
-                return SetupActionResult(
-                    action=action,
-                    success=True,
-                    skipped=True,
-                    skip_reason=SkipReason.NOTHING_CHANGED,
-                    message='All prerequisites already satisfied',
-                )
-            return SetupActionResult(action=action, success=True)
-        return SetupActionResult(action=action, success=False, message=f'Unknown action type: {action.action_type}')
+        match action.kind:
+            case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
+                return SyncCommands._dry_run_package_action(action, environments, strategy)
+            case PluginKind.PROJECT | PluginKind.SCM:
+                return SetupActionResult(action=action, success=True)
+            case None:
+                # Post-sync command
+                if prior_results and all(r.skipped for r in prior_results):
+                    return SetupActionResult(
+                        action=action,
+                        success=True,
+                        skipped=True,
+                        skip_reason=SkipReason.NOTHING_CHANGED,
+                        message='All prerequisites already satisfied',
+                    )
+                return SetupActionResult(action=action, success=True)
+            case _:
+                return SetupActionResult(action=action, success=False, message=f'Unknown action kind: {action.kind}')
 
     @staticmethod
     def _dry_run_package_action(
@@ -1116,6 +1140,50 @@ class SyncCommands:
                     break
         return results
 
+    @staticmethod
+    def _determine_working_dir(parameters: SetupParameters, path: Path) -> Path:
+        """Determine the working directory for command execution.
+
+        Args:
+            parameters: Setup parameters that may specify a project directory.
+            path: The path being processed.
+
+        Returns:
+            The working directory to use.
+        """
+        if isinstance(parameters.project_directory, Path):
+            return parameters.project_directory
+        return path if path.is_dir() else path.parent
+
+    async def _handle_project_phase(
+        self,
+        project_actions: list[SetupAction],
+        context: _ExecutionPhaseContext,
+    ) -> list[SetupActionResult]:
+        """Execute or skip project sync actions depending on context.
+
+        Args:
+            project_actions: The project-kind actions to process.
+            context: Execution phase context with parameters and flags.
+
+        Returns:
+            Results for each project action.
+        """
+        if not context.skip_project:
+            return await self._execute_project_sync_actions(
+                project_actions,
+                context.project_environments,
+                context.working_dir,
+                context.parameters,
+                context.event_queue,
+            )
+        return self._skip_actions(
+            project_actions,
+            SkipReason.NO_PROJECT_DIRECTORY,
+            'No project directory provided',
+            context.event_queue,
+        )
+
     async def _execute_single(
         self,
         actions: list[SetupAction],
@@ -1137,7 +1205,8 @@ class SyncCommands:
            ``None`` at preview time are resolved here.
         4. **Project sync** — run ``pdm install`` / ``uv sync`` in the
            manifest directory.
-        5. **Post-sync commands** — run arbitrary shell commands.
+        5. **SCM clone** — clone source-control repositories.
+        6. **Post-sync commands** — run arbitrary shell commands.
 
         Args:
             actions: The list of actions to execute (from preview).
@@ -1151,30 +1220,25 @@ class SyncCommands:
         logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
         results: list[SetupActionResult] = []
-        environments = self._get_available_environments()
-        project_environments = self._get_available_project_environments()
+        environments = self._discover_plugins('environment', Environment, check_dependencies=True)
+        project_environments = self._discover_plugins('project_environment', ProjectEnvironment)
+        scm_environments = self._discover_plugins('scm', ScmEnvironment)
 
         skip_project = parameters.project_directory is False
-        working_dir = (
-            parameters.project_directory
-            if isinstance(parameters.project_directory, Path)
-            else (path if path.is_dir() else path.parent)
-        )
+        working_dir = self._determine_working_dir(parameters, path)
 
         # Populate CLI commands for all resolved actions
         for action in actions:
             action.cli_command = SyncCommands._get_cli_command(
-                action, environments, parameters.strategy, project_environments
+                action, environments, parameters.strategy, project_environments, scm_environments
             )
 
-        runtime_actions, package_only_actions, tool_actions, project_sync_actions, command_actions = (
-            self._group_actions_by_phase(actions)
-        )
+        phases = self._group_actions_by_phase(actions)
 
         # --- Phase 1: runtime-provider actions (pim / pyenv) ---------------
-        if runtime_actions:
+        if phases[PluginKind.RUNTIME]:
             runtime_results, should_continue = await self._execute_package_actions(
-                runtime_actions,
+                phases[PluginKind.RUNTIME],
                 environments,
                 parameters,
                 event_queue,
@@ -1182,12 +1246,12 @@ class SyncCommands:
             results.extend(runtime_results)
             if not should_continue:
                 return SetupResults(actions=actions, results=results)
-            self._propagate_runtime(runtime_actions, environments, project_environments)
+            self._propagate_runtime(phases[PluginKind.RUNTIME], environments, project_environments)
 
         # --- Phase 2a: package-kind actions (pip, uv, etc.) ---------------
-        if package_only_actions:
+        if phases[PluginKind.PACKAGE]:
             package_results, should_continue = await self._execute_package_actions(
-                package_only_actions,
+                phases[PluginKind.PACKAGE],
                 environments,
                 parameters,
                 event_queue,
@@ -1199,20 +1263,20 @@ class SyncCommands:
         # --- Phase 2b: tool-kind actions (pipx, etc.) ---------------------
         # Re-discover plugins so that tools installed in Phase 2a
         # (e.g. pipx via pip) are now available as backends.
-        if tool_actions:
-            environments = self._get_available_environments()
+        if phases[PluginKind.TOOL]:
+            environments = self._discover_plugins('environment', Environment, check_dependencies=True)
 
             # Resolve deferred tool actions whose installer was None
-            self._resolve_deferred_actions(tool_actions, environments, parameters.strategy)
+            self._resolve_deferred_actions(phases[PluginKind.TOOL], environments, parameters.strategy)
 
             # Update CLI commands for newly-resolved tool actions
-            for action in tool_actions:
+            for action in phases[PluginKind.TOOL]:
                 action.cli_command = SyncCommands._get_cli_command(
-                    action, environments, parameters.strategy, project_environments
+                    action, environments, parameters.strategy, project_environments, scm_environments
                 )
 
             tool_results, should_continue = await self._execute_package_actions(
-                tool_actions,
+                phases[PluginKind.TOOL],
                 environments,
                 parameters,
                 event_queue,
@@ -1222,33 +1286,39 @@ class SyncCommands:
                 return SetupResults(actions=actions, results=results)
 
         # --- Phase 3: project sync ----------------------------------------
-        if project_sync_actions:
+        if phases[PluginKind.PROJECT]:
             # Re-discover project environments in case tools installed in
             # earlier phases provide new project-environment backends.
-            project_environments = self._get_available_project_environments()
+            project_environments = self._discover_plugins('project_environment', ProjectEnvironment)
 
-            if not skip_project:
-                results.extend(
-                    await self._execute_project_sync_actions(
-                        project_sync_actions,
-                        project_environments,
-                        working_dir,
-                        parameters,
-                        event_queue,
-                    )
+            results.extend(
+                await self._handle_project_phase(
+                    phases[PluginKind.PROJECT],
+                    _ExecutionPhaseContext(
+                        environments=environments,
+                        project_environments=project_environments,
+                        parameters=parameters,
+                        skip_project=skip_project,
+                        working_dir=working_dir,
+                        event_queue=event_queue,
+                    ),
                 )
-            else:
-                results.extend(
-                    self._skip_actions(
-                        project_sync_actions,
-                        SkipReason.NO_PROJECT_DIRECTORY,
-                        'No project directory provided',
-                        event_queue,
-                    )
-                )
+            )
 
-        # --- Phase 4: post-sync commands ----------------------------------
-        if command_actions:
+        # --- Phase 4: SCM clone -------------------------------------------
+        if phases[PluginKind.SCM]:
+            results.extend(
+                await self._execute_scm_actions(
+                    phases[PluginKind.SCM],
+                    scm_environments,
+                    working_dir,
+                    parameters,
+                    event_queue,
+                )
+            )
+
+        # --- Phase 5: post-sync commands ----------------------------------
+        if phases[None]:
             context = _ExecutionPhaseContext(
                 environments=environments,
                 project_environments=project_environments,
@@ -1257,47 +1327,26 @@ class SyncCommands:
                 working_dir=working_dir,
                 event_queue=event_queue,
             )
-            results.extend(await self._execute_command_actions(command_actions, context, prior_results=results))
+            results.extend(await self._execute_command_actions(phases[None], context, prior_results=results))
 
         return SetupResults(actions=actions, results=results)
 
     @staticmethod
     def _group_actions_by_phase(
         actions: list[SetupAction],
-    ) -> tuple[
-        list[SetupAction],
-        list[SetupAction],
-        list[SetupAction],
-        list[SetupAction],
-        list[SetupAction],
-    ]:
-        """Group actions into phase buckets in a single pass.
+    ) -> dict[PluginKind | None, list[SetupAction]]:
+        """Group actions into phase buckets keyed by :class:`PluginKind`.
+
+        Post-sync commands (``kind is None``) are stored under the
+        ``None`` key.
 
         Returns:
-            Tuple of (runtime, package, tool, project_sync, command) action lists.
+            Dict mapping each phase to its action list.
         """
-        runtime: list[SetupAction] = []
-        package: list[SetupAction] = []
-        tool: list[SetupAction] = []
-        project_sync: list[SetupAction] = []
-        command: list[SetupAction] = []
-
+        phases: dict[PluginKind | None, list[SetupAction]] = {k: [] for k in _PHASE_ORDER}
         for action in actions:
-            match action.action_type:
-                case SetupActionType.PACKAGE:
-                    match action.kind:
-                        case PluginKind.RUNTIME:
-                            runtime.append(action)
-                        case PluginKind.TOOL:
-                            tool.append(action)
-                        case _:
-                            package.append(action)
-                case SetupActionType.PROJECT_SYNC:
-                    project_sync.append(action)
-                case SetupActionType.RUN_COMMAND:
-                    command.append(action)
-
-        return runtime, package, tool, project_sync, command
+            phases[action.kind].append(action)
+        return phases
 
     @staticmethod
     def _propagate_runtime(
@@ -1490,6 +1539,105 @@ class SyncCommands:
                 return SetupActionResult(action=action, success=True, message=f'Synced project via {action.installer}')
             return SetupActionResult(
                 action=action, success=False, message=f'Project sync failed via {action.installer}'
+            )
+        except Exception as e:
+            return SetupActionResult(action=action, success=False, message=str(e))
+
+    async def _execute_scm_actions(
+        self,
+        scm_actions: list[SetupAction],
+        scm_environments: dict[str, ScmEnvironment] | None,
+        working_dir: Path,
+        parameters: SetupParameters,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None,
+    ) -> list[SetupActionResult]:
+        """Execute SCM_CLONE actions sequentially.
+
+        Each action invokes the resolved SCM-environment plugin's
+        :meth:`~ScmEnvironment.clone` method.
+
+        Args:
+            scm_actions: The SCM clone actions.
+            scm_environments: Dict of SCM-environment plugins.
+            working_dir: Working directory (manifest location).
+            parameters: Setup parameters (dry-run, etc.).
+            event_queue: Optional queue for progress events.
+
+        Returns:
+            List of action results.
+        """
+        results: list[SetupActionResult] = []
+
+        for action in scm_actions:
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+
+            result = await self._execute_scm_clone(action, scm_environments, working_dir, parameters)
+
+            results.append(result)
+            if event_queue is not None:
+                event_queue.put_nowait(
+                    ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                )
+            if not result.success and not result.skipped and parameters.fail_fast:
+                logger.error(f'SCM clone failed: {action.description} - {result.message}')
+                break
+
+        return results
+
+    @staticmethod
+    async def _execute_scm_clone(
+        action: SetupAction,
+        scm_environments: dict[str, ScmEnvironment] | None,
+        working_dir: Path,
+        parameters: SetupParameters,
+    ) -> SetupActionResult:
+        """Execute a single SCM_CLONE action.
+
+        Args:
+            action: The SCM clone action.
+            scm_environments: Dict of SCM-environment plugins.
+            working_dir: Working directory (manifest location).
+            parameters: Setup parameters.
+
+        Returns:
+            The result of the clone operation.
+        """
+        scm_envs = scm_environments or {}
+        if action.installer is None or action.installer not in scm_envs:
+            return SetupActionResult(
+                action=action, success=False, message=f"SCM environment '{action.installer}' is not available"
+            )
+
+        if action.package is None:
+            return SetupActionResult(action=action, success=False, message='No repository URL specified')
+
+        scm_env = scm_envs[action.installer]
+        url = action.package.name
+
+        # Derive destination from the repo URL (last path segment, minus .git)
+        repo_name = url.rstrip('/').rsplit('/', 1)[-1]
+        if repo_name.endswith('.git'):
+            repo_name = repo_name[:-4]
+        destination = working_dir / repo_name
+
+        # Skip if already cloned
+        if scm_env.is_cloned(url, destination):
+            return SetupActionResult(
+                action=action,
+                success=True,
+                skipped=True,
+                skip_reason=SkipReason.ALREADY_INSTALLED,
+                message=f"Repository already cloned at '{destination}'",
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(None, lambda: scm_env.clone(url, destination, dry=parameters.dry_run))
+            if success:
+                return SetupActionResult(action=action, success=True, message=f"Cloned '{url}' via {action.installer}")
+            return SetupActionResult(
+                action=action, success=False, message=f"Clone failed for '{url}' via {action.installer}"
             )
         except Exception as e:
             return SetupActionResult(action=action, success=False, message=str(e))

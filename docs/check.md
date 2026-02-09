@@ -36,13 +36,13 @@ porringer check --prereleases
 
 ```python
 from porringer.backend.builder import Builder
-from porringer.core.plugin_schema.environment import CheckUpdatesParameters
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 
 builder = Builder()
 
 # Build plugin environments
-plugin_infos = builder.find_environments()
-environments = builder.build_environments(plugin_infos)
+plugin_infos = builder.find_plugins('environment', Environment)
+environments = builder.build_plugins(plugin_infos)
 
 # Check each plugin
 for env in environments:

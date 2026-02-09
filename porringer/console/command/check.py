@@ -10,7 +10,7 @@ from rich.table import Table
 
 from porringer.backend.builder import Builder
 from porringer.console.schema import Configuration
-from porringer.core.plugin_schema.environment import CheckUpdatesParameters
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.schema import (
     CheckParameters,
     CheckResult,
@@ -35,10 +35,9 @@ def _check_plugin_updates(
         List of check results per plugin.
     """
     logger = logging.getLogger('porringer')
-    builder = Builder()
 
-    environment_types = builder.find_environments()
-    environments = builder.build_environments(environment_types)
+    environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
+    environments = Builder.build_plugins(environment_types)
 
     results: list[CheckResult] = []
 

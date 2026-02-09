@@ -3,7 +3,7 @@
 import re
 import sys
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
@@ -30,6 +30,9 @@ class PluginKind(Enum):
 
     RUNTIME = 'runtimes'
     """Manage language runtime installations."""
+
+    SCM = 'scm'
+    """Clone or manage source-control repositories."""
 
 
 # Pattern for PEP 440 constraint operators at the start of a substring.
@@ -88,7 +91,7 @@ class PackageRef(PorringerModel):
 
     @model_validator(mode='before')
     @classmethod
-    def _coerce_string(cls, data: str | dict) -> dict:  # type: ignore[type-arg]
+    def _coerce_string(cls, data: str | dict[str, Any]) -> dict[str, Any]:
         """Accept plain strings and auto-parse them into name + constraint."""
         if isinstance(data, str):
             return cls._split_spec(data)
@@ -264,6 +267,19 @@ class Plugin(Protocol):
             An integer priority (lower = preferred).
         """
         return 100
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if this plugin is available on the current system.
+
+        Plugins that depend on external tools can override this to check
+        whether the required executables exist.  The default implementation
+        always returns ``True``.
+
+        Returns:
+            ``True`` if the plugin is available, ``False`` otherwise.
+        """
+        return True
 
     @staticmethod
     def package_name_validator() -> str | None:

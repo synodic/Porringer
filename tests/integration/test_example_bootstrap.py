@@ -11,7 +11,7 @@ import pytest
 
 from porringer.backend.command.sync import SyncCommands
 from porringer.core.schema import PluginKind
-from porringer.schema import SetupActionType, SetupResults
+from porringer.schema import SetupResults
 
 # Absolute path to the bootstrap example manifest directory
 _BOOTSTRAP_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'python-bootstrap'
@@ -63,16 +63,25 @@ class TestBootstrapPreview:
     @staticmethod
     def test_post_sync_command_present(preview: SetupResults) -> None:
         """A RUN_COMMAND action for ``pdm install`` should be in the plan."""
-        command_actions = [a for a in preview.actions if a.action_type == SetupActionType.RUN_COMMAND]
+        command_actions = [a for a in preview.actions if a.kind is None]
         assert len(command_actions) == 1
         assert command_actions[0].command == ['pdm', 'install']
 
     @staticmethod
+    def test_scm_action_present(preview: SetupResults) -> None:
+        """An SCM action for cloning the porringer repo should be in the plan."""
+        scm_actions = [a for a in preview.actions if a.kind == PluginKind.SCM and a.ecosystem == 'git']
+        assert len(scm_actions) == 1
+        assert scm_actions[0].package is not None
+        assert scm_actions[0].package.name == 'https://github.com/synodic/porringer'
+        assert scm_actions[0].kind == PluginKind.SCM
+
+    @staticmethod
     def test_action_order_matches_phases(preview: SetupResults) -> None:
-        """Actions should be ordered: runtime, package, tool, command.
+        """Actions should be ordered: runtime, package, tool, scm, command.
 
         This validates the build order returned by preview. The execution
-        engine reorders into runtime → package → tool → command phases.
+        engine reorders into runtime → package → tool → scm → command phases.
         """
         kinds = []
         for a in preview.actions:
@@ -82,7 +91,9 @@ class TestBootstrapPreview:
                 kinds.append('package')
             elif a.kind == PluginKind.TOOL:
                 kinds.append('tool')
-            elif a.action_type == SetupActionType.RUN_COMMAND:
+            elif a.kind == PluginKind.SCM:
+                kinds.append('scm')
+            elif a.kind is None:
                 kinds.append('command')
             else:
                 kinds.append('other')
@@ -90,4 +101,5 @@ class TestBootstrapPreview:
         assert 'runtime' in kinds
         assert 'package' in kinds
         assert 'tool' in kinds
+        assert 'scm' in kinds
         assert 'command' in kinds

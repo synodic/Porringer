@@ -16,8 +16,8 @@ from porringer.core.plugin_schema.environment import (
     UninstallParameters,
 )
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Package, PackageRef, PluginParameters
-from porringer.schema import SetupAction, SetupActionType, SubActionProgress
+from porringer.core.schema import Package, PackageRef, PluginKind, PluginParameters
+from porringer.schema import SetupAction, SubActionProgress
 from porringer.utility.utility import async_run_command
 
 # Regex patterns for parsing pip output
@@ -197,8 +197,8 @@ class PipEnvironment(Environment, RuntimeConsumer):
         assert params.progress_callback is not None  # guaranteed by caller
 
         action = SetupAction(
-            action_type=SetupActionType.PACKAGE,
             description=f'Install {params.package.specifier}',
+            kind=PluginKind.PACKAGE,
             installer='pip',
             package=params.package,
         )

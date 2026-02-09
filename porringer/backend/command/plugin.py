@@ -14,6 +14,7 @@ from porringer.backend.schema import (
     PluginUninstallParameters,
     PluginUpdateParameters,
 )
+from porringer.core.plugin_schema.environment import Environment
 from porringer.schema import ListPluginResults, ListPluginsParameters
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import is_pipx_installation
@@ -40,11 +41,9 @@ class PluginCommands:
         """
         logger.info('Listing plugins')
 
-        builder = Builder()
+        environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
 
-        environment_types = builder.find_environments()
-
-        environments = builder.build_environments(environment_types)
+        environments = Builder.build_plugins(environment_types)
 
         return resolve_list_plugins_parameters(environments)
 

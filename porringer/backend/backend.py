@@ -11,27 +11,21 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 
-from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.schema import PluginKind
+from porringer.core.schema import Plugin, PluginKind
 
 logger = logging.getLogger(__name__)
 
 # Type alias for any plugin that participates in backend resolution.
-BackendPlugin = Environment | ProjectEnvironment
+BackendPlugin = Plugin
 
 
 class BackendResolver:
     """Maps ``(PluginKind, ecosystem)`` pairs to the best available plugin.
 
-    Construction requires two inputs:
-
-    * *environments* – all instantiated :class:`Environment` plugins
-      keyed by their canonical name.
-    * *preferences* – an optional dict coming from the manifest's
-      ``preferences`` field (e.g. ``{"python": "uv"}``).
-
-    Optionally accepts *project_environments* for project-scoped plugins.
+    Construction requires a single *plugins* mapping containing **all**
+    instantiated plugins (environments, project environments, SCM
+    environments) keyed by their canonical name, plus an optional
+    *preferences* dict from the manifest.
 
     Resolution algorithm per ``(kind, ecosystem)`` pair:
 
@@ -44,24 +38,17 @@ class BackendResolver:
 
     def __init__(
         self,
-        environments: Mapping[str, Environment],
+        plugins: Mapping[str, BackendPlugin],
         preferences: Mapping[str, str] | None = None,
-        project_environments: Mapping[str, ProjectEnvironment] | None = None,
     ) -> None:
         """Initialize the backend resolver with available plugins and preferences.
 
         Args:
-            environments: Instantiated environment plugins keyed by name.
+            plugins: All instantiated plugins keyed by canonical name.
             preferences: Optional ecosystem → plugin-name preference mapping.
-            project_environments: Optional instantiated project-environment plugins.
         """
-        self._environments = environments
-        self._project_environments: Mapping[str, ProjectEnvironment] = project_environments or {}
+        self._all_plugins: dict[str, BackendPlugin] = dict(plugins)
         self._preferences = preferences or {}
-
-        # Merged view for indexing and availability checks
-        self._all_plugins: dict[str, BackendPlugin] = dict(environments)
-        self._all_plugins.update(self._project_environments)
 
         # Index: (kind, ecosystem) -> [plugin_name, ...]
         self._backend_plugins: dict[tuple[PluginKind, str], list[str]] = {}
@@ -154,7 +141,7 @@ class BackendResolver:
         if plugin is None:
             return False
         try:
-            return type(plugin).is_available()
+            return plugin.is_available()
         except Exception:
             logger.debug("is_available() failed for plugin '%s'", plugin_name, exc_info=True)
             return False
