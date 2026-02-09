@@ -11,8 +11,14 @@ The `porringer.json` manifest declares the desired environment using kind sectio
   - `pyrefly` - Python type checker
   - `pytest` - Testing framework
   - `pytest-cov` - Coverage plugin for pytest
+  - `pytest-mock` - Mock object library for pytest
+  - `pytest-asyncio` - Async test support for pytest
 - **`tools.python`** (resolved to `pipx`): CLI tools installed in isolated environments
   - `pdm` - Python project manager
+
+These packages mirror the project's own `lint` and `test` dependency groups in
+`pyproject.toml`, so running `--dry-run` inside the dev environment shows every
+package as already satisfied.
 
 ## Usage
 
@@ -49,7 +55,7 @@ You can also embed this manifest in a `pyproject.toml` file:
 version = "1"
 
 [tool.porringer.packages]
-python = ["ruff", "pyrefly", "pytest", "pytest-cov"]
+python = ["ruff", "pyrefly", "pytest", "pytest-cov", "pytest-mock", "pytest-asyncio"]
 
 [tool.porringer.tools]
 python = ["pdm"]

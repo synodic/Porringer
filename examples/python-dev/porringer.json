@@ -1,7 +1,7 @@
 {
     "version": "1",
     "name": "Python Dev Environment",
-    "description": "Common linting, formatting, and testing tools for Python development",
+    "description": "Linting, type-checking, and testing tools for Porringer development",
     "author": "Synodic Software",
     "url": "https://github.com/synodic/porringer",
     "packages": {
@@ -15,7 +15,9 @@
                 "description": "Python type checker"
             },
             "pytest",
-            "pytest-cov"
+            "pytest-cov",
+            "pytest-mock",
+            "pytest-asyncio"
         ]
     },
     "tools": {
@@ -25,8 +27,5 @@
                 "description": "Python package and dependency manager"
             }
         ]
-    },
-    "projects": {
-        "python": []
     }
 }
