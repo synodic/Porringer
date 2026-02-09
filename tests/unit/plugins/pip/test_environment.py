@@ -2,7 +2,9 @@
 
 import json
 import subprocess
+import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -82,11 +84,13 @@ class TestVenvWithPip:
     @staticmethod
     def test_skips_entries_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
         """Entries missing a ``name`` key are silently dropped."""
-        pip_json = json.dumps([
-            {'name': 'ruff', 'version': '0.15.0'},
-            {'version': '1.0.0'},
-            {'name': None, 'version': '2.0.0'},
-        ])
+        pip_json = json.dumps(
+            [
+                {'name': 'ruff', 'version': '0.15.0'},
+                {'version': '1.0.0'},
+                {'name': None, 'version': '2.0.0'},
+            ]
+        )
         _mock_subprocess(monkeypatch, lambda *a, **kw: _ok(pip_json))
 
         result = _make_env().packages()
@@ -230,3 +234,60 @@ class TestCaching:
 
         expected_calls = 2
         assert call_count == expected_calls
+
+
+# ---------------------------------------------------------------------------
+# Guard: python_command must target the running interpreter
+# ---------------------------------------------------------------------------
+
+
+class TestPythonCommand:
+    """Verify ``python_command`` resolves to the running interpreter.
+
+    On CI the bare string ``'python'`` can resolve via PATH to a *different*
+    Python that lacks the project's dev dependencies, causing dry-run presence
+    checks to silently fail.  These tests ensure the fallback always points at
+    the same interpreter that is executing the test suite.
+    """
+
+    @staticmethod
+    def test_default_is_sys_executable() -> None:
+        """Without a runtime provider the command must be ``sys.executable``."""
+        env = _make_env()
+        assert env.python_command == sys.executable
+
+    @staticmethod
+    def test_runtime_override_takes_precedence() -> None:
+        """When a runtime provider resolves a path, that path wins."""
+        env = _make_env()
+        custom = Path('/custom/python3')
+        env.runtime_executable = custom
+        assert env.python_command == str(custom)
+
+
+# ---------------------------------------------------------------------------
+# Smoke test: unmocked packages() against the live environment
+# ---------------------------------------------------------------------------
+
+
+class TestLivePackages:
+    """Run ``packages()`` against the real interpreter (no mocking).
+
+    This catches the scenario where ``python_command`` resolves to a Python
+    that does *not* have the project's dependencies — the exact failure mode
+    observed on Windows and Linux CI.
+    """
+
+    @staticmethod
+    def test_known_dev_dependencies_are_visible() -> None:
+        """At least the known dev-dependencies must be discoverable."""
+        env = _make_env()
+        installed = {p.name.lower() for p in env.packages()}
+
+        # These are always present in the dev/test environment
+        expected = {'pytest', 'packaging'}
+        missing = expected - installed
+        assert not missing, (
+            f'Dev-dependencies not visible to PipEnvironment.packages(): {missing}. '
+            f'python_command={env.python_command!r}'
+        )
