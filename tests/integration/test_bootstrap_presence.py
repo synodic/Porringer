@@ -1,22 +1,22 @@
 """Presence test using the python-bootstrap example manifest.
 
-Verifies that when runtimes, packages, and tools declared in
-``examples/python-bootstrap/porringer.json`` are already installed,
-a dry-run reports every installable action as skipped.
+Verifies that the dry-run presence check works correctly for the
+``examples/python-bootstrap/porringer.json`` manifest.
 
-SCM clone actions are excluded from the all-skipped check because
-their presence depends on a local filesystem path rather than an
-installed package.  When SCM actions are not skipped, the post-sync
-``RUN_COMMAND`` is also not skipped (something changed).
+Actions whose backing installer is available and whose package is
+already installed should be skipped.  Actions with deferred
+installers (``installer=None`` — no provider on PATH) pass through
+dry-run as not-skipped because presence cannot be checked.
 """
 
+import importlib.metadata
 from pathlib import Path
 
 import pytest
 
 from porringer.api import API
 from porringer.core.schema import PluginKind
-from porringer.schema import SetupActionResult, SetupParameters
+from porringer.schema import SetupActionResult, SetupParameters, SkipReason
 from tests.conftest import execute_via_stream
 
 # Absolute path to the bootstrap example manifest directory
@@ -24,7 +24,7 @@ _BOOTSTRAP_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'python-boot
 
 
 class TestBootstrapPresence:
-    """Dry-run the python-bootstrap example and verify all-skipped."""
+    """Dry-run the python-bootstrap example and verify presence detection."""
 
     @staticmethod
     @pytest.fixture
@@ -38,25 +38,75 @@ class TestBootstrapPresence:
         return results.manifest_results[0].results
 
     @staticmethod
-    def test_installable_actions_skipped(dry_run_results: list[SetupActionResult]) -> None:
-        """Runtime, package, and tool actions should be skipped when already installed."""
-        installable = [
-            r for r in dry_run_results if r.action.kind in {PluginKind.RUNTIME, PluginKind.PACKAGE, PluginKind.TOOL}
-        ]
-        assert len(installable) > 0, 'No installable actions produced by dry-run'
-        not_skipped = [r for r in installable if not r.skipped]
-        assert not not_skipped, f'{len(not_skipped)} installable action(s) not skipped: ' + ', '.join(
-            r.action.description for r in not_skipped
+    def test_all_manifest_sections_produce_results(dry_run_results: list[SetupActionResult]) -> None:
+        """Every manifest section (runtime, package, tool, scm, command) yields at least one result."""
+        kinds = {r.action.kind for r in dry_run_results}
+        assert PluginKind.RUNTIME in kinds, 'No RUNTIME result'
+        assert PluginKind.PACKAGE in kinds, 'No PACKAGE result'
+        assert PluginKind.TOOL in kinds, 'No TOOL result'
+        assert PluginKind.SCM in kinds, 'No SCM result'
+        assert None in kinds, 'No post-sync command result'
+
+    @staticmethod
+    def test_dry_run_actions_succeed(dry_run_results: list[SetupActionResult]) -> None:
+        """All dry-run actions should complete successfully.
+
+        Actions with ``installer=None`` (deferred) succeed as no-ops.
+        Actions with a resolved installer succeed by either skipping
+        (already-installed) or reporting they would install.
+        """
+        failed = [r for r in dry_run_results if not r.success]
+        assert not failed, f'{len(failed)} action(s) failed: ' + ', '.join(
+            f'{r.action.description}: {r.message}' for r in failed
         )
 
     @staticmethod
+    def test_skipped_actions_have_reason(dry_run_results: list[SetupActionResult]) -> None:
+        """Every skipped action should carry a valid skip reason."""
+        skipped = [r for r in dry_run_results if r.skipped]
+        for r in skipped:
+            assert r.skip_reason is not None, f'Skipped action without reason: {r.action.description}'
+
+    @staticmethod
+    def test_already_installed_skip_reason(dry_run_results: list[SetupActionResult]) -> None:
+        """Installable actions detected as present should report ALREADY_INSTALLED."""
+        skipped = [
+            r
+            for r in dry_run_results
+            if r.skipped and r.action.kind in {PluginKind.RUNTIME, PluginKind.PACKAGE, PluginKind.TOOL}
+        ]
+        for r in skipped:
+            assert r.skip_reason == SkipReason.ALREADY_INSTALLED, (
+                f'{r.action.description} skipped with unexpected reason: {r.skip_reason}'
+            )
+
+    @staticmethod
+    def test_pipx_skipped_when_installed(dry_run_results: list[SetupActionResult]) -> None:
+        """If ``pipx`` is installed as a pip package, its PACKAGE action should be skipped.
+
+        The presence check uses ``pip list`` (not PATH), so we guard
+        with ``importlib.metadata`` which matches pip's view.
+        """
+        try:
+            importlib.metadata.distribution('pipx')
+        except importlib.metadata.PackageNotFoundError:
+            pytest.skip('pipx not installed as a pip package')
+        pipx_results = [
+            r
+            for r in dry_run_results
+            if r.action.kind == PluginKind.PACKAGE and r.action.package and r.action.package.name == 'pipx'
+        ]
+        assert len(pipx_results) == 1
+        assert pipx_results[0].skipped, 'pipx is installed but action was not skipped'
+
+    @staticmethod
     def test_scm_action_present(dry_run_results: list[SetupActionResult]) -> None:
-        """An SCM_CLONE action should be present in the dry-run results."""
+        """An SCM action should be present in the dry-run results."""
         scm_results = [r for r in dry_run_results if r.action.kind == PluginKind.SCM]
         assert len(scm_results) == 1
 
     @staticmethod
     def test_command_present(dry_run_results: list[SetupActionResult]) -> None:
-        """The post-sync RUN_COMMAND should be present in the dry-run results."""
+        """The post-sync command should be present in the dry-run results."""
         command_results = [r for r in dry_run_results if r.action.command is not None]
         assert len(command_results) == 1

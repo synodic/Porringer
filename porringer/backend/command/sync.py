@@ -497,10 +497,12 @@ class SyncCommands:
         for kind, ecosystem, packages in manifest.iter_sections():
             installer = resolver.resolve(kind, ecosystem)
 
-            # TOOL-kind actions are deferred when no backend is available
-            # at preview time — the prerequisite tool may be installed in
-            # an earlier phase (e.g. pipx installed via pip).
-            if installer is None and kind != PluginKind.TOOL:
+            # TOOL and RUNTIME actions are deferred when no backend is
+            # available at preview time — the prerequisite may be installed
+            # in an earlier phase (e.g. pipx installed via pip, or pyenv
+            # installed via brew).  Other kinds still generate actions with
+            # installer=None so the preview always reflects the full manifest.
+            if installer is None and kind not in {PluginKind.TOOL, PluginKind.RUNTIME}:
                 logger.warning(
                     "No installer available for (%s, '%s'); skipping its entries",
                     kind.value,

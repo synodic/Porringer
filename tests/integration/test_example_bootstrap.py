@@ -1,8 +1,11 @@
 """Bootstrap example tests.
 
 Validates that the ``examples/python-bootstrap/porringer.json`` manifest
-produces the correct phased action plan, including deferred tool
+produces the correct phased action plan, including deferred tool/runtime
 resolution and post-sync commands.
+
+Runtime and tool actions may have ``installer=None`` (deferred) when
+the backing CLI tool is not on PATH — this is expected and correct.
 """
 
 from pathlib import Path
@@ -34,7 +37,12 @@ class TestBootstrapPreview:
 
     @staticmethod
     def test_runtime_action_present(preview: SetupResults) -> None:
-        """A RUNTIME action for Python 3.14 should be in the plan."""
+        """A RUNTIME action for Python 3.14 should be in the plan.
+
+        The action may have ``installer=None`` (deferred) when no
+        runtime provider (pim/pyenv) is available on the current
+        platform.
+        """
         runtime_actions = [a for a in preview.actions if a.kind == PluginKind.RUNTIME and a.ecosystem == 'python']
         assert len(runtime_actions) == 1
         assert runtime_actions[0].package is not None
