@@ -82,13 +82,11 @@ class TestVenvWithPip:
     @staticmethod
     def test_skips_entries_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
         """Entries missing a ``name`` key are silently dropped."""
-        pip_json = json.dumps(
-            [
-                {'name': 'ruff', 'version': '0.15.0'},
-                {'version': '1.0.0'},
-                {'name': None, 'version': '2.0.0'},
-            ]
-        )
+        pip_json = json.dumps([
+            {'name': 'ruff', 'version': '0.15.0'},
+            {'version': '1.0.0'},
+            {'name': None, 'version': '2.0.0'},
+        ])
         _mock_subprocess(monkeypatch, lambda *a, **kw: _ok(pip_json))
 
         result = _make_env().packages()

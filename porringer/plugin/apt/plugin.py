@@ -48,7 +48,7 @@ class AptEnvironment(Environment):
     @override
     def default_priority() -> int:
         """Preferred on Linux (10), unavailable elsewhere (999)."""
-        if sys.platform in ('win32', 'darwin'):
+        if sys.platform in {'win32', 'darwin'}:
             return 999
         return 10
 

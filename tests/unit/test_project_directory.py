@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from porringer.api import API
+from porringer.core.schema import PluginKind
 from porringer.schema import (
     BatchSetupResults,
     SetupAction,
@@ -181,8 +182,6 @@ class TestBatchSetupResultsSkips:
 
     def test_skips_carries_action_metadata(self) -> None:
         """Each skipped result carries full action metadata."""
-        from porringer.core.schema import PluginKind
-
         action = SetupAction(
             action_type=SetupActionType.PROJECT_SYNC,
             description='Sync project via uv',

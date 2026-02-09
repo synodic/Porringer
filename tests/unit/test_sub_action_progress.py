@@ -8,7 +8,7 @@ import pytest
 
 from porringer.backend.command.sync import SyncCommands
 from porringer.core.plugin_schema.environment import PackageParameters
-from porringer.core.schema import PackageRef
+from porringer.core.schema import PackageRef, PluginKind
 from porringer.plugin.pip.plugin import PipEnvironment
 from porringer.schema import (
     BatchSetupResults,
@@ -29,8 +29,6 @@ MIN_STREAM_EVENTS = 2
 
 def _make_action(package: str = 'requests') -> SetupAction:
     """Create a test SetupAction."""
-    from porringer.core.schema import PluginKind
-
     return SetupAction(
         action_type=SetupActionType.PACKAGE,
         description=f'Install {package}',

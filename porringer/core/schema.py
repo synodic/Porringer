@@ -220,7 +220,7 @@ class Plugin(Protocol):
         self._distribution = parameters.distribution
 
     @staticmethod
-    def ecosystem() -> str:
+    def ecosystem() -> str | None:
         """Return the ecosystem this plugin belongs to.
 
         A free-form identifier such as ``"python"``, ``"node"``,
@@ -228,8 +228,11 @@ class Plugin(Protocol):
         can be introduced by third-party plugins without any changes to
         the core.
 
+        Return ``None`` for plugins that don't participate in backend
+        resolution (e.g. pure provider plugins).
+
         Returns:
-            The ecosystem identifier string.
+            The ecosystem identifier string, or ``None``.
         """
         raise NotImplementedError
 

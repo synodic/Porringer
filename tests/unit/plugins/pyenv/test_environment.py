@@ -9,7 +9,7 @@ from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import PackageParameters as PkgParams
 from porringer.core.plugin_schema.runtime import RuntimeProvider
-from porringer.core.schema import Distribution, PackageRef, PluginParameters
+from porringer.core.schema import Distribution, PackageRef, PluginKind, PluginParameters
 from porringer.plugin.pyenv.plugin import PyenvEnvironment
 from porringer.test.pytest.tests import EnvironmentUnitTests
 
@@ -29,8 +29,6 @@ class TestPyenvBasics:
         assert PyenvEnvironment.ecosystem() == 'python'
 
     def test_plugin_kind(self) -> None:
-        from porringer.core.schema import PluginKind
-
         assert PyenvEnvironment.plugin_kind() == PluginKind.RUNTIME
 
     def test_tool_name(self) -> None:
