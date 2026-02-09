@@ -4,14 +4,14 @@ This example demonstrates using Porringer to set up a Python development environ
 
 ## Manifest Overview
 
-The `porringer.json` manifest declares the desired **state** using backend identifiers. Porringer resolves each backend to the best available installer at runtime.
+The `porringer.json` manifest declares the desired environment using kind sections (`packages`, `tools`, `projects`, `runtimes`), each keyed by ecosystem. Porringer resolves each ecosystem to the best available installer at runtime.
 
-- **`python` backend** (resolved to `uv` or `pip`): Development tools installed in the current environment
+- **`packages.python`** (resolved to `uv` or `pip`): Development tools installed in the current environment
   - `ruff` - Fast Python linter and formatter
   - `pyrefly` - Python type checker
   - `pytest` - Testing framework
   - `pytest-cov` - Coverage plugin for pytest
-- **`python-tool` backend** (resolved to `pipx`): CLI tools installed in isolated environments
+- **`tools.python`** (resolved to `pipx`): CLI tools installed in isolated environments
   - `pdm` - Python project manager
 
 ## Usage
@@ -48,11 +48,14 @@ You can also embed this manifest in a `pyproject.toml` file:
 [tool.porringer]
 version = "1"
 
-[tool.porringer.state]
+[tool.porringer.packages]
 python = ["ruff", "pyrefly", "pytest", "pytest-cov"]
-python-tool = ["pdm"]
+
+[tool.porringer.tools]
+python = ["pdm"]
 
 [tool.porringer.preferences]
 python = "uv"  # optional: prefer uv over pip
 ```
+
 ```

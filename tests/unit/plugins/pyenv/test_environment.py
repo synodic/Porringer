@@ -25,8 +25,13 @@ def environment() -> PyenvEnvironment:
 class TestPyenvBasics:
     """Basic property tests."""
 
-    def test_package_backend(self) -> None:
-        assert PyenvEnvironment.package_backend() == 'python-runtime'
+    def test_ecosystem(self) -> None:
+        assert PyenvEnvironment.ecosystem() == 'python'
+
+    def test_plugin_kind(self) -> None:
+        from porringer.core.schema import PluginKind
+
+        assert PyenvEnvironment.plugin_kind() == PluginKind.RUNTIME
 
     def test_tool_name(self) -> None:
         assert PyenvEnvironment.tool_name() == 'pyenv'

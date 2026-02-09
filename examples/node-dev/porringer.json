@@ -4,7 +4,7 @@
     "description": "Common global tools and project setup for Node.js / Deno development",
     "author": "Synodic Software",
     "url": "https://github.com/synodic/porringer",
-    "state": {
+    "packages": {
         "node": [
             {
                 "name": "typescript",
@@ -16,13 +16,15 @@
             },
             "tsx"
         ],
-        "node-project": [],
         "deno": [
             {
                 "name": "jsr:@std/cli",
                 "description": "Deno standard-library CLI helpers"
             }
-        ],
-        "deno-project": []
+        ]
+    },
+    "projects": {
+        "node": [],
+        "deno": []
     }
 }

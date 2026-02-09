@@ -14,9 +14,15 @@ class PdmProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """PDM manages the ``python-project`` backend."""
-        return 'python-project'
+    def ecosystem() -> str:
+        """PDM belongs to the ``python`` ecosystem."""
+        return 'python'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """PDM is a secondary Python project manager (priority 20)."""
+        return 20
 
     @classmethod
     @override

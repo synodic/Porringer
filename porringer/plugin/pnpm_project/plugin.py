@@ -24,9 +24,15 @@ class PnpmProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Pnpm project manages the ``node-project`` backend."""
-        return 'node-project'
+    def ecosystem() -> str:
+        """Pnpm project belongs to the ``node`` ecosystem."""
+        return 'node'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Pnpm project is the preferred Node project manager (priority 10)."""
+        return 10
 
     @classmethod
     @override

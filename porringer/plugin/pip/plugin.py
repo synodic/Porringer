@@ -66,9 +66,21 @@ class PipEnvironment(Environment, RuntimeConsumer):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Pip manages the ``python`` package backend."""
+    def ecosystem() -> str:
+        """Pip belongs to the ``python`` ecosystem."""
         return 'python'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Pip is the fallback Python installer (priority 20)."""
+        return 20
+
+    @staticmethod
+    @override
+    def package_name_validator() -> str:
+        """Python packages use PEP 440 validation."""
+        return 'pep440'
 
     @classmethod
     @override

@@ -24,8 +24,13 @@ def environment() -> PimEnvironment:
 class TestPimBasics:
     """Basic property tests."""
 
-    def test_package_backend(self) -> None:
-        assert PimEnvironment.package_backend() == 'python-runtime'
+    def test_ecosystem(self) -> None:
+        assert PimEnvironment.ecosystem() == 'python'
+
+    def test_plugin_kind(self) -> None:
+        from porringer.core.schema import PluginKind
+
+        assert PimEnvironment.plugin_kind() == PluginKind.RUNTIME
 
     def test_tool_name(self) -> None:
         assert PimEnvironment.tool_name() == 'py'

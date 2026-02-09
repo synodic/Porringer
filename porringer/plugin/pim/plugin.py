@@ -3,6 +3,7 @@
 import json
 import logging
 import subprocess
+import sys
 from pathlib import Path
 from typing import override
 
@@ -12,7 +13,7 @@ from porringer.core.plugin_schema.environment import (
     UninstallParameters,
 )
 from porringer.core.plugin_schema.runtime import RuntimeProvider
-from porringer.core.schema import Package, PackageRef, PluginDependency
+from porringer.core.schema import Package, PackageRef, PluginDependency, PluginKind
 
 
 class PimEnvironment(Environment, RuntimeProvider):
@@ -36,9 +37,29 @@ class PimEnvironment(Environment, RuntimeProvider):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """PIM manages the ``python-runtime`` package backend."""
-        return 'python-runtime'
+    def ecosystem() -> str:
+        """PIM belongs to the ``python`` ecosystem."""
+        return 'python'
+
+    @staticmethod
+    @override
+    def plugin_kind() -> PluginKind:
+        """PIM manages language runtimes."""
+        return PluginKind.RUNTIME
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Preferred on Windows (10), unavailable elsewhere (999)."""
+        if sys.platform == 'win32':
+            return 10
+        return 999
+
+    @staticmethod
+    @override
+    def package_name_validator() -> str:
+        """Python runtimes use PEP 440 validation."""
+        return 'pep440'
 
     @classmethod
     @override

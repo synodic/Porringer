@@ -3,6 +3,7 @@
 import json
 import logging
 import subprocess
+import sys
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -35,9 +36,19 @@ class BrewEnvironment(Environment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Homebrew manages the ``system`` package backend."""
+    def ecosystem() -> str:
+        """Homebrew belongs to the ``system`` ecosystem."""
         return 'system'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Preferred on macOS (10), fallback on Linux (20), unavailable on Windows (999)."""
+        if sys.platform == 'darwin':
+            return 10
+        if sys.platform == 'win32':
+            return 999
+        return 20
 
     @classmethod
     @override

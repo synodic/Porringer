@@ -27,7 +27,7 @@ class TestProjectDirectorySkip:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'state': {'python': ['requests']},
+                'packages': {'python': ['requests']},
                 'post_sync': ['echo hello'],
             }
             manifest_path.write_text(json.dumps(manifest_data))
@@ -54,7 +54,7 @@ class TestProjectDirectorySkip:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'state': {'python': ['requests']},
+                'packages': {'python': ['requests']},
                 'post_sync': ['echo hello'],
             }
             manifest_path.write_text(json.dumps(manifest_data))
@@ -83,7 +83,7 @@ class TestProjectDirectorySkip:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
                 'version': '1',
-                'state': {'python': ['requests']},
+                'packages': {'python': ['requests']},
                 'post_sync': ['echo hello'],
             }
             manifest_path.write_text(json.dumps(manifest_data))
@@ -181,10 +181,13 @@ class TestBatchSetupResultsSkips:
 
     def test_skips_carries_action_metadata(self) -> None:
         """Each skipped result carries full action metadata."""
+        from porringer.core.schema import PluginKind
+
         action = SetupAction(
             action_type=SetupActionType.PROJECT_SYNC,
             description='Sync project via uv',
-            backend='python-project',
+            kind=PluginKind.PROJECT,
+            ecosystem='python',
             installer='uv',
         )
         result = SetupActionResult(
@@ -200,7 +203,8 @@ class TestBatchSetupResultsSkips:
 
         skip = batch.skips[0]
         assert skip.action.action_type == SetupActionType.PROJECT_SYNC
-        assert skip.action.backend == 'python-project'
+        assert skip.action.kind == PluginKind.PROJECT
+        assert skip.action.ecosystem == 'python'
         assert skip.action.installer == 'uv'
         assert skip.skip_reason == SkipReason.NO_PROJECT_DIRECTORY
 

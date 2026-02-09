@@ -24,7 +24,7 @@ from porringer.backend.cache import DirectoryCacheManager
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectSyncParameters
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.schema import (
     BatchSetupResults,
     DownloadParameters,
@@ -136,9 +136,12 @@ class SyncCommands:
 
         SyncCommands._validate_schema_version(manifest, _error)
 
-        available_plugins = SyncCommands._safe_available_plugins()
-        SyncCommands._validate_backends(manifest, available_plugins, _error)
-        SyncCommands._validate_package_names(manifest, _warning)
+        environments = SyncCommands._get_available_environments()
+        project_environments = SyncCommands._get_available_project_environments()
+        resolver = BackendResolver(environments, manifest.preferences, project_environments)
+
+        SyncCommands._validate_backends(manifest, resolver, _error)
+        SyncCommands._validate_package_names(manifest, resolver, _warning)
         SyncCommands._validate_duplicate_packages(manifest, _warning)
 
         return ManifestValidationResult(diagnostics=diagnostics)
@@ -173,14 +176,6 @@ class SyncCommands:
         return ManifestValidationCode.SCHEMA_INVALID
 
     @staticmethod
-    def _safe_available_plugins() -> set[str]:
-        """Load available plugins, returning an empty set on failure."""
-        try:
-            return set(SyncCommands._get_available_environments().keys())
-        except Exception:
-            return set()
-
-    @staticmethod
     def _validate_schema_version(
         manifest: SetupManifest,
         error_callback: Callable[[str, str, ManifestValidationCode], None],
@@ -197,60 +192,49 @@ class SyncCommands:
     @staticmethod
     def _validate_backends(
         manifest: SetupManifest,
-        available_plugins: set[str],
+        resolver: BackendResolver,
         error_callback: Callable[[str, str, ManifestValidationCode], None],
     ) -> None:
-        """Validate that each backend in ``state`` can be resolved to a plugin."""
-        environments = SyncCommands._get_available_environments()
-        project_environments = SyncCommands._get_available_project_environments()
-        resolver = BackendResolver(environments, manifest.preferences, project_environments)
-
-        for backend_name in manifest.state:
-            installer = resolver.resolve(backend_name)
+        """Validate that each (kind, ecosystem) in the manifest resolves to a plugin."""
+        for kind, ecosystem, _packages in manifest.iter_sections():
+            installer = resolver.resolve(kind, ecosystem)
             if installer is None:
                 error_callback(
-                    f'state.{backend_name}',
-                    f"No available installer for backend '{backend_name}'",
+                    f'{kind.value}.{ecosystem}',
+                    f"No available installer for ({kind.value}, '{ecosystem}')",
                     ManifestValidationCode.UNKNOWN_PLUGIN,
                 )
-
-    # Backends whose package names conform to PEP 508 / PEP 440.
-    _PEP440_BACKENDS: frozenset[str] = frozenset(
-        {
-            'python',
-            'python-tool',
-            'python-runtime',
-            'python-project',
-        }
-    )
 
     @staticmethod
     def _validate_package_names(
         manifest: SetupManifest,
+        resolver: BackendResolver,
         warning_callback: Callable[[str, str, ManifestValidationCode], None],
     ) -> None:
         """Validate package specifiers in a manifest.
 
-        PEP 440 validation is only applied to Python-ecosystem backends.
-        Non-Python backends (node, deno, system, …) accept any non-empty
-        package name since their naming conventions differ.
+        PEP 440 validation is applied when the resolved plugin declares
+        ``package_name_validator() == 'pep440'``.  Other ecosystems
+        accept any non-empty package name.
         """
-        for backend_name, packages in manifest.state.items():
+        for kind, ecosystem, packages in manifest.iter_sections():
+            validator = resolver.validator_for(kind, ecosystem)
+
             for j, spec in enumerate(packages):
                 name_str = str(spec.name)
                 if not name_str.strip():
                     warning_callback(
-                        f'state.{backend_name}[{j}].name',
+                        f'{kind.value}.{ecosystem}[{j}].name',
                         'Empty package name',
                         ManifestValidationCode.INVALID_PACKAGE_NAME,
                     )
                     continue
-                if backend_name in SyncCommands._PEP440_BACKENDS:
+                if validator == 'pep440':
                     try:
                         Requirement(name_str)
                     except InvalidRequirement as exc:
                         warning_callback(
-                            f'state.{backend_name}[{j}].name',
+                            f'{kind.value}.{ecosystem}[{j}].name',
                             f"Invalid package specifier '{spec.name}': {exc}",
                             ManifestValidationCode.INVALID_PACKAGE_NAME,
                         )
@@ -260,18 +244,19 @@ class SyncCommands:
         manifest: SetupManifest,
         warning_callback: Callable[[str, str, ManifestValidationCode], None],
     ) -> None:
-        """Warn when packages appear under multiple backends."""
+        """Warn when packages appear under multiple sections."""
         seen: dict[str, list[str]] = {}
-        for backend_name, packages in manifest.state.items():
+        for kind, ecosystem, packages in manifest.iter_sections():
+            label = f'{kind.value}.{ecosystem}'
             for spec in packages:
                 canonical = str(canonicalize_name(spec.name.name))
-                seen.setdefault(canonical, []).append(backend_name)
+                seen.setdefault(canonical, []).append(label)
 
-        for pkg_name, backends in seen.items():
-            if len(backends) > 1:
+        for pkg_name, locations in seen.items():
+            if len(locations) > 1:
                 warning_callback(
-                    'state',
-                    f"Package '{pkg_name}' is listed under multiple backends: {', '.join(backends)}",
+                    kind.value,
+                    f"Package '{pkg_name}' is listed under multiple sections: {', '.join(locations)}",
                     ManifestValidationCode.DUPLICATE_PACKAGE,
                 )
 
@@ -484,15 +469,12 @@ class SyncCommands:
     ) -> list[SetupAction]:
         """Builds the list of actions from a manifest.
 
-        All package entries become ``PACKAGE`` actions.  Backends that
-        resolve to a :class:`ProjectEnvironment` plugin produce a single
-        ``PROJECT_SYNC`` action instead.  The ``strategy`` parameter
+        Iterates each kind section (``packages``, ``tools``, ``projects``,
+        ``runtimes``) in the manifest.  Package/tool/runtime entries become
+        ``PACKAGE`` actions.  Project entries produce a single
+        ``PROJECT_SYNC`` action per ecosystem.  The ``strategy`` parameter
         controls only the human-readable description verb; the execution
-        layer uses the strategy on ``SetupParameters`` to decide
-        install-vs-upgrade behaviour at runtime.
-
-        Each backend key in ``manifest.state`` is resolved to an installer
-        plugin via :class:`BackendResolver`.
+        layer decides install-vs-upgrade behaviour at runtime.
 
         Args:
             manifest: The parsed setup manifest.
@@ -516,20 +498,25 @@ class SyncCommands:
         }
         verb = verb_map[strategy]
 
-        # Add package actions — resolve each backend to an installer
-        for backend_name, packages in manifest.state.items():
-            installer = resolver.resolve(backend_name)
+        # Iterate each kind section
+        for kind, ecosystem, packages in manifest.iter_sections():
+            installer = resolver.resolve(kind, ecosystem)
             if installer is None:
-                logger.warning("No installer available for backend '%s'; skipping its packages", backend_name)
+                logger.warning(
+                    "No installer available for (%s, '%s'); skipping its entries",
+                    kind.value,
+                    ecosystem,
+                )
                 continue
 
-            # Project-environment backends produce a single PROJECT_SYNC action
-            if installer in proj_envs:
+            # Project kind produces a single PROJECT_SYNC action
+            if kind == PluginKind.PROJECT:
                 actions.append(
                     SetupAction(
                         action_type=SetupActionType.PROJECT_SYNC,
                         description=f'Sync project via {installer}',
-                        backend=backend_name,
+                        kind=kind,
+                        ecosystem=ecosystem,
                         installer=installer,
                     )
                 )
@@ -542,7 +529,8 @@ class SyncCommands:
                     SetupAction(
                         action_type=SetupActionType.PACKAGE,
                         description=f"{verb} '{package.name}' via {installer}",
-                        backend=backend_name,
+                        kind=kind,
+                        ecosystem=ecosystem,
                         installer=installer,
                         package=package.name,
                         package_description=package.description,
@@ -656,10 +644,14 @@ class SyncCommands:
         if action.installer is None or action.package is None or action.installer not in environments:
             return SetupActionResult(action=action, success=True)
 
+        # Determine name validator from the plugin
+        env = environments[action.installer]
+        validator = type(env).package_name_validator()
+
         try:
             installed_packages = environments[action.installer].packages()
             is_installed, installed_detail = SyncCommands._is_package_installed(
-                action.package, installed_packages, action.backend
+                action.package, installed_packages, validator
             )
         except PluginError as e:
             logger.debug(f'Dry-run: plugin error checking packages for {action.installer}: {e}')
@@ -691,23 +683,23 @@ class SyncCommands:
     def _is_package_installed(
         package: PackageRef,
         installed_packages: list[Package],
-        backend: str | None = None,
+        name_validator: str | None = None,
     ) -> tuple[bool, str | None]:
         """Checks if a package is already installed with a compatible version.
 
-        For Python-ecosystem backends, uses PEP 440 canonicalization and
-        specifier matching.  For other backends, uses case-insensitive name
+        When *name_validator* is ``'pep440'``, uses PEP 440 canonicalization
+        and specifier matching.  Otherwise, uses case-insensitive name
         comparison and simple string version equality.
 
         Args:
             package: The package reference
             installed_packages: List of installed packages from the environment
-            backend: The backend identifier (used to select matching strategy)
+            name_validator: The validator tag declared by the resolved plugin
 
         Returns:
             Tuple of (is_installed, skip_reason or None)
         """
-        is_pep440 = backend in SyncCommands._PEP440_BACKENDS if backend else True
+        is_pep440 = name_validator == 'pep440'
 
         for installed in installed_packages:
             if is_pep440:
@@ -813,11 +805,12 @@ class SyncCommands:
         # Check if package is already installed
         is_installed = False
         installed_detail: str | None = None
+        validator = type(environment).package_name_validator()
         try:
             loop = asyncio.get_running_loop()
             installed_packages = await loop.run_in_executor(None, environment.packages)
             is_installed, installed_detail = SyncCommands._is_package_installed(
-                action.package, installed_packages, action.backend
+                action.package, installed_packages, validator
             )
         except PluginError as e:
             logger.debug(f'Plugin error checking packages for {action.installer}: {e}')
@@ -1114,9 +1107,9 @@ class SyncCommands:
     ) -> SetupResults:
         """Execute setup actions for a single path with parallel support.
 
-        Execution is **phased**: actions targeting the ``python-runtime``
-        backend run first so that the resolved interpreter path can be
-        forwarded to downstream ``python`` / ``python-tool`` installers.
+        Execution is **phased**: actions with ``kind == RUNTIME`` run first
+        so that the resolved interpreter path can be forwarded to downstream
+        package/tool installers.
 
         Package operations are executed in parallel when plugins support it.
         RUN_COMMAND actions are executed sequentially after all packages.
@@ -1157,9 +1150,7 @@ class SyncCommands:
         command_actions = [a for a in actions if a.action_type == SetupActionType.RUN_COMMAND]
 
         # --- Phase 1: runtime-provider actions (pim / pyenv) ---------------
-        runtime_actions = [
-            a for a in package_actions if a.installer and isinstance(environments.get(a.installer), RuntimeProvider)
-        ]
+        runtime_actions = [a for a in package_actions if a.kind == PluginKind.RUNTIME]
 
         if runtime_actions:
             runtime_results, should_continue = await self._execute_package_actions(

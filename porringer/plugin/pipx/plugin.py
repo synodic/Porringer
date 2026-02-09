@@ -13,7 +13,7 @@ from porringer.core.plugin_schema.environment import (
     UninstallParameters,
 )
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.utility.utility import async_run_command
 
 
@@ -50,9 +50,27 @@ class PipxEnvironment(Environment, RuntimeConsumer):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Pipx manages the ``python-tool`` package backend."""
-        return 'python-tool'
+    def ecosystem() -> str:
+        """Pipx belongs to the ``python`` ecosystem."""
+        return 'python'
+
+    @staticmethod
+    @override
+    def plugin_kind() -> PluginKind:
+        """Pipx installs CLI tools in isolated environments."""
+        return PluginKind.TOOL
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Pipx is the preferred Python tool installer (priority 10)."""
+        return 10
+
+    @staticmethod
+    @override
+    def package_name_validator() -> str:
+        """Python packages use PEP 440 validation."""
+        return 'pep440'
 
     @classmethod
     @override

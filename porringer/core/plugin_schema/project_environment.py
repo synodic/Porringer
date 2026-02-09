@@ -18,7 +18,7 @@ from pathlib import Path
 from pydantic import Field
 
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Plugin, PluginParameters, PorringerModel
+from porringer.core.schema import Plugin, PluginKind, PluginParameters, PorringerModel
 
 logger = logging.getLogger(__name__)
 
@@ -88,12 +88,28 @@ class ProjectEnvironment(Plugin, RuntimeConsumer):
 
     @staticmethod
     @abstractmethod
-    def package_backend() -> str:
-        """Return the backend identifier for this project environment.
+    def ecosystem() -> str:
+        """Return the ecosystem this project environment belongs to.
 
-        Examples: ``"python-project"``, ``"node-project"``, ``"deno-project"``.
+        Examples: ``"python"``, ``"node"``, ``"deno"``.
         """
         ...
+
+    @staticmethod
+    def plugin_kind() -> PluginKind:
+        """Project environments always have kind ``PROJECT``."""
+        return PluginKind.PROJECT
+
+    @staticmethod
+    def default_priority() -> int:
+        """Return the default priority for resolver ordering.
+
+        Lower values are preferred.
+
+        Returns:
+            An integer priority (lower = preferred).
+        """
+        return 100
 
     @classmethod
     @abstractmethod

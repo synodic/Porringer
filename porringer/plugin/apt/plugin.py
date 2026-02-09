@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+import sys
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -39,9 +40,17 @@ class AptEnvironment(Environment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """APT manages the ``system`` package backend."""
+    def ecosystem() -> str:
+        """APT belongs to the ``system`` ecosystem."""
         return 'system'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Preferred on Linux (10), unavailable elsewhere (999)."""
+        if sys.platform in ('win32', 'darwin'):
+            return 999
+        return 10
 
     @classmethod
     @override

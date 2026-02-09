@@ -22,9 +22,15 @@ class PnpmEnvironment(Environment):
 
     @staticmethod
     @override
-    def package_backend() -> str:
-        """Pnpm manages the ``node`` package backend."""
+    def ecosystem() -> str:
+        """Pnpm belongs to the ``node`` ecosystem."""
         return 'node'
+
+    @staticmethod
+    @override
+    def default_priority() -> int:
+        """Pnpm is the preferred Node installer (priority 10)."""
+        return 10
 
     @classmethod
     @override
