@@ -91,6 +91,48 @@ porringer sync --dry-run
 porringer sync --dry-run --path ./my-project
 ```
 
+Dry-run mode previews *all* actions, including project-sync commands.
+Project-sync backends that support `--dry-run` (e.g. `pdm`, `uv`) receive the
+flag so they can report what they *would* do without modifying the environment.
+
+## Execution Phases
+
+The sync engine processes actions in five ordered phases:
+
+| Phase | Kind        | Description                                               |
+| ----- | ----------- | --------------------------------------------------------- |
+| 1     | `runtimes`  | Install language runtimes (e.g. Python via `pim`/`pyenv`) |
+| 2a    | `packages`  | Install packages (e.g. `pipx` via `pip`)                  |
+| 2b    | `tools`     | Install CLI tools (e.g. `pdm` via `pipx`)                 |
+| 3     | `projects`  | Synchronise project dependencies from lock files          |
+| 4     | `post_sync` | Run post-sync commands (e.g. `pdm install`)               |
+
+Between Phases 2a and 2b the engine **re-discovers available plugins** so that
+tools installed during Phase 2a (e.g. `pipx`) can be used as installers in
+Phase 2b.  This enables **deferred tool resolution** — a tool action whose
+installer is not yet available at preview time is created with
+`installer=None` and resolved just before execution.
+
+### Bootstrap Chain Example
+
+A single manifest can bootstrap an entire toolchain from scratch:
+
+```json
+{
+    "version": "1",
+    "runtimes": { "python": ["3.14"] },
+    "packages": { "python": [{ "name": "pipx" }] },
+    "tools": { "python": [{ "name": "pdm" }] },
+    "post_sync": ["pdm install"]
+}
+```
+
+Execution order: `pim`/`pyenv` installs Python 3.14 → `pip` installs `pipx` →
+re-discovery finds `pipx` → `pipx` installs `pdm` → `pdm install` syncs
+project deps.
+
+See `examples/python-bootstrap/` for a ready-to-use example.
+
 ## Upgrade strategy
 
 ```shell
@@ -118,8 +160,8 @@ porringer sync --path manifest.json --project-dir ./my-project
 ## Standalone Manifests (No Project)
 
 When consuming a manifest that has no associated project (e.g. a manifest
-downloaded from a URL), use the API with `project_directory=False` to install only
-package-level requirements and skip project backends:
+downloaded from a URL), use the API with `project_directory=False` to install
+package-level requirements and skip project-sync backends:
 
 ```python
 params = SetupParameters(paths=manifest_path, project_directory=False)
@@ -131,8 +173,10 @@ for skip in results.skips:
     print(f"Skipped: {skip.action.description} — {skip.skip_reason.value}: {skip.message}")
 ```
 
-Project-sync and post-sync actions are reported as *skipped* (not failed),
-so `results.success` remains `True`.  Use `results.skips` or
+**Note:** `project_directory=False` skips only **project-sync** actions (Phase 3).
+Post-sync commands (Phase 4) still execute — they are independent of whether a
+project directory exists.  Project-sync actions are reported as *skipped* (not
+failed), so `results.success` remains `True`.  Use `results.skips` or
 `results.total_skipped` to detect and act on skipped actions.
 
 ## API Usage

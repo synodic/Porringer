@@ -34,6 +34,7 @@ from porringer.schema import (
     ManifestMetadata,
     ManifestValidationCode,
     ManifestValidationResult,
+    PluginInformation,
     ProgressCallback,
     ProgressEvent,
     ProgressEventKind,
@@ -54,27 +55,23 @@ from porringer.utility.utility import canonicalize_type
 logger = logging.getLogger(__name__)
 
 
+# Maps SyncStrategy to the human-readable verb used in action descriptions.
+_STRATEGY_VERB: dict[SyncStrategy, str] = {
+    SyncStrategy.MINIMAL: 'Install',
+    SyncStrategy.LATEST: 'Upgrade',
+    SyncStrategy.EXACT: 'Ensure',
+}
+
+
 @dataclass(frozen=True)
 class _ExecutionPhaseContext:
     """Shared context for execution phase operations."""
 
     environments: dict[str, Environment]
     project_environments: dict[str, ProjectEnvironment] | None
-    available_plugins: set[str]
     parameters: SetupParameters
     skip_project: bool
     working_dir: Path
-    event_queue: asyncio.Queue[ProgressEvent | None] | None
-
-
-@dataclass(frozen=True)
-class _CommandExecutionContext:
-    """Shared context for command action execution."""
-
-    available_plugins: set[str]
-    environments: dict[str, Environment]
-    working_dir: Path
-    parameters: SetupParameters
     event_queue: asyncio.Queue[ProgressEvent | None] | None
 
 
@@ -396,16 +393,10 @@ class SyncCommands:
         Returns:
             Dict mapping plugin name to instantiated environment.
         """
-        builder = Builder()
-        plugin_infos = builder.find_environments()
-        environments = builder.build_environments(plugin_infos)
-
-        result: dict[str, Environment] = {}
-        for env in environments:
-            canonicalized = canonicalize_type(type(env))
-            result[canonicalized.name] = env
-
-        return result
+        return SyncCommands._build_plugin_dict(
+            Builder().find_environments,
+            Builder.build_environments,
+        )
 
     @staticmethod
     def _get_available_project_environments() -> dict[str, ProjectEnvironment]:
@@ -414,16 +405,20 @@ class SyncCommands:
         Returns:
             Dict mapping plugin name to instantiated project environment.
         """
-        builder = Builder()
-        plugin_infos = builder.find_project_environments()
-        project_environments = builder.build_project_environments(plugin_infos)
+        return SyncCommands._build_plugin_dict(
+            Builder().find_project_environments,
+            Builder.build_project_environments,
+        )
 
-        result: dict[str, ProjectEnvironment] = {}
-        for proj_env in project_environments:
-            canonicalized = canonicalize_type(type(proj_env))
-            result[canonicalized.name] = proj_env
-
-        return result
+    @staticmethod
+    def _build_plugin_dict[T](
+        find_fn: Callable[[], list[PluginInformation[T]]],
+        build_fn: Callable[[list[PluginInformation[T]]], list[T]],
+    ) -> dict[str, T]:
+        """Discover and instantiate plugins, returning a name-keyed dict."""
+        infos = find_fn()
+        instances = build_fn(infos)
+        return {canonicalize_type(type(inst)).name: inst for inst in instances}
 
     @staticmethod
     def _get_cli_command(
@@ -490,18 +485,16 @@ class SyncCommands:
 
         resolver = BackendResolver(environments, manifest.preferences, proj_envs)
 
-        # Determine description verb based on strategy
-        verb_map = {
-            SyncStrategy.MINIMAL: 'Install',
-            SyncStrategy.LATEST: 'Upgrade',
-            SyncStrategy.EXACT: 'Ensure',
-        }
-        verb = verb_map[strategy]
+        verb = _STRATEGY_VERB[strategy]
 
         # Iterate each kind section
         for kind, ecosystem, packages in manifest.iter_sections():
             installer = resolver.resolve(kind, ecosystem)
-            if installer is None:
+
+            # TOOL-kind actions are deferred when no backend is available
+            # at preview time — the prerequisite tool may be installed in
+            # an earlier phase (e.g. pipx installed via pip).
+            if installer is None and kind != PluginKind.TOOL:
                 logger.warning(
                     "No installer available for (%s, '%s'); skipping its entries",
                     kind.value,
@@ -525,10 +518,13 @@ class SyncCommands:
             for package in packages:
                 if not package.is_applicable():
                     continue
+                desc = (
+                    f"{verb} '{package.name}' via {installer}" if installer else f"{verb} '{package.name}' (deferred)"
+                )
                 actions.append(
                     SetupAction(
                         action_type=SetupActionType.PACKAGE,
-                        description=f"{verb} '{package.name}' via {installer}",
+                        description=desc,
                         kind=kind,
                         ecosystem=ecosystem,
                         installer=installer,
@@ -608,20 +604,25 @@ class SyncCommands:
     @staticmethod
     def _dry_run_action(
         action: SetupAction,
-        available_plugins: set[str],
         environments: dict[str, Environment],
         strategy: SyncStrategy = SyncStrategy.MINIMAL,
+        *,
+        prior_results: list[SetupActionResult] | None = None,
     ) -> SetupActionResult:
         """Simulates executing an action in dry-run mode.
 
         For PACKAGE actions, real system state is checked so that the result
         accurately reflects whether the action would be skipped.
 
+        For RUN_COMMAND actions, the command is skipped when all prior
+        results were themselves skipped (nothing changed, so the
+        post-sync command has nothing to do).
+
         Args:
             action: The action to simulate.
-            available_plugins: Set of available plugin names.
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (affects skip logic for packages).
+            prior_results: Results from earlier phases (used by RUN_COMMAND).
 
         Returns:
             The simulated result.
@@ -631,6 +632,14 @@ class SyncCommands:
         if action.action_type == SetupActionType.PROJECT_SYNC:
             return SetupActionResult(action=action, success=True)
         if action.action_type == SetupActionType.RUN_COMMAND:
+            if prior_results and all(r.skipped for r in prior_results):
+                return SetupActionResult(
+                    action=action,
+                    success=True,
+                    skipped=True,
+                    skip_reason=SkipReason.NOTHING_CHANGED,
+                    message='All prerequisites already satisfied',
+                )
             return SetupActionResult(action=action, success=True)
         return SetupActionResult(action=action, success=False, message=f'Unknown action type: {action.action_type}')
 
@@ -651,7 +660,7 @@ class SyncCommands:
         try:
             installed_packages = environments[action.installer].packages()
             is_installed, installed_detail = SyncCommands._is_package_installed(
-                action.package, installed_packages, validator
+                action.package, installed_packages, validator, action.kind
             )
         except PluginError as e:
             logger.debug(f'Dry-run: plugin error checking packages for {action.installer}: {e}')
@@ -684,6 +693,7 @@ class SyncCommands:
         package: PackageRef,
         installed_packages: list[Package],
         name_validator: str | None = None,
+        kind: PluginKind | None = None,
     ) -> tuple[bool, str | None]:
         """Checks if a package is already installed with a compatible version.
 
@@ -691,18 +701,28 @@ class SyncCommands:
         and specifier matching.  Otherwise, uses case-insensitive name
         comparison and simple string version equality.
 
+        For ``RUNTIME`` actions, name comparison uses prefix matching so
+        that a request for ``3.14`` matches an installed ``3.14-64``
+        (architecture-qualified tag).
+
         Args:
             package: The package reference
             installed_packages: List of installed packages from the environment
             name_validator: The validator tag declared by the resolved plugin
+            kind: The plugin kind (enables prefix matching for RUNTIME)
 
         Returns:
             Tuple of (is_installed, skip_reason or None)
         """
         is_pep440 = name_validator == 'pep440'
+        is_runtime = kind == PluginKind.RUNTIME
 
         for installed in installed_packages:
-            if is_pep440:
+            if is_runtime:
+                # Runtime tags use prefix matching: "3.14" matches "3.14-64"
+                if not installed.name.lower().startswith(package.name.lower()):
+                    continue
+            elif is_pep440:
                 if canonicalize_name(installed.name) != canonicalize_name(package.name):
                     continue
             elif installed.name.lower() != package.name.lower():
@@ -810,7 +830,7 @@ class SyncCommands:
             loop = asyncio.get_running_loop()
             installed_packages = await loop.run_in_executor(None, environment.packages)
             is_installed, installed_detail = SyncCommands._is_package_installed(
-                action.package, installed_packages, validator
+                action.package, installed_packages, validator, action.kind
             )
         except PluginError as e:
             logger.debug(f'Plugin error checking packages for {action.installer}: {e}')
@@ -908,7 +928,6 @@ class SyncCommands:
         self,
         package_actions: list[SetupAction],
         environments: dict[str, Environment],
-        available_plugins: set[str],
         parameters: SetupParameters,
         event_queue: asyncio.Queue[ProgressEvent | None] | None,
     ) -> tuple[list[SetupActionResult], bool]:
@@ -919,9 +938,7 @@ class SyncCommands:
         """
         if parameters.dry_run:
             return (
-                self._dry_run_package_actions(
-                    package_actions, available_plugins, environments, parameters.strategy, event_queue
-                ),
+                self._dry_run_package_actions(package_actions, environments, parameters.strategy, event_queue),
                 True,
             )
 
@@ -949,7 +966,6 @@ class SyncCommands:
     def _dry_run_package_actions(
         self,
         package_actions: list[SetupAction],
-        available_plugins: set[str],
         environments: dict[str, Environment],
         strategy: SyncStrategy,
         event_queue: asyncio.Queue[ProgressEvent | None] | None,
@@ -957,7 +973,7 @@ class SyncCommands:
         """Execute dry-run for package actions."""
         results: list[SetupActionResult] = []
         for action in package_actions:
-            result = self._dry_run_action(action, available_plugins, environments, strategy)
+            result = self._dry_run_action(action, environments, strategy)
             results.append(result)
             if event_queue is not None:
                 event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
@@ -1072,7 +1088,9 @@ class SyncCommands:
     async def _execute_command_actions(
         self,
         command_actions: list[SetupAction],
-        context: _CommandExecutionContext,
+        context: _ExecutionPhaseContext,
+        *,
+        prior_results: list[SetupActionResult] | None = None,
     ) -> list[SetupActionResult]:
         """Execute RUN_COMMAND actions sequentially."""
         results: list[SetupActionResult] = []
@@ -1080,9 +1098,9 @@ class SyncCommands:
             if context.parameters.dry_run:
                 result = self._dry_run_action(
                     action,
-                    context.available_plugins,
                     context.environments,
                     context.parameters.strategy,
+                    prior_results=prior_results,
                 )
             else:
                 result = self._execute_run_command(action, context.working_dir, context.parameters.timeout)
@@ -1107,14 +1125,19 @@ class SyncCommands:
     ) -> SetupResults:
         """Execute setup actions for a single path with parallel support.
 
-        Execution is **phased**: actions with ``kind == RUNTIME`` run first
-        so that the resolved interpreter path can be forwarded to downstream
-        package/tool installers.
+        Execution is **phased** so that each layer's prerequisite tools
+        are available before they are needed:
 
-        Package operations are executed in parallel when plugins support it.
-        RUN_COMMAND actions are executed sequentially after all packages.
-
-        Uses asyncio.TaskGroup (Python 3.11+) for structured concurrency.
+        1. **Runtime** — install/resolve language runtimes (pim, pyenv).
+        2. **Package** — install packages into the current environment
+           (pip, uv).  This may install tool prerequisites such as pipx.
+        3. **Tool** — install isolated CLI tools (pipx).  Plugins are
+           re-discovered after Phase 2 so that newly-installed backends
+           are available.  Deferred actions whose ``installer`` was
+           ``None`` at preview time are resolved here.
+        4. **Project sync** — run ``pdm install`` / ``uv sync`` in the
+           manifest directory.
+        5. **Post-sync commands** — run arbitrary shell commands.
 
         Args:
             actions: The list of actions to execute (from preview).
@@ -1130,33 +1153,29 @@ class SyncCommands:
         results: list[SetupActionResult] = []
         environments = self._get_available_environments()
         project_environments = self._get_available_project_environments()
-        available_plugins = set(environments.keys()) | set(project_environments.keys())
 
         skip_project = parameters.project_directory is False
-        if isinstance(parameters.project_directory, Path):
-            working_dir = parameters.project_directory
-        else:
-            working_dir = path if path.is_dir() else path.parent
+        working_dir = (
+            parameters.project_directory
+            if isinstance(parameters.project_directory, Path)
+            else (path if path.is_dir() else path.parent)
+        )
 
-        # Populate CLI commands for all actions
+        # Populate CLI commands for all resolved actions
         for action in actions:
             action.cli_command = SyncCommands._get_cli_command(
                 action, environments, parameters.strategy, project_environments
             )
 
-        # Separate actions by type
-        package_actions = [a for a in actions if a.action_type == SetupActionType.PACKAGE]
-        project_sync_actions = [a for a in actions if a.action_type == SetupActionType.PROJECT_SYNC]
-        command_actions = [a for a in actions if a.action_type == SetupActionType.RUN_COMMAND]
+        runtime_actions, package_only_actions, tool_actions, project_sync_actions, command_actions = (
+            self._group_actions_by_phase(actions)
+        )
 
         # --- Phase 1: runtime-provider actions (pim / pyenv) ---------------
-        runtime_actions = [a for a in package_actions if a.kind == PluginKind.RUNTIME]
-
         if runtime_actions:
             runtime_results, should_continue = await self._execute_package_actions(
                 runtime_actions,
                 environments,
-                available_plugins,
                 parameters,
                 event_queue,
             )
@@ -1165,13 +1184,11 @@ class SyncCommands:
                 return SetupResults(actions=actions, results=results)
             self._propagate_runtime(runtime_actions, environments, project_environments)
 
-        # --- Phase 2: remaining package actions --------------------------
-        dependent_actions = [a for a in package_actions if a not in runtime_actions]
-        if dependent_actions:
+        # --- Phase 2a: package-kind actions (pip, uv, etc.) ---------------
+        if package_only_actions:
             package_results, should_continue = await self._execute_package_actions(
-                dependent_actions,
+                package_only_actions,
                 environments,
-                available_plugins,
                 parameters,
                 event_queue,
             )
@@ -1179,83 +1196,108 @@ class SyncCommands:
             if not should_continue:
                 return SetupResults(actions=actions, results=results)
 
-        # --- Phase 2.5 & 3: project sync and command phases ---------------
-        if project_sync_actions:
-            results.extend(
-                await self._execute_project_sync_phase(
-                    project_sync_actions,
-                    _ExecutionPhaseContext(
-                        environments=environments,
-                        project_environments=project_environments,
-                        available_plugins=available_plugins,
-                        parameters=parameters,
-                        skip_project=skip_project,
-                        working_dir=working_dir,
-                        event_queue=event_queue,
-                    ),
-                )
-            )
+        # --- Phase 2b: tool-kind actions (pipx, etc.) ---------------------
+        # Re-discover plugins so that tools installed in Phase 2a
+        # (e.g. pipx via pip) are now available as backends.
+        if tool_actions:
+            environments = self._get_available_environments()
 
-        if command_actions:
-            results.extend(
-                await self._execute_command_phase(
-                    command_actions,
-                    _ExecutionPhaseContext(
-                        environments=environments,
-                        project_environments=project_environments,
-                        available_plugins=available_plugins,
-                        parameters=parameters,
-                        skip_project=skip_project,
-                        working_dir=working_dir,
-                        event_queue=event_queue,
-                    ),
+            # Resolve deferred tool actions whose installer was None
+            self._resolve_deferred_actions(tool_actions, environments, parameters.strategy)
+
+            # Update CLI commands for newly-resolved tool actions
+            for action in tool_actions:
+                action.cli_command = SyncCommands._get_cli_command(
+                    action, environments, parameters.strategy, project_environments
                 )
+
+            tool_results, should_continue = await self._execute_package_actions(
+                tool_actions,
+                environments,
+                parameters,
+                event_queue,
             )
+            results.extend(tool_results)
+            if not should_continue:
+                return SetupResults(actions=actions, results=results)
+
+        # --- Phase 3: project sync ----------------------------------------
+        if project_sync_actions:
+            # Re-discover project environments in case tools installed in
+            # earlier phases provide new project-environment backends.
+            project_environments = self._get_available_project_environments()
+
+            if not skip_project:
+                results.extend(
+                    await self._execute_project_sync_actions(
+                        project_sync_actions,
+                        project_environments,
+                        working_dir,
+                        parameters,
+                        event_queue,
+                    )
+                )
+            else:
+                results.extend(
+                    self._skip_actions(
+                        project_sync_actions,
+                        SkipReason.NO_PROJECT_DIRECTORY,
+                        'No project directory provided',
+                        event_queue,
+                    )
+                )
+
+        # --- Phase 4: post-sync commands ----------------------------------
+        if command_actions:
+            context = _ExecutionPhaseContext(
+                environments=environments,
+                project_environments=project_environments,
+                parameters=parameters,
+                skip_project=skip_project,
+                working_dir=working_dir,
+                event_queue=event_queue,
+            )
+            results.extend(await self._execute_command_actions(command_actions, context, prior_results=results))
 
         return SetupResults(actions=actions, results=results)
 
-    async def _execute_project_sync_phase(
-        self,
-        project_sync_actions: list[SetupAction],
-        context: _ExecutionPhaseContext,
-    ) -> list[SetupActionResult]:
-        """Execute or skip project-sync actions based on context."""
-        if not context.skip_project:
-            return await self._execute_project_sync_actions(
-                project_sync_actions,
-                context.project_environments,
-                context.working_dir,
-                context.parameters,
-                context.event_queue,
-            )
-        return self._skip_actions(
-            project_sync_actions,
-            SkipReason.NO_PROJECT_DIRECTORY,
-            'No project directory provided',
-            context.event_queue,
-        )
+    @staticmethod
+    def _group_actions_by_phase(
+        actions: list[SetupAction],
+    ) -> tuple[
+        list[SetupAction],
+        list[SetupAction],
+        list[SetupAction],
+        list[SetupAction],
+        list[SetupAction],
+    ]:
+        """Group actions into phase buckets in a single pass.
 
-    async def _execute_command_phase(
-        self,
-        command_actions: list[SetupAction],
-        context: _ExecutionPhaseContext,
-    ) -> list[SetupActionResult]:
-        """Execute or skip command actions based on context."""
-        if not context.skip_project:
-            cmd_context = _CommandExecutionContext(
-                available_plugins=context.available_plugins,
-                environments=context.environments,
-                working_dir=context.working_dir,
-                parameters=context.parameters,
-                event_queue=context.event_queue,
-            )
-            return await self._execute_command_actions(command_actions, cmd_context)
-        return self._skip_actions(
-            command_actions,
-            SkipReason.NO_PROJECT_DIRECTORY,
-            'No project directory for post-sync command',
-            context.event_queue,
-        )
+        Returns:
+            Tuple of (runtime, package, tool, project_sync, command) action lists.
+        """
+        runtime: list[SetupAction] = []
+        package: list[SetupAction] = []
+        tool: list[SetupAction] = []
+        project_sync: list[SetupAction] = []
+        command: list[SetupAction] = []
+
+        for action in actions:
+            match action.action_type:
+                case SetupActionType.PACKAGE:
+                    match action.kind:
+                        case PluginKind.RUNTIME:
+                            runtime.append(action)
+                        case PluginKind.TOOL:
+                            tool.append(action)
+                        case _:
+                            package.append(action)
+                case SetupActionType.PROJECT_SYNC:
+                    project_sync.append(action)
+                case SetupActionType.RUN_COMMAND:
+                    command.append(action)
+
+        return runtime, package, tool, project_sync, command
 
     @staticmethod
     def _propagate_runtime(
@@ -1290,25 +1332,55 @@ class SyncCommands:
 
             logger.info('Runtime resolved: %s -> %s', tag, executable)
 
-            # Propagate to environment plugins that consume this runtime kind
-            for name, downstream in environments.items():
+            # Propagate to all plugins (environment + project-environment) that consume this runtime kind
+            all_plugins: dict[str, Environment | ProjectEnvironment] = {**environments, **proj_envs}
+            for name, downstream in all_plugins.items():
                 if isinstance(downstream, RuntimeConsumer):
                     downstream_type = cast(type[RuntimeConsumer], type(downstream))
                     if downstream_type.consumed_runtime_kind() == kind:
                         downstream.runtime_executable = executable
                         logger.debug('Set runtime_executable on %s to %s', name, executable)
 
-            # Propagate to project-environment plugins that consume this runtime kind
-            for name, proj_downstream in proj_envs.items():
-                is_consumer = isinstance(proj_downstream, RuntimeConsumer)
-                if is_consumer:
-                    proj_type = cast(type[RuntimeConsumer], type(proj_downstream))
-                    if proj_type.consumed_runtime_kind() == kind:
-                        proj_downstream.runtime_executable = executable
-                        logger.debug('Set runtime_executable on project plugin %s to %s', name, executable)
-
             # Use only the first successfully resolved runtime
             break
+
+    @staticmethod
+    def _resolve_deferred_actions(
+        actions: list[SetupAction],
+        environments: dict[str, Environment],
+        strategy: SyncStrategy = SyncStrategy.MINIMAL,
+    ) -> None:
+        """Resolve deferred actions whose ``installer`` is ``None``.
+
+        After a preceding phase installs new tools (e.g. pip installs pipx),
+        plugins are re-discovered and a fresh ``BackendResolver`` determines
+        the correct backend for each deferred action.  Actions that still
+        cannot be resolved are left with ``installer = None`` so that the
+        normal execution path reports them as unavailable.
+
+        Args:
+            actions: Mutable list of actions to resolve in-place.
+            environments: Freshly-discovered environment plugins.
+            strategy: Sync strategy (for description verb).
+        """
+        deferred = [a for a in actions if a.installer is None and a.ecosystem is not None]
+        if not deferred:
+            return
+
+        resolver = BackendResolver(environments)
+        verb = _STRATEGY_VERB[strategy]
+
+        for action in deferred:
+            assert action.kind is not None
+            assert action.ecosystem is not None
+            installer = resolver.resolve(action.kind, action.ecosystem)
+            if installer is not None:
+                action.installer = installer
+                if action.package is not None:
+                    action.description = f"{verb} '{action.package}' via {installer}"
+                logger.info('Deferred action resolved: %s -> %s', action.description, installer)
+            else:
+                logger.warning('Deferred action still unresolved: %s', action.description)
 
     @staticmethod
     def _skip_actions(
@@ -1371,10 +1443,7 @@ class SyncCommands:
             if event_queue is not None:
                 event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
 
-            if parameters.dry_run:
-                result = SetupActionResult(action=action, success=True)
-            else:
-                result = await self._execute_project_sync(action, project_environments, working_dir, parameters)
+            result = await self._execute_project_sync(action, project_environments, working_dir, parameters)
 
             results.append(result)
             if event_queue is not None:

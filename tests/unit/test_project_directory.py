@@ -22,8 +22,12 @@ class TestProjectDirectorySkip:
     """Tests for project_directory=False skipping PROJECT_SYNC and RUN_COMMAND actions."""
 
     @staticmethod
-    def test_false_skips_post_sync(test_api: API) -> None:
-        """Post-sync commands are skipped when project_directory is False."""
+    def test_false_skips_project_sync_not_post_sync(test_api: API) -> None:
+        """Post-sync commands still execute when project_directory is False.
+
+        Only PROJECT_SYNC actions are skipped — ``post_sync`` commands are
+        independent of the project directory setting.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
@@ -41,12 +45,19 @@ class TestProjectDirectorySkip:
 
             results = execute_via_stream(test_api, preview, params)
 
-            # The RUN_COMMAND should be skipped
-            command_results = [r for r in results.skips if r.action.action_type == SetupActionType.RUN_COMMAND]
+            # The RUN_COMMAND should NOT be skipped — post_sync is decoupled
+            command_skips = [r for r in results.skips if r.action.action_type == SetupActionType.RUN_COMMAND]
+            assert len(command_skips) == 0
+
+            # The RUN_COMMAND should succeed (dry-run always succeeds)
+            command_results = [
+                r
+                for mr in results.manifest_results
+                for r in mr.results
+                if r.action.action_type == SetupActionType.RUN_COMMAND
+            ]
             assert len(command_results) == 1
-            assert command_results[0].skipped is True
-            assert command_results[0].skip_reason == SkipReason.NO_PROJECT_DIRECTORY
-            assert command_results[0].message == 'No project directory for post-sync command'
+            assert command_results[0].success is True
 
     @staticmethod
     def test_false_keeps_package_actions(test_api: API) -> None:
@@ -153,22 +164,16 @@ class TestBatchSetupResultsSkips:
             skip_reason=SkipReason.NO_PROJECT_DIRECTORY,
             message='No project directory provided',
         )
-        r3 = self._make_result(
-            SetupActionType.RUN_COMMAND,
-            skipped=True,
-            skip_reason=SkipReason.NO_PROJECT_DIRECTORY,
-            message='No project directory for post-sync command',
-        )
+        r3 = self._make_result(SetupActionType.RUN_COMMAND, skipped=False)
 
         batch = BatchSetupResults(
             manifest_results=[SetupResults(actions=[], results=[r1, r2, r3])],
         )
 
-        assert batch.total_skipped == 2
-        assert len(batch.skips) == 2
-        assert all(r.skipped for r in batch.skips)
+        assert batch.total_skipped == 1
+        assert len(batch.skips) == 1
+        assert batch.skips[0].skipped
         assert batch.skips[0].skip_reason == SkipReason.NO_PROJECT_DIRECTORY
-        assert batch.skips[1].skip_reason == SkipReason.NO_PROJECT_DIRECTORY
 
     def test_skips_empty_when_none_skipped(self) -> None:
         """The skips property returns empty list when nothing is skipped."""

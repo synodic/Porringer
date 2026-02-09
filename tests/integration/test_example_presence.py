@@ -18,7 +18,7 @@ _EXAMPLE_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'python-dev'
 
 # Packages present in both the example manifest and pyproject.toml dependency
 # groups (lint + test).  These MUST be installed in the dev venv.
-_EXPECTED_PRESENT = {'pytest', 'pytest-cov', 'ruff'}
+_EXPECTED_PRESENT = {'pytest', 'pytest-cov', 'pytest-mock', 'pytest-asyncio', 'ruff', 'pyrefly'}
 
 
 class TestExamplePresence:

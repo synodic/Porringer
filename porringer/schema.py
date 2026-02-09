@@ -119,6 +119,7 @@ class SkipReason(Enum):
     """
 
     ALREADY_INSTALLED = auto()
+    NOTHING_CHANGED = auto()
     NO_PROJECT_DIRECTORY = auto()
 
 
@@ -424,17 +425,17 @@ class BatchSetupResults:
     @property
     def total_succeeded(self) -> int:
         """Total number of successful action results (excludes skipped)."""
-        return sum(sum(1 for r in m.results if r.success and not r.skipped) for m in self.manifest_results)
+        return sum(1 for m in self.manifest_results for r in m.results if r.success and not r.skipped)
 
     @property
     def total_failed(self) -> int:
         """Total number of failed action results."""
-        return sum(sum(1 for r in m.results if not r.success) for m in self.manifest_results)
+        return sum(1 for m in self.manifest_results for r in m.results if not r.success)
 
     @property
     def total_skipped(self) -> int:
         """Total number of skipped action results."""
-        return sum(sum(1 for r in m.results if r.skipped) for m in self.manifest_results)
+        return sum(1 for m in self.manifest_results for r in m.results if r.skipped)
 
     @property
     def skips(self) -> list[SetupActionResult]:
