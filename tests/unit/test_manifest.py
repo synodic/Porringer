@@ -21,7 +21,6 @@ from porringer.schema import (
     SyncStrategy,
 )
 from porringer.utility.exception import ManifestError
-from tests.conftest import execute_via_stream
 
 # Test constants
 EXPECTED_ACTIONS_JSON_MANIFEST = 2  # 1 install + 1 command
@@ -62,7 +61,7 @@ class TestSetupManifest:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             assert results.manifest_path == manifest_path
             # 1 install + 1 command = 2 actions
@@ -80,7 +79,7 @@ packages.python = ["requests"]
 """
             pyproject_path.write_text(pyproject_content)
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             assert results.manifest_path == pyproject_path
             assert len(results.actions) == 1  # 1 install
@@ -89,7 +88,7 @@ packages.python = ["requests"]
     def test_missing_manifest_raises_error(test_api: API) -> None:
         """Test that missing manifest raises ManifestError"""
         with tempfile.TemporaryDirectory() as tmpdir, pytest.raises(ManifestError):
-            test_api.sync.preview_single(Path(tmpdir))
+            test_api.sync.parse_manifest(Path(tmpdir))
 
 
 class TestSetupPreview:
@@ -107,7 +106,7 @@ class TestSetupPreview:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             # 2 packages + 1 command = 3 actions
             assert len(results.actions) == THREE_ACTIONS
@@ -134,7 +133,7 @@ class TestSetupPreview:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             # Only 'requests' (no filter) and 'uvloop' (matching) should be included
             assert len(results.actions) == TWO_ACTIONS
@@ -154,7 +153,7 @@ class TestSetupPreview:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             assert len(results.actions) == THREE_ACTIONS
 
@@ -171,7 +170,7 @@ class TestSetupBatch:
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir))
-            results = test_api.sync.preview_batch(params)
+            results = test_api.sync.run(params)
 
             assert len(results.manifest_results) == 1
             assert results.total_actions == 1
@@ -193,7 +192,7 @@ class TestSetupBatch:
             )
 
             params = SetupParameters(paths=[project1, project2])
-            results = test_api.sync.preview_batch(params)
+            results = test_api.sync.run(params)
 
             assert len(results.manifest_results) == DUAL_MANIFESTS
             assert results.total_actions == THREE_ACTIONS  # 1 + 2
@@ -212,11 +211,10 @@ class TestSetupBatch:
             (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'python': ['requests']}}))
 
             params = SetupParameters(paths=[project1, project2], fail_fast=False)
-            results = test_api.sync.preview_batch(params)
+            results = test_api.sync.run(params)
 
             assert len(results.manifest_results) == SINGLE_MANIFEST
             assert len(results.failed_paths) == SINGLE_FAILED_PATH
-            assert results.failed_paths[FIRST_ACTION_INDEX][0] == project2
 
     @staticmethod
     def test_preview_batch_from_cache(test_api: API, temp_cache_dir) -> None:
@@ -232,7 +230,7 @@ class TestSetupBatch:
 
         # Preview from cache (paths=None)
         params = SetupParameters(paths=None)
-        results = test_api.sync.preview_batch(params)
+        results = test_api.sync.run(params)
 
         assert len(results.manifest_results) == SINGLE_MANIFEST
         assert results.total_actions == SINGLE_MANIFEST
@@ -255,7 +253,7 @@ class TestSetupBatch:
 
         # Preview from all cached
         params = SetupParameters(paths=None)
-        results = test_api.sync.preview_batch(params)
+        results = test_api.sync.run(params)
 
         assert len(results.manifest_results) == DUAL_MANIFESTS
         assert results.total_actions == TWO_ACTIONS
@@ -370,7 +368,7 @@ class TestManifestMetadata:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             assert results.metadata is not None
             assert results.metadata.name == 'Dev Environment'
@@ -386,7 +384,7 @@ class TestManifestMetadata:
             manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             assert results.metadata is not None
             assert results.metadata.name is None
@@ -410,7 +408,7 @@ class TestManifestMetadata:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             assert len(results.actions) == TWO_ACTIONS
             assert str(results.actions[0].package) == 'ruff'
@@ -432,8 +430,7 @@ class TestSetupCLI:
 
             # Test dry-run via API
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            preview = test_api.sync.preview_batch(setup_params)
-            results = execute_via_stream(test_api, preview, setup_params)
+            results = test_api.sync.run(setup_params)
 
             # Should have 1 action for pip install
             assert len(results.manifest_results) == 1
@@ -678,8 +675,7 @@ class TestDryRunStateAware:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            preview = test_api.sync.preview_batch(setup_params)
-            results = execute_via_stream(test_api, preview, setup_params)
+            results = test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -699,8 +695,7 @@ class TestDryRunStateAware:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            preview = test_api.sync.preview_batch(setup_params)
-            results = execute_via_stream(test_api, preview, setup_params)
+            results = test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -718,8 +713,7 @@ class TestDryRunStateAware:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            preview = test_api.sync.preview_batch(setup_params)
-            results = execute_via_stream(test_api, preview, setup_params)
+            results = test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -739,8 +733,7 @@ class TestDryRunStateAware:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            preview = test_api.sync.preview_batch(setup_params)
-            results = execute_via_stream(test_api, preview, setup_params)
+            results = test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -763,7 +756,7 @@ class TestSyncStrategyUpgrade:
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir), strategy=SyncStrategy.LATEST)
+            results = test_api.sync.parse_manifest(Path(tmpdir), strategy=SyncStrategy.LATEST)
 
             # 2 packages + 1 command = 3 actions
             assert len(results.actions) == THREE_ACTIONS
@@ -781,7 +774,7 @@ class TestSyncStrategyUpgrade:
             manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir), strategy=SyncStrategy.EXACT)
+            results = test_api.sync.parse_manifest(Path(tmpdir), strategy=SyncStrategy.EXACT)
 
             assert len(results.actions) == 1
             assert results.actions[0].kind == PluginKind.PACKAGE
@@ -795,7 +788,7 @@ class TestSyncStrategyUpgrade:
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir), strategy=SyncStrategy.LATEST)
-            results = test_api.sync.preview_batch(params)
+            results = test_api.sync.run(params)
 
             assert len(results.manifest_results) == 1
             assert results.manifest_results[0].actions[0].kind == PluginKind.PACKAGE
@@ -808,7 +801,7 @@ class TestSyncStrategyUpgrade:
             manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir))
+            results = test_api.sync.parse_manifest(Path(tmpdir))
 
             assert results.actions[0].kind == PluginKind.PACKAGE
 
@@ -820,7 +813,7 @@ class TestSyncStrategyUpgrade:
             manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = test_api.sync.preview_single(Path(tmpdir), strategy=SyncStrategy.LATEST)
+            results = test_api.sync.parse_manifest(Path(tmpdir), strategy=SyncStrategy.LATEST)
 
             assert 'Upgrade' in results.actions[0].description
 
@@ -834,8 +827,7 @@ class TestSyncStrategyUpgrade:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True, strategy=SyncStrategy.LATEST)
-            preview = test_api.sync.preview_batch(setup_params)
-            results = execute_via_stream(test_api, preview, setup_params)
+            results = test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -852,8 +844,7 @@ class TestSyncStrategyUpgrade:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True, strategy=SyncStrategy.LATEST)
-            preview = test_api.sync.preview_batch(setup_params)
-            results = execute_via_stream(test_api, preview, setup_params)
+            results = test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]

@@ -21,32 +21,39 @@ from porringer.schema import (
 )
 
 
-def execute_via_stream(api: API, preview: BatchSetupResults, params: SetupParameters) -> BatchSetupResults:
+def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
     """Drain ``execute_stream`` and build ``BatchSetupResults`` from emitted events.
 
-    This is a test helper that replaces the removed ``execute_batch`` /
-    ``execute_batch_async`` convenience methods.
+    This is a test helper that calls ``execute_stream`` directly — no
+    separate preview step is needed.
     """
+    manifests: list[SetupResults] = []
     collected: list[SetupActionResult] = []
+    failed_paths: list[tuple[Path, str]] = []
 
     async def _run() -> None:
-        async for event in api.sync.execute_stream(preview, params):
-            if event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+        async for event in api.sync.execute_stream(params):
+            if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+                manifests.append(event.manifest)
+            elif event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
+                failed_paths.append(event.failed_path)
+            elif event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
                 collected.append(event.result)
 
     asyncio.run(_run())
 
     # Partition collected results by manifest based on action identity
-    manifest_action_sets = [set(id(a) for a in mr.actions) for mr in preview.manifest_results]
+    manifest_action_sets = [set(id(a) for a in m.actions) for m in manifests]
     manifest_results: list[SetupResults] = []
 
-    for mr, action_ids in zip(preview.manifest_results, manifest_action_sets, strict=False):
+    for preview, action_ids in zip(manifests, manifest_action_sets, strict=False):
         mr_results = [r for r in collected if id(r.action) in action_ids]
-        sr = SetupResults(actions=mr.actions, results=mr_results)
-        sr.manifest_path = mr.manifest_path
+        sr = SetupResults(actions=preview.actions, results=mr_results)
+        sr.manifest_path = preview.manifest_path
+        sr.metadata = preview.metadata
         manifest_results.append(sr)
 
-    return BatchSetupResults(manifest_results=manifest_results, failed_paths=list(preview.failed_paths))
+    return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
 
 
 @pytest.fixture

@@ -14,7 +14,6 @@ from porringer.schema import (
     SetupResults,
     SkipReason,
 )
-from tests.conftest import execute_via_stream
 
 
 class TestProjectDirectorySkip:
@@ -37,12 +36,10 @@ class TestProjectDirectorySkip:
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
-            preview = test_api.sync.preview_batch(params)
+            results = test_api.sync.run(params)
 
-            # Preview should still show all actions (2: 1 package + 1 command)
-            assert preview.total_actions == 2
-
-            results = execute_via_stream(test_api, preview, params)
+            # Should show all actions (2: 1 package + 1 command)
+            assert results.total_actions == 2
 
             # The RUN_COMMAND should NOT be skipped — post_sync is decoupled
             command_skips = [r for r in results.skips if r.action.kind is None]
@@ -66,8 +63,7 @@ class TestProjectDirectorySkip:
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
-            preview = test_api.sync.preview_batch(params)
-            results = execute_via_stream(test_api, preview, params)
+            results = test_api.sync.run(params)
 
             # Package action should not be skipped due to project_directory
             package_results = [
@@ -94,8 +90,7 @@ class TestProjectDirectorySkip:
             params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             assert params.project_directory is None
 
-            preview = test_api.sync.preview_batch(params)
-            results = execute_via_stream(test_api, preview, params)
+            results = test_api.sync.run(params)
 
             # The RUN_COMMAND should NOT be in skips
             command_skips = [r for r in results.skips if r.action.kind is None]
