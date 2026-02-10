@@ -6,9 +6,11 @@ from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Distribution
 from porringer.test.mock.environment import MockEnvironment
 from porringer.test.mock.project_environment import MockProjectEnvironment
+from porringer.test.mock.scm import MockScm
 
 
 def _mock_environment_list() -> Sequence[type[Environment]]:
@@ -39,6 +41,20 @@ def _mock_project_environment_list() -> Sequence[type[ProjectEnvironment]]:
     return variants
 
 
+def _mock_scm_environment_list() -> Sequence[type[ScmEnvironment]]:
+    """Mocked list of SCM environments.
+
+    Returns:
+        List of mock SCM environments.
+    """
+    variants = []
+
+    # Default
+    variants.append(MockScm)
+
+    return variants
+
+
 def _porringer_distribution_list() -> Sequence[Distribution]:
     """Mocked list of plugin distributions
 
@@ -56,4 +72,5 @@ def _porringer_distribution_list() -> Sequence[Distribution]:
 
 environment_variants = _mock_environment_list()
 project_environment_variants = _mock_project_environment_list()
+scm_environment_variants = _mock_scm_environment_list()
 porringer_distribution_list = _porringer_distribution_list()

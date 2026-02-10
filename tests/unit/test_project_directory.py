@@ -10,7 +10,6 @@ from porringer.schema import (
     BatchSetupResults,
     SetupAction,
     SetupActionResult,
-    SetupActionType,
     SetupParameters,
     SetupResults,
     SkipReason,
@@ -46,16 +45,11 @@ class TestProjectDirectorySkip:
             results = execute_via_stream(test_api, preview, params)
 
             # The RUN_COMMAND should NOT be skipped — post_sync is decoupled
-            command_skips = [r for r in results.skips if r.action.action_type == SetupActionType.RUN_COMMAND]
+            command_skips = [r for r in results.skips if r.action.kind is None]
             assert len(command_skips) == 0
 
             # The RUN_COMMAND should succeed (dry-run always succeeds)
-            command_results = [
-                r
-                for mr in results.manifest_results
-                for r in mr.results
-                if r.action.action_type == SetupActionType.RUN_COMMAND
-            ]
+            command_results = [r for mr in results.manifest_results for r in mr.results if r.action.kind is None]
             assert len(command_results) == 1
             assert command_results[0].success is True
 
@@ -77,10 +71,7 @@ class TestProjectDirectorySkip:
 
             # Package action should not be skipped due to project_directory
             package_results = [
-                r
-                for mr in results.manifest_results
-                for r in mr.results
-                if r.action.action_type == SetupActionType.PACKAGE
+                r for mr in results.manifest_results for r in mr.results if r.action.kind == PluginKind.PACKAGE
             ]
             assert len(package_results) == 1
             project_skips = [
@@ -107,7 +98,7 @@ class TestProjectDirectorySkip:
             results = execute_via_stream(test_api, preview, params)
 
             # The RUN_COMMAND should NOT be in skips
-            command_skips = [r for r in results.skips if r.action.action_type == SetupActionType.RUN_COMMAND]
+            command_skips = [r for r in results.skips if r.action.kind is None]
             assert len(command_skips) == 0
 
 
@@ -138,14 +129,15 @@ class TestBatchSetupResultsSkips:
 
     @staticmethod
     def _make_result(
-        action_type: SetupActionType,
+        kind: PluginKind | None,
         skipped: bool = False,
         skip_reason: SkipReason | None = None,
         message: str | None = None,
     ) -> SetupActionResult:
+        label = kind.name if kind is not None else 'COMMAND'
         action = SetupAction(
-            action_type=action_type,
-            description=f'Test {action_type.name}',
+            description=f'Test {label}',
+            kind=kind,
         )
         return SetupActionResult(
             action=action,
@@ -157,14 +149,14 @@ class TestBatchSetupResultsSkips:
 
     def test_skips_returns_only_skipped(self) -> None:
         """The skips property returns only skipped results."""
-        r1 = self._make_result(SetupActionType.PACKAGE, skipped=False)
+        r1 = self._make_result(PluginKind.PACKAGE, skipped=False)
         r2 = self._make_result(
-            SetupActionType.PROJECT_SYNC,
+            PluginKind.PROJECT,
             skipped=True,
             skip_reason=SkipReason.NO_PROJECT_DIRECTORY,
             message='No project directory provided',
         )
-        r3 = self._make_result(SetupActionType.RUN_COMMAND, skipped=False)
+        r3 = self._make_result(None, skipped=False)
 
         batch = BatchSetupResults(
             manifest_results=[SetupResults(actions=[], results=[r1, r2, r3])],
@@ -177,7 +169,7 @@ class TestBatchSetupResultsSkips:
 
     def test_skips_empty_when_none_skipped(self) -> None:
         """The skips property returns empty list when nothing is skipped."""
-        r1 = self._make_result(SetupActionType.PACKAGE)
+        r1 = self._make_result(PluginKind.PACKAGE)
         batch = BatchSetupResults(
             manifest_results=[SetupResults(actions=[], results=[r1])],
         )
@@ -188,7 +180,6 @@ class TestBatchSetupResultsSkips:
     def test_skips_carries_action_metadata(self) -> None:
         """Each skipped result carries full action metadata."""
         action = SetupAction(
-            action_type=SetupActionType.PROJECT_SYNC,
             description='Sync project via uv',
             kind=PluginKind.PROJECT,
             ecosystem='python',
@@ -206,7 +197,6 @@ class TestBatchSetupResultsSkips:
         )
 
         skip = batch.skips[0]
-        assert skip.action.action_type == SetupActionType.PROJECT_SYNC
         assert skip.action.kind == PluginKind.PROJECT
         assert skip.action.ecosystem == 'python'
         assert skip.action.installer == 'uv'
@@ -215,7 +205,7 @@ class TestBatchSetupResultsSkips:
     def test_success_true_when_only_skips(self) -> None:
         """BatchSetupResults.success is True even when actions are skipped."""
         r1 = self._make_result(
-            SetupActionType.PROJECT_SYNC,
+            PluginKind.PROJECT,
             skipped=True,
             skip_reason=SkipReason.NO_PROJECT_DIRECTORY,
         )
@@ -228,9 +218,9 @@ class TestBatchSetupResultsSkips:
 
     def test_total_succeeded_excludes_skipped(self) -> None:
         """total_succeeded does not count skipped results."""
-        r1 = self._make_result(SetupActionType.PACKAGE, skipped=False)  # succeeded
+        r1 = self._make_result(PluginKind.PACKAGE, skipped=False)  # succeeded
         r2 = self._make_result(
-            SetupActionType.PROJECT_SYNC,
+            PluginKind.PROJECT,
             skipped=True,
             skip_reason=SkipReason.NO_PROJECT_DIRECTORY,
         )

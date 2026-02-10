@@ -59,6 +59,9 @@ yarn-project = "porringer.plugin.yarn_project.plugin:YarnProjectEnvironment"
 bun-project = "porringer.plugin.bun_project.plugin:BunProjectEnvironment"
 deno-project = "porringer.plugin.deno_project.plugin:DenoProjectEnvironment"
 
+[project.entry-points."porringer.scm"]
+git = "porringer.plugin.git.plugin:GitScm"
+
 [project.scripts]
 porringer = "porringer.console.entry:app"
 

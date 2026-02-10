@@ -1,13 +1,16 @@
-"""Builder"""
+"""Builder — generic plugin discovery and construction.
+
+Provides :meth:`Builder.find_plugins` and :meth:`Builder.build_plugins`
+for discovering and instantiating plugins from any entry-point group
+without per-kind boilerplate.
+"""
 
 import logging
 from importlib import metadata
 
 from packaging.version import Version
 
-from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.schema import Distribution, PluginDependency, PluginParameters
+from porringer.core.schema import Distribution, Plugin, PluginDependency, PluginParameters
 from porringer.schema import PluginInformation
 from porringer.utility.exception import PluginDependencyError
 from porringer.utility.utility import canonicalize_type
@@ -22,24 +25,34 @@ class Builder:
         """Initializes the builder"""
         pass
 
-    def find_environments(self, check_dependencies: bool = True) -> list[PluginInformation[Environment]]:
-        """Searches for registered environment plugins
+    # ------------------------------------------------------------------
+    # Generic discovery & construction
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def find_plugins[T: Plugin](
+        group: str,
+        base_class: type[T],
+        *,
+        check_dependencies: bool = False,
+    ) -> list[PluginInformation[T]]:
+        """Search for registered plugins in an entry-point group.
+
+        Scans ``porringer.<group>`` for classes that are subclasses of
+        *base_class* and returns plugin-info wrappers for each.
 
         Args:
-            check_dependencies: If True, validates plugin dependencies and filters
-                               out plugins with unmet required dependencies
+            group: Entry-point group suffix (e.g. ``'environment'``).
+            base_class: Expected base class; incompatible types are skipped.
+            check_dependencies: If ``True``, validates plugin dependencies
+                and filters out plugins with unmet required dependencies.
 
         Returns:
-            A list of loaded plugins
-
-        Raises:
-            PluginDependencyError: If a required dependency is missing and check_dependencies is True
+            A list of discovered plugin information objects.
         """
-        group_name = 'environment'
-        plugin_types: list[PluginInformation[Environment]] = []
+        plugin_types: list[PluginInformation[T]] = []
 
-        # Filter entries by type
-        for entry_point in list(metadata.entry_points(group=f'porringer.{group_name}')):
+        for entry_point in list(metadata.entry_points(group=f'porringer.{group}')):
             try:
                 loaded_type = entry_point.load()
             except ModuleNotFoundError as e:
@@ -52,24 +65,54 @@ class Builder:
                 logger.error(f"Plugin '{canonicalized.name}' is not installed. Skipping")
                 continue
 
-            # TODO: Add metadata to plugin information, percolate to pytest_synodic API
-
-            if not issubclass(loaded_type, Environment):
+            if not issubclass(loaded_type, base_class):
                 logger.warning(
-                    f"Found incompatible plugin. The '{canonicalized.name}' plugin must be an instance"
-                    f" of '{group_name}'"
+                    f"Found incompatible plugin. The '{canonicalized.name}' plugin must be an instance of '{group}'"
                 )
             else:
-                logger.debug(f'{group_name} plugin found: {canonicalized.name}')
+                logger.debug(f'{group} plugin found: {canonicalized.name}')
                 plugin_types.append(PluginInformation(loaded_type, entry_point.dist))
 
         if check_dependencies:
-            plugin_types = self._resolve_dependencies(plugin_types)
+            plugin_types = Builder._resolve_dependencies(plugin_types)
 
         return plugin_types
 
     @staticmethod
-    def _resolve_dependencies(plugins: list[PluginInformation[Environment]]) -> list[PluginInformation[Environment]]:
+    def build_plugin[T: Plugin](info: PluginInformation[T]) -> T:
+        """Construct a single plugin instance from its discovery info.
+
+        Args:
+            info: The plugin information (type + distribution).
+
+        Returns:
+            The instantiated plugin.
+        """
+        plugin_version = Version(info.distribution.version)
+        plugin_distribution = Distribution(version=plugin_version)
+        parameters = PluginParameters(distribution=plugin_distribution)
+        return info.type(parameters)
+
+    @staticmethod
+    def build_plugins[T: Plugin](infos: list[PluginInformation[T]]) -> list[T]:
+        """Construct plugin instances from a list of discovery infos.
+
+        Args:
+            infos: The plugin information list.
+
+        Returns:
+            The instantiated plugins.
+        """
+        return [Builder.build_plugin(i) for i in infos]
+
+    # ------------------------------------------------------------------
+    # Dependency resolution
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_dependencies[T: Plugin](
+        plugins: list[PluginInformation[T]],
+    ) -> list[PluginInformation[T]]:
         """Resolves plugin dependencies, filtering out plugins with unmet dependencies.
 
         Args:
@@ -87,7 +130,7 @@ class Builder:
             canonicalized = canonicalize_type(plugin_info.type)
             available_plugins.add(canonicalized.name)
 
-        resolved_plugins: list[PluginInformation[Environment]] = []
+        resolved_plugins: list[PluginInformation[T]] = []
 
         for plugin_info in plugins:
             plugin_name = canonicalize_type(plugin_info.type).name
@@ -120,7 +163,7 @@ class Builder:
         return resolved_plugins
 
     @staticmethod
-    def get_plugin_dependencies(plugin_type: type[Environment]) -> list[PluginDependency]:
+    def get_plugin_dependencies(plugin_type: type[Plugin]) -> list[PluginDependency]:
         """Gets the applicable dependencies for a plugin on the current platform.
 
         Args:
@@ -131,105 +174,3 @@ class Builder:
         """
         all_deps = plugin_type.dependencies()
         return [dep for dep in all_deps if dep.is_applicable()]
-
-    @staticmethod
-    def build_environment(environment_type: PluginInformation[Environment]) -> Environment:
-        """Constructs a single environment from input type
-
-        Args:
-            environment_type: The type to construct
-
-        Returns:
-            The instantiated environment
-        """
-        pluginVersion = Version(environment_type.distribution.version)
-        pluginDistribution = Distribution(version=pluginVersion)
-        parameters = PluginParameters(distribution=pluginDistribution)
-
-        return environment_type.type(parameters)
-
-    @staticmethod
-    def build_environments(environment_types: list[PluginInformation[Environment]]) -> list[Environment]:
-        """Constructs environments from input types
-
-        Args:
-            environment_types: The types to construct
-
-        Returns:
-            The instantiated environments
-        """
-        environments: list[Environment] = []
-
-        for environment_type in environment_types:
-            environments.append(Builder.build_environment(environment_type))
-
-        return environments
-
-    @staticmethod
-    def find_project_environments() -> list[PluginInformation[ProjectEnvironment]]:
-        """Searches for registered project environment plugins.
-
-        Scans the ``porringer.project_environment`` entry-point group for
-        classes that subclass :class:`ProjectEnvironment`.
-
-        Returns:
-            A list of loaded project-environment plugins.
-        """
-        group_name = 'project_environment'
-        plugin_types: list[PluginInformation[ProjectEnvironment]] = []
-
-        for entry_point in list(metadata.entry_points(group=f'porringer.{group_name}')):
-            try:
-                loaded_type = entry_point.load()
-            except ModuleNotFoundError as e:
-                logger.warning(f"Plugin '{entry_point.name}' could not be loaded: {e}. Skipping")
-                continue
-
-            canonicalized = canonicalize_type(loaded_type)
-
-            if entry_point.dist is None:
-                logger.error(f"Plugin '{canonicalized.name}' is not installed. Skipping")
-                continue
-
-            if not issubclass(loaded_type, ProjectEnvironment):
-                logger.warning(
-                    f"Found incompatible plugin. The '{canonicalized.name}' plugin must be an instance"
-                    f" of '{group_name}'"
-                )
-            else:
-                logger.debug(f'{group_name} plugin found: {canonicalized.name}')
-                plugin_types.append(PluginInformation(loaded_type, entry_point.dist))
-
-        return plugin_types
-
-    @staticmethod
-    def build_project_environment(
-        project_environment_type: PluginInformation[ProjectEnvironment],
-    ) -> ProjectEnvironment:
-        """Constructs a single project environment from input type.
-
-        Args:
-            project_environment_type: The type to construct.
-
-        Returns:
-            The instantiated project environment.
-        """
-        plugin_version = Version(project_environment_type.distribution.version)
-        plugin_distribution = Distribution(version=plugin_version)
-        parameters = PluginParameters(distribution=plugin_distribution)
-
-        return project_environment_type.type(parameters)
-
-    @staticmethod
-    def build_project_environments(
-        project_environment_types: list[PluginInformation[ProjectEnvironment]],
-    ) -> list[ProjectEnvironment]:
-        """Constructs project environments from input types.
-
-        Args:
-            project_environment_types: The types to construct.
-
-        Returns:
-            The instantiated project environments.
-        """
-        return [Builder.build_project_environment(t) for t in project_environment_types]

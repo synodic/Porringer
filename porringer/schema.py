@@ -104,14 +104,6 @@ class ManifestValidationResult:
         return [d for d in self.diagnostics if d.severity == ManifestDiagnosticSeverity.WARNING]
 
 
-class SetupActionType(Enum):
-    """The type of action to perform during setup."""
-
-    PACKAGE = auto()
-    PROJECT_SYNC = auto()
-    RUN_COMMAND = auto()
-
-
 class SkipReason(Enum):
     """Machine-readable reason an action was skipped.
 
@@ -127,19 +119,25 @@ class SkipReason(Enum):
 class SetupAction:
     """A single action to perform during setup.
 
+    The ``kind`` field is the primary discriminator:
+
+    * :attr:`PluginKind.PACKAGE`, :attr:`PluginKind.TOOL`,
+      :attr:`PluginKind.RUNTIME` — install/upgrade a single package.
+    * :attr:`PluginKind.PROJECT` — sync a project lock-file / venv.
+    * :attr:`PluginKind.SCM` — clone a repository.
+    * ``None`` — run a post-sync shell command.
+
     Args:
-        action_type: The type of action.
-        kind: The plugin kind (PACKAGE, TOOL, PROJECT, RUNTIME).
-        ecosystem: The ecosystem identifier (e.g. ``"python"``, ``"node"``).
-        installer: The plugin name (for PACKAGE/TOOL/RUNTIME).
-        package: The package reference (for PACKAGE/TOOL/RUNTIME).
-        command: The command to run (for RUN_COMMAND).
         description: Human-readable description of the action.
+        kind: The plugin kind, or ``None`` for post-sync commands.
+        ecosystem: The ecosystem identifier (e.g. ``"python"``, ``"node"``).
+        installer: The plugin name (for PACKAGE/TOOL/RUNTIME/PROJECT/SCM).
+        package: The package reference (for PACKAGE/TOOL/RUNTIME/SCM).
+        command: The command to run (for post-sync commands).
         cli_command: The actual CLI command (for display purposes).
         package_description: Optional per-package description from the manifest.
     """
 
-    action_type: SetupActionType
     description: str
     kind: PluginKind | None = None
     ecosystem: str | None = None
@@ -302,6 +300,10 @@ class SetupManifest(BaseModel):
     )
     runtimes: dict[str, list[PackageSpec]] = Field(
         default_factory=dict, description='Language runtimes to install per ecosystem (e.g. {"python": ["3.12"]})'
+    )
+    scm: dict[str, list[PackageSpec]] = Field(
+        default_factory=dict,
+        description='SCM repositories to clone per ecosystem (e.g. {"git": ["https://github.com/org/repo"]})',
     )
     preferences: dict[str, str] = Field(
         default_factory=dict,

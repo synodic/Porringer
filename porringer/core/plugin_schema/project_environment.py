@@ -10,7 +10,6 @@ that the tool itself is already installed (e.g. via pipx).
 """
 
 import logging
-import shutil
 import subprocess
 from abc import abstractmethod
 from pathlib import Path
@@ -18,7 +17,8 @@ from pathlib import Path
 from pydantic import Field
 
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Plugin, PluginKind, PluginParameters, PorringerModel
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
+from porringer.core.schema import PluginKind, PluginParameters, PorringerModel
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class ProjectSyncParameters(PorringerModel):
     dry: bool = Field(default=False, description='If True, preview the sync without modifying the environment')
 
 
-class ProjectEnvironment(Plugin, RuntimeConsumer):
+class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
     """Plugin definition for project-scoped dependency managers.
 
     Unlike :class:`~porringer.core.plugin_schema.environment.Environment`,
@@ -100,17 +100,6 @@ class ProjectEnvironment(Plugin, RuntimeConsumer):
         """Project environments always have kind ``PROJECT``."""
         return PluginKind.PROJECT
 
-    @staticmethod
-    def default_priority() -> int:
-        """Return the default priority for resolver ordering.
-
-        Lower values are preferred.
-
-        Returns:
-            An integer priority (lower = preferred).
-        """
-        return 100
-
     @classmethod
     @abstractmethod
     def consumed_runtime_kind(cls) -> str:
@@ -155,11 +144,6 @@ class ProjectEnvironment(Plugin, RuntimeConsumer):
         if params.dry:
             args.append('--dry-run')
         return self._run_sync(args, params.directory)
-
-    @classmethod
-    def is_available(cls) -> bool:
-        """Check if the underlying tool is on PATH."""
-        return shutil.which(cls.tool_name()) is not None
 
     # ------------------------------------------------------------------
     # Internal helpers

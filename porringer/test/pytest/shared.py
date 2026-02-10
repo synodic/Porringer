@@ -6,8 +6,9 @@ from typing import LiteralString, cast
 import pytest
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin, PluginParameters
-from porringer.test.pytest.variants import environment_variants, project_environment_variants
+from porringer.test.pytest.variants import environment_variants, project_environment_variants, scm_environment_variants
 
 
 class BaseTests[T: Plugin](metaclass=ABCMeta):
@@ -104,3 +105,26 @@ class ProjectEnvironmentTests[T: ProjectEnvironment](PluginTests[T], metaclass=A
         project_environment_type = cast(type[ProjectEnvironment], request.param)
 
         return project_environment_type
+
+
+class ScmEnvironmentTests[T: ScmEnvironment](PluginTests[T], metaclass=ABCMeta):
+    """Shared functionality between the different SCM-environment testing categories."""
+
+    @staticmethod
+    @pytest.fixture(
+        name='scm_environment_type',
+        scope='session',
+        params=scm_environment_variants,
+    )
+    def fixture_scm_environment_type(request: pytest.FixtureRequest) -> type[ScmEnvironment]:
+        """Fixture defining all testable variations of mock ScmEnvironment.
+
+        Args:
+            request: Parameterization list
+
+        Returns:
+            Variation of a ScmEnvironment
+        """
+        scm_environment_type = cast(type[ScmEnvironment], request.param)
+
+        return scm_environment_type

@@ -2,7 +2,6 @@
 
 import asyncio
 import re
-import shutil
 import subprocess
 from abc import abstractmethod
 from collections.abc import Callable
@@ -11,11 +10,10 @@ from pathlib import Path
 from packaging.version import InvalidVersion, Version
 from pydantic import Field
 
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import (
     Package,
     PackageRef,
-    Plugin,
-    PluginKind,
     PluginParameters,
     PorringerModel,
 )
@@ -56,7 +54,7 @@ class CheckUpdatesParameters(PorringerModel):
     include_prereleases: bool = Field(default=False, description='Include pre-release versions')
 
 
-class Environment(Plugin):
+class Environment(ToolBasedPlugin):
     """Plugin definition for package environments"""
 
     runtime_executable: Path | None
@@ -75,65 +73,6 @@ class Environment(Plugin):
         """
         super().__init__(parameters)
         self.runtime_executable = None
-
-    @staticmethod
-    def ecosystem() -> str | None:
-        """Declares which ecosystem this plugin belongs to.
-
-        A free-form identifier such as ``"python"``, ``"node"``,
-        ``"system"``, or ``"deno"``.  All plugins that manage the same
-        ecosystem are interchangeable within their
-        :meth:`plugin_kind`.  The ``BackendResolver`` picks the best
-        available installer for each ``(kind, ecosystem)`` pair.
-
-        Returns ``None`` for plugins that don't participate in backend
-        resolution (e.g. pure provider plugins).
-
-        Returns:
-            The ecosystem identifier, or ``None``.
-        """
-        return None
-
-    @staticmethod
-    def plugin_kind() -> PluginKind:
-        """Return the kind of operation this plugin performs.
-
-        Defaults to :attr:`PluginKind.PACKAGE`.  Override to
-        :attr:`PluginKind.TOOL` or :attr:`PluginKind.RUNTIME` as
-        appropriate.
-
-        Returns:
-            The plugin kind.
-        """
-        return PluginKind.PACKAGE
-
-    @staticmethod
-    def default_priority() -> int:
-        """Return the default priority for resolver ordering.
-
-        Lower values are preferred.  When multiple plugins share the
-        same ``(plugin_kind, ecosystem)`` pair the resolver picks
-        the first available one sorted by this value ascending.
-
-        Returns:
-            An integer priority (lower = preferred).
-        """
-        return 100
-
-    @staticmethod
-    def package_name_validator() -> str | None:
-        """Return the validation scheme for package names, or ``None``.
-
-        Well-known values:
-
-        * ``"pep440"`` — validate via
-          :class:`packaging.requirements.Requirement`
-        * ``None`` — accept any non-empty name (the default)
-
-        Returns:
-            A validation scheme identifier, or ``None``.
-        """
-        return None
 
     @abstractmethod
     def install_command(self, package: PackageRef) -> list[str]:
@@ -168,39 +107,6 @@ class Environment(Plugin):
             A list of command arguments (e.g., ['pip', 'install', '--upgrade', 'requests']).
         """
         ...
-
-    @classmethod
-    def tool_name(cls) -> str | None:
-        """Returns the CLI executable name that this plugin wraps.
-
-        Override this method to declare which command-line tool the plugin
-        uses.  The base :meth:`is_available` implementation uses this value
-        with ``shutil.which`` to test whether the tool is on PATH.
-
-        Returns ``None`` for plugins that are not backed by a single CLI
-        tool (the default).  Those plugins are always considered available.
-
-        Returns:
-            The executable name (e.g. ``'pip'``, ``'uv'``), or ``None``.
-        """
-        return None
-
-    @classmethod
-    def is_available(cls) -> bool:
-        """Checks if the underlying package manager is available on the system.
-
-        The default implementation delegates to :meth:`tool_name`: if a tool
-        name is declared, ``shutil.which`` is used to verify the executable
-        exists on PATH.  Plugins whose ``tool_name()`` returns ``None`` are
-        always considered available.
-
-        Returns:
-            True if the package manager is available, False otherwise.
-        """
-        name = cls.tool_name()
-        if name is None:
-            return True
-        return shutil.which(name) is not None
 
     @classmethod
     def tool_version(cls) -> Version | None:

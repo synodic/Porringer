@@ -15,6 +15,7 @@ from porringer.backend.schema import (
     PluginUninstallParameters,
     PluginUpdateParameters,
 )
+from porringer.core.plugin_schema.environment import Environment
 from porringer.schema import ListPluginsParameters, LocalConfiguration
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import is_pipx_installation
@@ -65,7 +66,7 @@ class TestCommandPlugin:
             mock_entry_points.return_value = [mock_entry_point]
 
             # This should not raise an exception - it should handle the error gracefully
-            result = builder.find_environments()
+            result = builder.find_plugins('environment', Environment)
 
             # The result should be empty since the plugin couldn't be loaded
             assert result == []

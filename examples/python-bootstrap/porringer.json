@@ -25,6 +25,11 @@
             }
         ]
     },
+    "scm": {
+        "git": [
+            "https://github.com/synodic/porringer"
+        ]
+    },
     "post_sync": [
         "pdm install"
     ]

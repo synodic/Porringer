@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from porringer.api import API
-from porringer.schema import SetupActionType, SetupParameters, SkipReason
+from porringer.core.schema import PluginKind
+from porringer.schema import SetupParameters, SkipReason
 from tests.conftest import execute_via_stream
 
 # Absolute path to the example manifest directory
@@ -38,9 +39,7 @@ class TestExamplePresence:
         return [
             (r.action.package.name, r.skipped, r.skip_reason)
             for r in mr.results
-            if r.action.action_type == SetupActionType.PACKAGE
-            and r.action.installer == 'pip'
-            and r.action.package is not None
+            if r.action.kind == PluginKind.PACKAGE and r.action.installer == 'pip' and r.action.package is not None
         ]
 
     @staticmethod
