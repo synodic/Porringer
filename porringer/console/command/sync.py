@@ -22,7 +22,6 @@ from porringer.schema import (
     SubActionProgress,
     SyncStrategy,
 )
-from porringer.utility.exception import ManifestError
 
 app = typer.Typer()
 
@@ -65,6 +64,9 @@ class _ProgressState:
     completed: int = 0
     active_tasks: dict[str, TaskID] = field(default_factory=dict)
     collected_results: list[SetupActionResult] = field(default_factory=list)
+    manifests: list[SetupResults] = field(default_factory=list)
+    failed_paths: list[tuple[Path, str]] = field(default_factory=list)
+    overall_task: TaskID | None = None
 
 
 def _create_api(configuration: Configuration) -> API:
@@ -77,11 +79,6 @@ def _create_api(configuration: Configuration) -> API:
         Initialized API instance.
     """
     return API(configuration.local_configuration)
-
-
-def _count_actions(preview_results: BatchSetupResults) -> int:
-    """Count total actions in preview results."""
-    return sum(len(mr.actions) for mr in preview_results.manifest_results)
 
 
 def _progress_label(strategy: SyncStrategy) -> str:
@@ -169,6 +166,8 @@ def _handle_progress_event(
     overall_task: TaskID | None,
     state: _ProgressState,
 ) -> None:
+    if event.action is None:
+        return
     action_desc = _action_description(event.action)
 
     if event.kind == ProgressEventKind.ACTION_STARTED:
@@ -191,15 +190,26 @@ def _handle_progress_event(
 
 async def _run_stream_with_progress(
     api: API,
-    preview_results: BatchSetupResults,
     setup_params: SetupParameters,
     progress: Progress,
-    total_actions: int,
     overall_task: TaskID | None,
     state: _ProgressState,
 ) -> None:
-    async for event in api.sync.execute_stream(preview_results, setup_params):
-        _handle_progress_event(event, progress, setup_params, total_actions, overall_task, state)
+    async for event in api.sync.execute_stream(setup_params):
+        if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+            state.manifests.append(event.manifest)
+            total = sum(len(m.actions) for m in state.manifests)
+            if overall_task is not None:
+                progress.update(overall_task, total=total)
+            elif total > 0 and not setup_params.dry_run:
+                overall_task = progress.add_task(_progress_label(setup_params.strategy), total=total)
+                state.overall_task = overall_task
+            continue
+        if event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
+            state.failed_paths.append(event.failed_path)
+            continue
+        total_actions = sum(len(m.actions) for m in state.manifests)
+        _handle_progress_event(event, progress, setup_params, total_actions, state.overall_task or overall_task, state)
 
 
 def _format_cli_command(result: SetupActionResult) -> str:
@@ -364,55 +374,53 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
             strategy=options.strategy,
         )
 
-    # Preview to get actions
+    # For dry runs, use the simple sync method (no progress bar needed).
+    # For real execution, use the streaming progress display.
     try:
-        preview_results = api.sync.preview_batch(setup_params)
-    except (ManifestError, ValueError) as e:
-        error_msg = e.error if isinstance(e, ManifestError) else str(e)
-        configuration.console.print(f'[red]Error:[/red] {error_msg}')
+        if setup_params.dry_run:
+            execute_results = api.sync.run(setup_params)
+        else:
+            execute_results = _execute_with_progress(configuration, api, setup_params)
+    except ValueError as e:
+        configuration.console.print(f'[red]Error:[/red] {e}')
         raise typer.Exit(EXIT_FAILURE) from e
 
-    # Check for failed paths (no manifest found)
-    if preview_results.failed_paths and not preview_results.manifest_results:
-        for _path, error in preview_results.failed_paths:
+    # Fast path: all manifests failed, no actions at all
+    if execute_results.failed_paths and execute_results.total_actions == 0:
+        for _path, error in execute_results.failed_paths:
             configuration.console.print(f'[red]Error:[/red] {error}')
         raise typer.Exit(EXIT_FAILURE)
 
-    if preview_results.total_actions == 0 and not preview_results.failed_paths:
+    if execute_results.total_actions == 0:
         configuration.console.print('[yellow]No actions to execute[/yellow]')
         return
 
-    # Execute with async progress
-    execute_results = _execute_with_progress(configuration, api, preview_results, setup_params)
-
     _display_results(configuration, execute_results, options.dry_run, options.strategy)
 
-    if not options.dry_run and not execute_results.success:
+    if not execute_results.success:
         raise typer.Exit(EXIT_FAILURE)
 
 
 def _execute_with_progress(
     configuration: Configuration,
     api: API,
-    preview_results: BatchSetupResults,
     setup_params: SetupParameters,
 ) -> BatchSetupResults:
     """Execute installation with progress display.
 
     Uses ``execute_stream`` to receive ``ProgressEvent`` items and updates
-    a Rich progress bar accordingly.  Results are collected from the stream
-    events so no second execution is needed.
+    a Rich progress bar accordingly.  Manifests are discovered via
+    ``MANIFEST_LOADED`` events emitted by the stream — no separate preview
+    step is required.
 
     Args:
         configuration: CLI configuration with console.
         api: The API instance.
-        preview_results: Preview results with actions.
         setup_params: Setup parameters.
 
     Returns:
         BatchSetupResults from execution.
     """
-    total_actions = _count_actions(preview_results)
     state = _ProgressState()
 
     with Progress(
@@ -423,35 +431,31 @@ def _execute_with_progress(
         TextColumn('({task.completed}/{task.total})'),
         console=configuration.console,
         transient=True,
-        disable=total_actions == 0 or setup_params.dry_run,
+        disable=setup_params.dry_run,
     ) as progress:
-        overall_task = None
-        if total_actions > 0 and not setup_params.dry_run:
-            overall_task = progress.add_task(_progress_label(setup_params.strategy), total=total_actions)
-
         asyncio.run(
             _run_stream_with_progress(
                 api,
-                preview_results,
                 setup_params,
                 progress,
-                total_actions,
-                overall_task,
+                None,
                 state,
             )
         )
 
     # Build BatchSetupResults from collected events
+    # Partition results by manifest using action identity
+    manifest_action_sets = [set(id(a) for a in m.actions) for m in state.manifests]
     manifest_results: list[SetupResults] = []
-    for preview in preview_results.manifest_results:
-        sr = SetupResults(actions=preview.actions, results=list(state.collected_results))
+
+    for preview, action_ids in zip(state.manifests, manifest_action_sets, strict=False):
+        mr_results = [r for r in state.collected_results if id(r.action) in action_ids]
+        sr = SetupResults(actions=preview.actions, results=mr_results)
         sr.manifest_path = preview.manifest_path
+        sr.metadata = preview.metadata
         manifest_results.append(sr)
 
-    return BatchSetupResults(
-        manifest_results=manifest_results,
-        failed_paths=list(preview_results.failed_paths),
-    )
+    return BatchSetupResults(manifest_results=manifest_results, failed_paths=state.failed_paths)
 
 
 @app.callback(invoke_without_command=True)

@@ -111,7 +111,6 @@ class SkipReason(Enum):
     """
 
     ALREADY_INSTALLED = auto()
-    NOTHING_CHANGED = auto()
     NO_PROJECT_DIRECTORY = auto()
 
 
@@ -190,6 +189,8 @@ class SubActionProgress:
 class ProgressEventKind(Enum):
     """The kind of progress event emitted during setup execution."""
 
+    MANIFEST_LOADED = auto()
+    MANIFEST_FAILED = auto()
     ACTION_STARTED = auto()
     ACTION_COMPLETED = auto()
     SUB_ACTION_PROGRESS = auto()
@@ -204,15 +205,19 @@ class ProgressEvent:
 
     Args:
         kind: What this event represents.
-        action: The setup action this event relates to.
+        action: The setup action this event relates to (``None`` for ``MANIFEST_LOADED`` / ``MANIFEST_FAILED``).
         result: Action result (set only for ``ACTION_COMPLETED``).
         sub_action: Sub-action detail (set only for ``SUB_ACTION_PROGRESS``).
+        manifest: Per-manifest preview (set only for ``MANIFEST_LOADED``).
+        failed_path: Path and error message (set only for ``MANIFEST_FAILED``).
     """
 
     kind: ProgressEventKind
-    action: SetupAction
+    action: SetupAction | None = None
     result: SetupActionResult | None = None
     sub_action: SubActionProgress | None = None
+    manifest: SetupResults | None = None
+    failed_path: tuple[Path, str] | None = None
 
 
 @dataclass

@@ -38,7 +38,7 @@ class TestBootstrapDeferredRuntime:
             return original_which(cmd)
 
         with patch('shutil.which', side_effect=_which_no_runtime):
-            return SyncCommands.preview_single(_BOOTSTRAP_DIR)
+            return SyncCommands.parse_manifest(_BOOTSTRAP_DIR)
 
     @staticmethod
     def test_manifest_loads(preview_no_runtime: SetupResults) -> None:

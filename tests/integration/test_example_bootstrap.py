@@ -26,8 +26,8 @@ class TestBootstrapPreview:
     @staticmethod
     @pytest.fixture
     def preview() -> SetupResults:
-        """Preview the bootstrap manifest."""
-        return SyncCommands.preview_single(_BOOTSTRAP_DIR)
+        """Parse the bootstrap manifest."""
+        return SyncCommands.parse_manifest(_BOOTSTRAP_DIR)
 
     @staticmethod
     def test_manifest_loads(preview: SetupResults) -> None:

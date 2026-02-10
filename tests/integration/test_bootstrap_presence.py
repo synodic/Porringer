@@ -17,7 +17,6 @@ import pytest
 from porringer.api import API
 from porringer.core.schema import PluginKind
 from porringer.schema import SetupActionResult, SetupParameters, SkipReason
-from tests.conftest import execute_via_stream
 
 # Absolute path to the bootstrap example manifest directory
 _BOOTSTRAP_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'python-bootstrap'
@@ -31,8 +30,7 @@ class TestBootstrapPresence:
     def dry_run_results(test_api: API) -> list[SetupActionResult]:
         """Dry-run the bootstrap manifest and return all action results."""
         setup_params = SetupParameters(paths=_BOOTSTRAP_DIR, dry_run=True)
-        preview = test_api.sync.preview_batch(setup_params)
-        results = execute_via_stream(test_api, preview, setup_params)
+        results = test_api.sync.run(setup_params)
 
         assert len(results.manifest_results) == 1
         return results.manifest_results[0].results

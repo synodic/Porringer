@@ -165,8 +165,7 @@ package-level requirements and skip project-sync backends:
 
 ```python
 params = SetupParameters(paths=manifest_path, project_directory=False)
-preview = api.sync.preview_batch(params)
-results = execute_stream(preview, params)
+results = api.sync.run(params)
 
 # Inspect which actions were skipped and why
 for skip in results.skips:
@@ -189,20 +188,20 @@ from porringer.schema import LocalConfiguration, SetupParameters
 api = API(LocalConfiguration())
 
 # Full sync (project + packages)
-preview = api.sync.preview_batch(SetupParameters(paths=project_path))
+results = api.sync.run(SetupParameters(paths=project_path))
 
 # Packages only — skip project backends and post-sync commands
-preview = api.sync.preview_batch(SetupParameters(paths=manifest_path, project_directory=False))
+results = api.sync.run(SetupParameters(paths=manifest_path, project_directory=False))
 
 # Override project directory (manifest and project in different locations)
-preview = api.sync.preview_batch(
+results = api.sync.run(
     SetupParameters(paths=manifest_path, project_directory=project_path)
 )
 
 # Execute with streaming progress
 async def run():
-    async for event in api.sync.execute_stream(preview, SetupParameters(paths=project_path)):
-        print(event.kind, event.action.description)
+    async for event in api.sync.execute_stream(SetupParameters(paths=project_path)):
+        print(event.kind, getattr(event.action, 'description', 'manifest loaded'))
 
 asyncio.run(run())
 ```

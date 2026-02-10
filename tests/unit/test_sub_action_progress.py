@@ -1,6 +1,8 @@
 """Tests for progress event stream and sub-action progress."""
 
 import asyncio
+import json
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -11,13 +13,11 @@ from porringer.core.plugin_schema.environment import PackageParameters
 from porringer.core.schema import PackageRef, PluginKind
 from porringer.plugin.pip.plugin import PipEnvironment
 from porringer.schema import (
-    BatchSetupResults,
     ProgressEvent,
     ProgressEventKind,
     SetupAction,
     SetupActionResult,
     SetupParameters,
-    SetupResults,
     SubActionProgress,
 )
 
@@ -262,51 +262,48 @@ class TestExecuteStream:
     @staticmethod
     def test_stream_yields_events() -> None:
         """execute_stream yields ProgressEvent items via the queue-based bridge."""
-        action = _make_action('test-pkg')
-        setup_results = SetupResults(
-            actions=[action],
-            results=[],
-        )
-        setup_results.manifest_path = None  # Will be set below
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
 
-        preview = SetupResults(actions=[action], results=[])
-        preview.manifest_path = Path('.')
-        previews = BatchSetupResults(manifest_results=[preview], failed_paths=[])
-        params = SetupParameters(dry_run=True)
+            params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            commands = SyncCommands()
 
-        commands = SyncCommands()
+            async def run() -> list[ProgressEvent]:
+                collected: list[ProgressEvent] = []
+                async for event in commands.execute_stream(params):
+                    collected.append(event)
+                return collected
 
-        async def run() -> list[ProgressEvent]:
-            collected: list[ProgressEvent] = []
-            async for event in commands.execute_stream(previews, params):
-                collected.append(event)
-            return collected
+            events = asyncio.run(run())
 
-        events = asyncio.run(run())
+            # Should have at least a MANIFEST_LOADED event + start/complete pairs
+            manifest_events = [e for e in events if e.kind == ProgressEventKind.MANIFEST_LOADED]
+            assert len(manifest_events) >= 1
 
-        # Dry-run install actions should produce start+complete event pairs
-        started = [e for e in events if e.kind == ProgressEventKind.ACTION_STARTED]
-        completed = [e for e in events if e.kind == ProgressEventKind.ACTION_COMPLETED]
-        assert len(started) == len(completed)
+            started = [e for e in events if e.kind == ProgressEventKind.ACTION_STARTED]
+            completed = [e for e in events if e.kind == ProgressEventKind.ACTION_COMPLETED]
+            assert len(started) == len(completed)
 
     @staticmethod
     def test_stream_cancellation() -> None:
         """Breaking from the stream cancels the background task."""
-        actions = [_make_action(f'pkg-{i}') for i in range(5)]
-        preview = SetupResults(actions=actions, results=[])
-        preview.manifest_path = Path('.')
-        previews = BatchSetupResults(manifest_results=[preview], failed_paths=[])
-        params = SetupParameters(dry_run=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packages': {'python': ['requests', 'flask', 'pytest', 'ruff', 'black']}}
+            manifest_path.write_text(json.dumps(manifest_data))
 
-        commands = SyncCommands()
+            params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            commands = SyncCommands()
 
-        async def run() -> list[ProgressEvent]:
-            collected: list[ProgressEvent] = []
-            async for event in commands.execute_stream(previews, params):
-                collected.append(event)
-                if len(collected) >= MIN_STREAM_EVENTS:
-                    break  # early exit
-            return collected
+            async def run() -> list[ProgressEvent]:
+                collected: list[ProgressEvent] = []
+                async for event in commands.execute_stream(params):
+                    collected.append(event)
+                    if len(collected) >= MIN_STREAM_EVENTS:
+                        break  # early exit
+                return collected
 
-        events = asyncio.run(run())
-        assert len(events) >= MIN_STREAM_EVENTS
+            events = asyncio.run(run())
+            assert len(events) >= MIN_STREAM_EVENTS

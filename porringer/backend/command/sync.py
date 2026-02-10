@@ -569,8 +569,12 @@ class SyncCommands:
         return actions
 
     @staticmethod
-    def preview_single(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
-        """Previews the setup actions for a single path without executing them.
+    def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
+        """Parse a manifest and build the action plan without executing.
+
+        This is a low-level utility for manifest inspection (e.g. validating
+        that a manifest produces the expected actions).  For execution and
+        dry-run, use :meth:`execute_stream` or :meth:`run` instead.
 
         Args:
             path: Path to manifest file or directory containing one.
@@ -582,7 +586,7 @@ class SyncCommands:
         Raises:
             ManifestError: If the manifest cannot be found or parsed.
         """
-        logger.info(f'Previewing setup from: {path}')
+        logger.info(f'Parsing manifest from: {path}')
 
         manifest_path, manifest = SyncCommands._find_manifest(path)
         environments = SyncCommands._discover_plugins('environment', Environment, check_dependencies=True)
@@ -598,39 +602,11 @@ class SyncCommands:
 
         return SetupResults(actions=actions, manifest_path=manifest_path, metadata=metadata)
 
-    def preview_batch(self, parameters: SetupParameters) -> BatchSetupResults:
-        """Preview setup actions for multiple paths.
-
-        Args:
-            parameters: The setup parameters with paths or group.
-
-        Returns:
-            BatchSetupResults containing previews for each manifest.
-        """
-        paths = self._resolve_paths(parameters)
-        logger.info(f'Previewing setup for {len(paths)} path(s)')
-
-        manifest_results: list[SetupResults] = []
-        failed_paths: list[tuple[Path, str]] = []
-
-        for path in paths:
-            try:
-                result = self.preview_single(path, strategy=parameters.strategy)
-                manifest_results.append(result)
-            except ManifestError as e:
-                failed_paths.append((path, str(e.error)))
-                if parameters.fail_fast:
-                    break
-
-        return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
-
     @staticmethod
     def _dry_run_action(
         action: SetupAction,
         environments: dict[str, Environment],
         strategy: SyncStrategy = SyncStrategy.MINIMAL,
-        *,
-        prior_results: list[SetupActionResult] | None = None,
     ) -> SetupActionResult:
         """Simulates executing an action in dry-run mode.
 
@@ -638,14 +614,13 @@ class SyncCommands:
         that the result accurately reflects whether the action would be
         skipped.
 
-        For post-sync commands (``kind is None``), the command is skipped
-        when all prior results were themselves skipped (nothing changed).
+        Post-sync commands (``kind is None``) always report success since
+        they would unconditionally run during a real execution.
 
         Args:
             action: The action to simulate.
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (affects skip logic for packages).
-            prior_results: Results from earlier phases (used by commands).
 
         Returns:
             The simulated result.
@@ -656,15 +631,7 @@ class SyncCommands:
             case PluginKind.PROJECT | PluginKind.SCM:
                 return SetupActionResult(action=action, success=True)
             case None:
-                # Post-sync command
-                if prior_results and all(r.skipped for r in prior_results):
-                    return SetupActionResult(
-                        action=action,
-                        success=True,
-                        skipped=True,
-                        skip_reason=SkipReason.NOTHING_CHANGED,
-                        message='All prerequisites already satisfied',
-                    )
+                # Post-sync commands always "would run" in dry-run mode.
                 return SetupActionResult(action=action, success=True)
             case _:
                 return SetupActionResult(action=action, success=False, message=f'Unknown action kind: {action.kind}')
@@ -1115,8 +1082,6 @@ class SyncCommands:
         self,
         command_actions: list[SetupAction],
         context: _ExecutionPhaseContext,
-        *,
-        prior_results: list[SetupActionResult] | None = None,
     ) -> list[SetupActionResult]:
         """Execute RUN_COMMAND actions sequentially."""
         results: list[SetupActionResult] = []
@@ -1126,7 +1091,6 @@ class SyncCommands:
                     action,
                     context.environments,
                     context.parameters.strategy,
-                    prior_results=prior_results,
                 )
             else:
                 result = self._execute_run_command(action, context.working_dir, context.parameters.timeout)
@@ -1329,7 +1293,7 @@ class SyncCommands:
                 working_dir=working_dir,
                 event_queue=event_queue,
             )
-            results.extend(await self._execute_command_actions(phases[None], context, prior_results=results))
+            results.extend(await self._execute_command_actions(phases[None], context))
 
         return SetupResults(actions=actions, results=results)
 
@@ -1646,28 +1610,57 @@ class SyncCommands:
 
     async def execute_stream(
         self,
-        previews: BatchSetupResults,
         parameters: SetupParameters,
     ) -> AsyncIterator[ProgressEvent]:
-        """Stream progress events while executing setup actions for multiple manifests.
+        """Stream progress events while executing setup actions.
 
-        Yields ``ProgressEvent`` items as actions start, complete, and report
-        sub-action detail.  Cancellation is handled via standard
-        ``task.cancel()`` on the consuming task.
+        Resolves paths, parses manifests, and executes (or dry-runs) in a
+        single call.  A :attr:`ProgressEventKind.MANIFEST_LOADED` event is
+        emitted for each successfully parsed manifest before its actions
+        begin executing.
+
+        Yields ``ProgressEvent`` items as manifests are loaded, actions
+        start, complete, and report sub-action detail.  Cancellation is
+        handled via standard ``task.cancel()`` on the consuming task.
 
         Args:
-            previews: The batch preview results containing actions per manifest.
-            parameters: The setup parameters.
+            parameters: The setup parameters (paths, dry_run, strategy, etc.).
 
         Yields:
-            ProgressEvent for each action lifecycle transition and sub-action update.
+            ProgressEvent for each manifest load, action lifecycle transition,
+            and sub-action update.
         """
         queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
 
         async def _run() -> None:
-            """Execute all manifests, emitting events into *queue*."""
+            """Resolve paths, parse manifests, execute, and emit events."""
             try:
-                for preview in previews.manifest_results:
+                paths = self._resolve_paths(parameters)
+                logger.info(f'Executing setup for {len(paths)} path(s) (dry_run={parameters.dry_run})')
+
+                for path in paths:
+                    try:
+                        preview = self.parse_manifest(path, strategy=parameters.strategy)
+                    except ManifestError as e:
+                        logger.warning(f'Failed to load manifest at {path}: {e.error}')
+                        queue.put_nowait(
+                            ProgressEvent(
+                                kind=ProgressEventKind.MANIFEST_FAILED,
+                                failed_path=(path, str(e.error)),
+                            )
+                        )
+                        if parameters.fail_fast:
+                            break
+                        continue
+
+                    # Emit MANIFEST_LOADED so consumers know the action plan
+                    queue.put_nowait(
+                        ProgressEvent(
+                            kind=ProgressEventKind.MANIFEST_LOADED,
+                            manifest=preview,
+                        )
+                    )
+
                     if preview.manifest_path is None:
                         continue
 
@@ -1693,3 +1686,48 @@ class SyncCommands:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+
+    def run(self, parameters: SetupParameters) -> BatchSetupResults:
+        """Execute setup synchronously and return collected results.
+
+        Resolves paths and parses manifests synchronously, then executes
+        (or dry-runs) actions via :meth:`execute_stream` for each manifest.
+
+        Args:
+            parameters: The setup parameters (paths, dry_run, strategy, etc.).
+
+        Returns:
+            BatchSetupResults from execution.
+        """
+        paths = self._resolve_paths(parameters)
+        logger.info(f'Running setup for {len(paths)} path(s) (dry_run={parameters.dry_run})')
+
+        manifest_results: list[SetupResults] = []
+        failed_paths: list[tuple[Path, str]] = []
+        previews: list[SetupResults] = []
+
+        # Phase 1: synchronous manifest loading
+        for path in paths:
+            try:
+                preview = self.parse_manifest(path, strategy=parameters.strategy)
+                previews.append(preview)
+            except ManifestError as e:
+                failed_paths.append((path, str(e.error)))
+                if parameters.fail_fast:
+                    break
+
+        # Phase 2: async execution for successfully loaded manifests
+        if previews:
+
+            async def _execute_all() -> None:
+                for preview in previews:
+                    if preview.manifest_path is None:
+                        continue
+                    sr = await self._execute_single(preview.actions, preview.manifest_path, parameters)
+                    sr.manifest_path = preview.manifest_path
+                    sr.metadata = preview.metadata
+                    manifest_results.append(sr)
+
+            asyncio.run(_execute_all())
+
+        return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
