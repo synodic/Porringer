@@ -607,8 +607,6 @@ class SyncCommands:
         action: SetupAction,
         environments: dict[str, Environment],
         strategy: SyncStrategy = SyncStrategy.MINIMAL,
-        *,
-        prior_results: list[SetupActionResult] | None = None,
     ) -> SetupActionResult:
         """Simulates executing an action in dry-run mode.
 
@@ -616,14 +614,13 @@ class SyncCommands:
         that the result accurately reflects whether the action would be
         skipped.
 
-        For post-sync commands (``kind is None``), the command is skipped
-        when all prior results were themselves skipped (nothing changed).
+        Post-sync commands (``kind is None``) always report success since
+        they would unconditionally run during a real execution.
 
         Args:
             action: The action to simulate.
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (affects skip logic for packages).
-            prior_results: Results from earlier phases (used by commands).
 
         Returns:
             The simulated result.
@@ -634,15 +631,7 @@ class SyncCommands:
             case PluginKind.PROJECT | PluginKind.SCM:
                 return SetupActionResult(action=action, success=True)
             case None:
-                # Post-sync command
-                if prior_results and all(r.skipped for r in prior_results):
-                    return SetupActionResult(
-                        action=action,
-                        success=True,
-                        skipped=True,
-                        skip_reason=SkipReason.NOTHING_CHANGED,
-                        message='All prerequisites already satisfied',
-                    )
+                # Post-sync commands always "would run" in dry-run mode.
                 return SetupActionResult(action=action, success=True)
             case _:
                 return SetupActionResult(action=action, success=False, message=f'Unknown action kind: {action.kind}')
@@ -1093,8 +1082,6 @@ class SyncCommands:
         self,
         command_actions: list[SetupAction],
         context: _ExecutionPhaseContext,
-        *,
-        prior_results: list[SetupActionResult] | None = None,
     ) -> list[SetupActionResult]:
         """Execute RUN_COMMAND actions sequentially."""
         results: list[SetupActionResult] = []
@@ -1104,7 +1091,6 @@ class SyncCommands:
                     action,
                     context.environments,
                     context.parameters.strategy,
-                    prior_results=prior_results,
                 )
             else:
                 result = self._execute_run_command(action, context.working_dir, context.parameters.timeout)
@@ -1307,7 +1293,7 @@ class SyncCommands:
                 working_dir=working_dir,
                 event_queue=event_queue,
             )
-            results.extend(await self._execute_command_actions(phases[None], context, prior_results=results))
+            results.extend(await self._execute_command_actions(phases[None], context))
 
         return SetupResults(actions=actions, results=results)
 
@@ -1737,9 +1723,7 @@ class SyncCommands:
                 for preview in previews:
                     if preview.manifest_path is None:
                         continue
-                    sr = await self._execute_single(
-                        preview.actions, preview.manifest_path, parameters
-                    )
+                    sr = await self._execute_single(preview.actions, preview.manifest_path, parameters)
                     sr.manifest_path = preview.manifest_path
                     sr.metadata = preview.metadata
                     manifest_results.append(sr)

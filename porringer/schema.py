@@ -111,7 +111,6 @@ class SkipReason(Enum):
     """
 
     ALREADY_INSTALLED = auto()
-    NOTHING_CHANGED = auto()
     NO_PROJECT_DIRECTORY = auto()
 
 
@@ -217,7 +216,7 @@ class ProgressEvent:
     action: SetupAction | None = None
     result: SetupActionResult | None = None
     sub_action: SubActionProgress | None = None
-    manifest: 'SetupResults | None' = None
+    manifest: SetupResults | None = None
     failed_path: tuple[Path, str] | None = None
 
 

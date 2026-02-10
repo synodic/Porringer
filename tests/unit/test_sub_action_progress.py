@@ -1,6 +1,8 @@
 """Tests for progress event stream and sub-action progress."""
 
 import asyncio
+import json
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -260,9 +262,6 @@ class TestExecuteStream:
     @staticmethod
     def test_stream_yields_events() -> None:
         """execute_stream yields ProgressEvent items via the queue-based bridge."""
-        import json
-        import tempfile
-
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
@@ -290,9 +289,6 @@ class TestExecuteStream:
     @staticmethod
     def test_stream_cancellation() -> None:
         """Breaking from the stream cancels the background task."""
-        import json
-        import tempfile
-
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {'version': '1', 'packages': {'python': ['requests', 'flask', 'pytest', 'ruff', 'black']}}

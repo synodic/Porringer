@@ -385,7 +385,7 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
 
     # Fast path: all manifests failed, no actions at all
     if execute_results.failed_paths and execute_results.total_actions == 0:
-        for path, error in execute_results.failed_paths:
+        for _path, error in execute_results.failed_paths:
             configuration.console.print(f'[red]Error:[/red] {error}')
         raise typer.Exit(EXIT_FAILURE)
 
