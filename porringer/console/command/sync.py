@@ -166,6 +166,8 @@ def _handle_progress_event(
     overall_task: TaskID | None,
     state: _ProgressState,
 ) -> None:
+    if event.action is None:
+        return
     action_desc = _action_description(event.action)
 
     if event.kind == ProgressEventKind.ACTION_STARTED:
