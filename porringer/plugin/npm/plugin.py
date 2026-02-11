@@ -23,7 +23,7 @@ class NpmEnvironment(Environment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Npm belongs to the ``node`` ecosystem."""
+        """Npm belongs to the `node` ecosystem."""
         return 'node'
 
     @staticmethod
@@ -35,7 +35,7 @@ class NpmEnvironment(Environment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Npm wraps the ``npm`` CLI."""
+        """Npm wraps the `npm` CLI."""
         return 'npm'
 
     @override
@@ -83,14 +83,14 @@ class NpmEnvironment(Environment):
     def search(self, package: PackageRef) -> Package | None:
         """Searches the environment's sources for a package.
 
-        npm does not provide a reliable search CLI; returns ``None``
+        npm does not provide a reliable search CLI; returns `None`
         to indicate that search is not supported.
 
         Args:
             package: The package reference to search for
 
         Returns:
-            Always ``None``.
+            Always `None`.
         """
         return None
 
@@ -152,7 +152,7 @@ class NpmEnvironment(Environment):
     def packages(self) -> list[Package]:
         """Gathers globally installed npm packages.
 
-        Uses ``npm ls -g --json --depth=0`` to list top-level global
+        Uses `npm ls -g --json --depth=0` to list top-level global
         packages and parses the JSON output.
 
         Returns:

@@ -26,7 +26,7 @@ class AptEnvironment(Environment):
 
     Note:
         APT operations (install, remove, upgrade) require root privileges.
-        Run with sudo: ``sudo porringer ...``
+        Run with sudo: `sudo porringer ...`
 
     CLI Reference:
         - dpkg -l  - List installed packages
@@ -41,7 +41,7 @@ class AptEnvironment(Environment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """APT belongs to the ``system`` ecosystem."""
+        """APT belongs to the `system` ecosystem."""
         return 'system'
 
     @staticmethod
@@ -55,7 +55,7 @@ class AptEnvironment(Environment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """APT wraps the ``apt`` CLI."""
+        """APT wraps the `apt` CLI."""
         return 'apt'
 
     @override
@@ -70,7 +70,12 @@ class AptEnvironment(Environment):
     def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via apt."""
         if package.constraint:
-            return ['apt', 'install', '--only-upgrade', f'{package.name}={package.constraint}']
+            return [
+                'apt',
+                'install',
+                '--only-upgrade',
+                f'{package.name}={package.constraint}',
+            ]
         return ['apt', 'install', '--only-upgrade', package.name]
 
     @override
@@ -264,6 +269,64 @@ class AptEnvironment(Environment):
 
         version = self.__class__._get_package_version(package)
         return Package(name=pkg.name, version=version)
+
+    @override
+    async def async_install(self, params: PackageParameters) -> Package | None:
+        """Asynchronously installs a package using APT.
+
+        Overrides the base to use `-y` auto-confirm and resolve
+        the installed version afterward.
+        """
+        if params.progress_callback is None:
+            return await super().async_install(params)
+
+        logger = logging.getLogger('porringer.apt.install')
+        package = params.package.name
+
+        if params.dry:
+            args = ['apt', 'install', '--simulate', package]
+            logger.info(f'[dry-run] Would run: {" ".join(args)}')
+            return Package(name=params.package.name, version=None)
+
+        result = await self._async_streaming_run(
+            args=['apt', 'install', '-y', package],
+            params=params,
+            phase='installing',
+            verb='install',
+        )
+        if result is not None:
+            version = self.__class__._get_package_version(package)
+            return Package(name=result.name, version=version)
+        return None
+
+    @override
+    async def async_upgrade(self, params: PackageParameters) -> Package | None:
+        """Asynchronously upgrades a package using APT.
+
+        Overrides the base to use `-y --only-upgrade` and resolve
+        the installed version afterward.
+        """
+        if params.progress_callback is None:
+            return await super().async_upgrade(params)
+
+        logger = logging.getLogger('porringer.apt.upgrade')
+        package = params.package.name
+
+        if params.dry:
+            args = ['apt', 'install', '--simulate', '--only-upgrade', package]
+            logger.info(f'[dry-run] Would run: {" ".join(args)}')
+            return Package(name=params.package.name, version=None)
+
+        result = await self._async_streaming_run(
+            args=['apt', 'install', '-y', '--only-upgrade', package],
+            params=params,
+            phase='upgrading',
+            verb='upgrade',
+        )
+        if result is not None:
+            version = self.__class__._get_package_version(package)
+            return Package(name=result.name, version=version)
+        return None
 
     @override
     def packages(self) -> list[Package]:

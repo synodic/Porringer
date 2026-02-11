@@ -18,7 +18,7 @@ class MockScm(ScmEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Mock manages the ``git`` ecosystem."""
+        """Mock manages the `git` ecosystem."""
         return 'git'
 
     @override

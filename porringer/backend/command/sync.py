@@ -54,7 +54,7 @@ from porringer.utility.utility import canonicalize_type
 logger = logging.getLogger(__name__)
 
 
-# Execution order for phased setup.  ``None`` represents post-sync commands.
+# Execution order for phased setup.  `None` represents post-sync commands.
 _PHASE_ORDER: list[PluginKind | None] = [
     PluginKind.RUNTIME,
     PluginKind.PACKAGE,
@@ -223,7 +223,7 @@ class SyncCommands:
         """Validate package specifiers in a manifest.
 
         PEP 440 validation is applied when the resolved plugin declares
-        ``package_name_validator() == 'pep440'``.  Other ecosystems
+        `package_name_validator() == 'pep440'`.  Other ecosystems
         accept any non-empty package name.
         """
         for kind, ecosystem, packages in manifest.iter_sections():
@@ -274,7 +274,7 @@ class SyncCommands:
         """Export a JSON Schema representation of the manifest format.
 
         Returns:
-            A dict containing the JSON Schema for ``SetupManifest``.
+            A dict containing the JSON Schema for `SetupManifest`.
         """
         return SetupManifest.model_json_schema()
 
@@ -403,10 +403,10 @@ class SyncCommands:
         """Discover and instantiate plugins, returning a name-keyed dict.
 
         Args:
-            group: Entry-point group suffix (e.g. ``'environment'``).
+            group: Entry-point group suffix (e.g. `'environment'`).
             base_class: Expected base class for the plugins.
-            **kwargs: Forwarded to :meth:`Builder.find_plugins`
-                (e.g. ``check_dependencies=True``).
+            **kwargs: Forwarded to `Builder.find_plugins()`
+                (e.g. `check_dependencies=True`).
 
         Returns:
             Dict mapping canonical plugin name to instantiated plugin.
@@ -470,7 +470,7 @@ class SyncCommands:
         Iterates each kind section in the manifest.  Package/tool/runtime
         entries produce one action per package.  Project entries produce a
         single action per ecosystem.  SCM entries produce one action per
-        repository URL.  The ``strategy`` parameter controls only the
+        repository URL.  The `strategy` parameter controls only the
         human-readable description verb; the execution layer decides
         install-vs-upgrade behaviour at runtime.
 
@@ -574,7 +574,7 @@ class SyncCommands:
 
         This is a low-level utility for manifest inspection (e.g. validating
         that a manifest produces the expected actions).  For execution and
-        dry-run, use :meth:`execute_stream` or :meth:`run` instead.
+        dry-run, use `execute_stream()` or `run()` instead.
 
         Args:
             path: Path to manifest file or directory containing one.
@@ -614,7 +614,7 @@ class SyncCommands:
         that the result accurately reflects whether the action would be
         skipped.
 
-        Post-sync commands (``kind is None``) always report success since
+        Post-sync commands (`kind is None`) always report success since
         they would unconditionally run during a real execution.
 
         Args:
@@ -690,12 +690,12 @@ class SyncCommands:
     ) -> tuple[bool, str | None]:
         """Checks if a package is already installed with a compatible version.
 
-        When *name_validator* is ``'pep440'``, uses PEP 440 canonicalization
+        When *name_validator* is `'pep440'`, uses PEP 440 canonicalization
         and specifier matching.  Otherwise, uses case-insensitive name
         comparison and simple string version equality.
 
-        For ``RUNTIME`` actions, name comparison uses prefix matching so
-        that a request for ``3.14`` matches an installed ``3.14-64``
+        For `RUNTIME` actions, name comparison uses prefix matching so
+        that a request for `3.14` matches an installed `3.14-64`
         (architecture-qualified tag).
 
         Args:
@@ -1167,9 +1167,9 @@ class SyncCommands:
            (pip, uv).  This may install tool prerequisites such as pipx.
         3. **Tool** — install isolated CLI tools (pipx).  Plugins are
            re-discovered after Phase 2 so that newly-installed backends
-           are available.  Deferred actions whose ``installer`` was
-           ``None`` at preview time are resolved here.
-        4. **Project sync** — run ``pdm install`` / ``uv sync`` in the
+           are available.  Deferred actions whose `installer` was
+           `None` at preview time are resolved here.
+        4. **Project sync** — run `pdm install` / `uv sync` in the
            manifest directory.
         5. **SCM clone** — clone source-control repositories.
         6. **Post-sync commands** — run arbitrary shell commands.
@@ -1178,7 +1178,7 @@ class SyncCommands:
             actions: The list of actions to execute (from preview).
             path: The path this execution is for (used for working directory).
             parameters: The setup parameters.
-            event_queue: Optional queue to emit ``ProgressEvent`` items into.
+            event_queue: Optional queue to emit `ProgressEvent` items into.
 
         Returns:
             SetupResults containing the results of each action.
@@ -1301,10 +1301,10 @@ class SyncCommands:
     def _group_actions_by_phase(
         actions: list[SetupAction],
     ) -> dict[PluginKind | None, list[SetupAction]]:
-        """Group actions into phase buckets keyed by :class:`PluginKind`.
+        """Group actions into phase buckets keyed by `PluginKind`.
 
-        Post-sync commands (``kind is None``) are stored under the
-        ``None`` key.
+        Post-sync commands (`kind is None`) are stored under the
+        `None` key.
 
         Returns:
             Dict mapping each phase to its action list.
@@ -1323,10 +1323,10 @@ class SyncCommands:
         """Resolve the interpreter path and propagate to downstream consumers.
 
         After runtime-provider actions complete, finds the first
-        :class:`RuntimeProvider` that can resolve an executable and sets
-        ``runtime_executable`` on all :class:`RuntimeConsumer` plugins
-        whose ``consumed_runtime_kind`` matches the provider's
-        ``provided_runtime_kind``.
+        `RuntimeProvider` that can resolve an executable and sets
+        `runtime_executable` on all `RuntimeConsumer` plugins
+        whose `consumed_runtime_kind` matches the provider's
+        `provided_runtime_kind`.
         """
         proj_envs = project_environments or {}
 
@@ -1365,12 +1365,12 @@ class SyncCommands:
         environments: dict[str, Environment],
         strategy: SyncStrategy = SyncStrategy.MINIMAL,
     ) -> None:
-        """Resolve deferred actions whose ``installer`` is ``None``.
+        """Resolve deferred actions whose `installer` is `None`.
 
         After a preceding phase installs new tools (e.g. pip installs pipx),
-        plugins are re-discovered and a fresh ``BackendResolver`` determines
+        plugins are re-discovered and a fresh `BackendResolver` determines
         the correct backend for each deferred action.  Actions that still
-        cannot be resolved are left with ``installer = None`` so that the
+        cannot be resolved are left with `installer = None` so that the
         normal execution path reports them as unavailable.
 
         Args:
@@ -1440,7 +1440,7 @@ class SyncCommands:
         """Execute PROJECT_SYNC actions sequentially.
 
         Each action invokes the resolved project-environment plugin's
-        :meth:`~ProjectEnvironment.sync` method in the manifest directory.
+        `ProjectEnvironment.sync()` method in the manifest directory.
 
         Args:
             project_sync_actions: The project sync actions.
@@ -1520,7 +1520,7 @@ class SyncCommands:
         """Execute SCM_CLONE actions sequentially.
 
         Each action invokes the resolved SCM-environment plugin's
-        :meth:`~ScmEnvironment.clone` method.
+        `ScmEnvironment.clone()` method.
 
         Args:
             scm_actions: The SCM clone actions.
@@ -1615,13 +1615,13 @@ class SyncCommands:
         """Stream progress events while executing setup actions.
 
         Resolves paths, parses manifests, and executes (or dry-runs) in a
-        single call.  A :attr:`ProgressEventKind.MANIFEST_LOADED` event is
+        single call.  A `ProgressEventKind.MANIFEST_LOADED` event is
         emitted for each successfully parsed manifest before its actions
         begin executing.
 
-        Yields ``ProgressEvent`` items as manifests are loaded, actions
+        Yields `ProgressEvent` items as manifests are loaded, actions
         start, complete, and report sub-action detail.  Cancellation is
-        handled via standard ``task.cancel()`` on the consuming task.
+        handled via standard `task.cancel()` on the consuming task.
 
         Args:
             parameters: The setup parameters (paths, dry_run, strategy, etc.).
@@ -1691,7 +1691,7 @@ class SyncCommands:
         """Execute setup synchronously and return collected results.
 
         Resolves paths and parses manifests synchronously, then executes
-        (or dry-runs) actions via :meth:`execute_stream` for each manifest.
+        (or dry-runs) actions via `execute_stream()` for each manifest.
 
         Args:
             parameters: The setup parameters (paths, dry_run, strategy, etc.).

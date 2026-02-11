@@ -15,12 +15,12 @@ class DenoProjectEnvironment(ProjectEnvironment):
     """Project environment managed by Deno.
 
     Delegates dependency resolution and lock-file synchronisation to
-    ``deno install`` inside the project directory.  Deno reads
-    dependencies from ``deno.json`` (or ``package.json`` for Node-compat
+    `deno install` inside the project directory.  Deno reads
+    dependencies from `deno.json` (or `package.json` for Node-compat
     projects).
 
-    Overrides :meth:`sync` because Deno does not support ``--dry-run``
-    on ``deno install``.
+    Overrides `sync()` because Deno does not support `--dry-run`
+    on `deno install`.
     """
 
     _sync_verb: str = 'install'
@@ -28,7 +28,7 @@ class DenoProjectEnvironment(ProjectEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Deno project belongs to the ``deno`` ecosystem."""
+        """Deno project belongs to the `deno` ecosystem."""
         return 'deno'
 
     @staticmethod
@@ -46,21 +46,21 @@ class DenoProjectEnvironment(ProjectEnvironment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Deno project wraps the ``deno`` CLI."""
+        """Deno project wraps the `deno` CLI."""
         return 'deno'
 
     @override
     def sync(self, params: ProjectSyncParameters) -> bool:
-        """Run ``deno install`` in the project directory.
+        """Run `deno install` in the project directory.
 
-        Deno does not support ``--dry-run``.  In dry-run mode the
+        Deno does not support `--dry-run`.  In dry-run mode the
         command is logged but not executed.
 
         Args:
             params: Sync parameters (directory, dry-run flag).
 
         Returns:
-            ``True`` on success, ``False`` on failure.
+            `True` on success, `False` on failure.
         """
         args = list(self.sync_command())
         if params.dry:

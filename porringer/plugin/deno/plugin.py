@@ -16,15 +16,15 @@ class DenoEnvironment(Environment):
     """Represents a Deno environment.
 
     Provides methods to install, uninstall, and upgrade global scripts
-    using ``deno install -g``.  Deno supports both npm (``npm:``) and
-    JSR (``jsr:``) package sources.  By default, bare package names are
-    prefixed with ``npm:`` unless they already carry a source prefix.
+    using `deno install -g`.  Deno supports both npm (`npm:`) and
+    JSR (`jsr:`) package sources.  By default, bare package names are
+    prefixed with `npm:` unless they already carry a source prefix.
     """
 
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Deno belongs to the ``deno`` ecosystem."""
+        """Deno belongs to the `deno` ecosystem."""
         return 'deno'
 
     @staticmethod
@@ -36,16 +36,16 @@ class DenoEnvironment(Environment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Deno wraps the ``deno`` CLI."""
+        """Deno wraps the `deno` CLI."""
         return 'deno'
 
     @staticmethod
     def _deno_specifier(package: PackageRef) -> str:
         """Build a Deno-compatible package specifier.
 
-        Prefixes the package name with ``npm:`` when no source prefix
-        (``npm:``, ``jsr:``, ``https:``) is present.  Appends the
-        constraint with ``@`` separator if provided.
+        Prefixes the package name with `npm:` when no source prefix
+        (`npm:`, `jsr:`, `https:`) is present.  Appends the
+        constraint with `@` separator if provided.
         """
         name = package.name
         if not any(name.startswith(p) for p in ('npm:', 'jsr:', 'https:', 'http:')):
@@ -90,7 +90,7 @@ class DenoEnvironment(Environment):
 
     @override
     def search(self, package: PackageRef) -> Package | None:
-        """Deno does not provide a search CLI; returns ``None``."""
+        """Deno does not provide a search CLI; returns `None`."""
         return None
 
     @override

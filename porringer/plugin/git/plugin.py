@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class GitScm(ScmEnvironment):
     """SCM environment plugin for Git.
 
-    Provides clone and presence-check operations using the ``git``
+    Provides clone and presence-check operations using the `git`
     command-line tool.
     """
 
@@ -35,7 +35,7 @@ class GitScm(ScmEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Git belongs to the ``git`` ecosystem."""
+        """Git belongs to the `git` ecosystem."""
         return 'git'
 
     @override
@@ -45,10 +45,10 @@ class GitScm(ScmEnvironment):
         Args:
             url: The repository URL to clone.
             destination: Local filesystem path for the clone.
-            dry: If ``True``, preview without modifying the filesystem.
+            dry: If `True`, preview without modifying the filesystem.
 
         Returns:
-            ``True`` on success, ``False`` on failure.
+            `True` on success, `False` on failure.
         """
         if dry:
             logger.info('Would clone %s into %s', url, destination)
@@ -74,13 +74,13 @@ class GitScm(ScmEnvironment):
         """Check whether a Git repository already exists at *destination*.
 
         A directory is considered cloned if it exists and contains a
-        ``.git`` subdirectory.
+        `.git` subdirectory.
 
         Args:
             url: The repository URL (unused — presence is path-based).
             destination: Expected local path for the clone.
 
         Returns:
-            ``True`` if the repository is already present.
+            `True` if the repository is already present.
         """
         return destination.is_dir() and (destination / '.git').is_dir()

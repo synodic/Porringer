@@ -1,10 +1,10 @@
 """Plugin utilities for project-scoped environments.
 
-A :class:`ProjectEnvironment` plugin wraps a project dependency manager
+A `ProjectEnvironment` plugin wraps a project dependency manager
 (PDM, Poetry, uv) and delegates venv creation, dependency resolution,
 and lock-file synchronisation entirely to the underlying tool.
 
-The sync engine invokes :meth:`ProjectEnvironment.sync` in the
+The sync engine invokes `ProjectEnvironment.sync()` in the
 manifest's directory after all per-package actions have completed so
 that the tool itself is already installed (e.g. via pipx).
 """
@@ -33,30 +33,30 @@ class ProjectSyncParameters(PorringerModel):
 class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
     """Plugin definition for project-scoped dependency managers.
 
-    Unlike :class:`~porringer.core.plugin_schema.environment.Environment`,
-    which installs individual packages, a ``ProjectEnvironment`` runs the
+    Unlike `Environment`,
+    which installs individual packages, a `ProjectEnvironment` runs the
     tool's native *sync* / *install* command inside the project directory.
     Venv creation, lock-file handling, and dependency resolution are left
     entirely to the wrapped tool.
 
-    Subclasses **must** override :meth:`tool_name`.  Everything else has
+    Subclasses **must** override `tool_name()`.  Everything else has
     sensible defaults that can be overridden when the tool's CLI differs
-    from the common pattern (e.g. Poetry's ``poetry env use`` step).
+    from the common pattern (e.g. Poetry's `poetry env use` step).
     """
 
     _sync_verb: str = 'install'
     """The sub-command the tool uses for project synchronisation.
 
-    Defaults to ``"install"`` (used by PDM and Poetry).
-    Override to ``"sync"`` for tools like uv.
+    Defaults to `"install"` (used by PDM and Poetry).
+    Override to `"sync"` for tools like uv.
     """
 
     runtime_executable: Path | None
     """Override the language runtime interpreter for this project.
 
-    When set by a :class:`~porringer.core.plugin_schema.runtime.RuntimeProvider`
+    When set by a `RuntimeProvider`
     during phased execution, the sync command is invoked with a flag
-    that selects this interpreter (e.g. ``--python <path>``).
+    that selects this interpreter (e.g. `--python <path>`).
     """
 
     def __init__(self, parameters: PluginParameters) -> None:
@@ -77,8 +77,8 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
     def tool_name(cls) -> str:
         """Return the CLI executable name this plugin wraps.
 
-        Used by :meth:`is_available` to verify the tool is on PATH and
-        by :meth:`sync_command` to build the default command.
+        Used by `is_available()` to verify the tool is on PATH and
+        by `sync_command()` to build the default command.
         """
         ...
 
@@ -91,13 +91,13 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
     def ecosystem() -> str:
         """Return the ecosystem this project environment belongs to.
 
-        Examples: ``"python"``, ``"node"``, ``"deno"``.
+        Examples: `"python"`, `"node"`, `"deno"`.
         """
         ...
 
     @staticmethod
     def plugin_kind() -> PluginKind:
-        """Project environments always have kind ``PROJECT``."""
+        """Project environments always have kind `PROJECT`."""
         return PluginKind.PROJECT
 
     @classmethod
@@ -105,15 +105,15 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
     def consumed_runtime_kind(cls) -> str:
         """Return the kind of runtime this project environment consumes.
 
-        Examples: ``"python"``, ``"node"``, ``"deno"``.
+        Examples: `"python"`, `"node"`, `"deno"`.
         """
         ...
 
     def sync_command(self) -> list[str]:
         """Return the CLI command for syncing the project.
 
-        Built from :meth:`tool_name` and :attr:`_sync_verb`, with
-        ``--python <path>`` appended when a runtime override is active.
+        Built from `tool_name()` and `_sync_verb`, with
+        `--python <path>` appended when a runtime override is active.
 
         This is used for displaying commands in dry-run / preview mode
         and should reflect instance state.
@@ -127,18 +127,18 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
         """Run the tool's native sync/install in *params.directory*.
 
         The default implementation builds the command from
-        :meth:`sync_command` (which already includes ``--python`` when a
-        runtime override is active) and appends ``--dry-run`` for dry
+        `sync_command()` (which already includes `--python` when a
+        runtime override is active) and appends `--dry-run` for dry
         runs.
 
         Override this method when the tool requires a different CLI shape
-        (e.g. Poetry needs ``poetry env use`` before ``poetry install``).
+        (e.g. Poetry needs `poetry env use` before `poetry install`).
 
         Args:
             params: Sync parameters (directory, dry-run flag).
 
         Returns:
-            ``True`` on success, ``False`` on failure.
+            `True` on success, `False` on failure.
         """
         args = list(self.sync_command())
         if params.dry:
@@ -153,14 +153,14 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
         """Run a sync subprocess and return success.
 
         Shared helper that handles logging and error handling so each
-        plugin's :meth:`sync` implementation stays minimal.
+        plugin's `sync()` implementation stays minimal.
 
         Args:
             args: Full command-line arguments.
             directory: Working directory.
 
         Returns:
-            ``True`` if the process exited cleanly.
+            `True` if the process exited cleanly.
         """
         tool = self.tool_name()
         sync_logger = logging.getLogger(f'porringer.{tool}.sync')

@@ -15,9 +15,9 @@ class PnpmProjectEnvironment(ProjectEnvironment):
     """Project environment managed by pnpm.
 
     Delegates dependency resolution and lock-file synchronisation to
-    ``pnpm install`` inside the project directory.
+    `pnpm install` inside the project directory.
 
-    Overrides :meth:`sync` because pnpm does not support ``--dry-run``.
+    Overrides `sync()` because pnpm does not support `--dry-run`.
     """
 
     _sync_verb: str = 'install'
@@ -25,7 +25,7 @@ class PnpmProjectEnvironment(ProjectEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Pnpm project belongs to the ``node`` ecosystem."""
+        """Pnpm project belongs to the `node` ecosystem."""
         return 'node'
 
     @staticmethod
@@ -43,21 +43,21 @@ class PnpmProjectEnvironment(ProjectEnvironment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Pnpm project wraps the ``pnpm`` CLI."""
+        """Pnpm project wraps the `pnpm` CLI."""
         return 'pnpm'
 
     @override
     def sync(self, params: ProjectSyncParameters) -> bool:
-        """Run ``pnpm install`` in the project directory.
+        """Run `pnpm install` in the project directory.
 
-        pnpm does not support ``--dry-run``.  In dry-run mode the
+        pnpm does not support `--dry-run`.  In dry-run mode the
         command is logged but not executed.
 
         Args:
             params: Sync parameters (directory, dry-run flag).
 
         Returns:
-            ``True`` on success, ``False`` on failure.
+            `True` on success, `False` on failure.
         """
         args = list(self.sync_command())
         if params.dry:

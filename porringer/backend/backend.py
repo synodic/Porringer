@@ -1,8 +1,8 @@
 """Backend resolution for mapping (kind, ecosystem) pairs to installer plugins.
 
-The ``BackendResolver`` determines which plugin should handle each
-``(PluginKind, ecosystem)`` pair declared in a manifest.  For example,
-``(PACKAGE, "python")`` might resolve to ``uv`` or ``pip`` depending
+The `BackendResolver` determines which plugin should handle each
+`(PluginKind, ecosystem)` pair declared in a manifest.  For example,
+`(PACKAGE, "python")` might resolve to `uv` or `pip` depending
 on availability and user preferences.
 """
 
@@ -20,20 +20,20 @@ BackendPlugin = Plugin
 
 
 class BackendResolver:
-    """Maps ``(PluginKind, ecosystem)`` pairs to the best available plugin.
+    """Maps `(PluginKind, ecosystem)` pairs to the best available plugin.
 
     Construction requires a single *plugins* mapping containing **all**
     instantiated plugins (environments, project environments, SCM
     environments) keyed by their canonical name, plus an optional
     *preferences* dict from the manifest.
 
-    Resolution algorithm per ``(kind, ecosystem)`` pair:
+    Resolution algorithm per `(kind, ecosystem)` pair:
 
     1. If the user gave an explicit **preference** for the ecosystem and
        the named plugin is available, use it.
     2. Otherwise sort all registered candidates by
-       :meth:`~Plugin.default_priority` ascending and pick the first one
-       whose ``is_available()`` returns ``True``.
+       `Plugin.default_priority()` ascending and pick the first one
+       whose `is_available()` returns `True`.
     """
 
     def __init__(
@@ -69,7 +69,7 @@ class BackendResolver:
     # ------------------------------------------------------------------
 
     def resolve(self, kind: PluginKind, ecosystem: str) -> str | None:
-        """Return the chosen plugin name for *(kind, ecosystem)*, or ``None``."""
+        """Return the chosen plugin name for *(kind, ecosystem)*, or `None`."""
         key = (kind, ecosystem)
         if key not in self._resolved:
             logger.warning("No plugins registered for (%s, '%s')", kind.value, ecosystem)
@@ -77,9 +77,9 @@ class BackendResolver:
         return self._resolved[key]
 
     def validator_for(self, kind: PluginKind, ecosystem: str) -> str | None:
-        """Return the ``package_name_validator()`` tag for the resolved plugin.
+        """Return the `package_name_validator()` tag for the resolved plugin.
 
-        Returns ``None`` when no plugin is resolved or the plugin
+        Returns `None` when no plugin is resolved or the plugin
         declares no validator.
         """
         name = self.resolve(kind, ecosystem)
@@ -98,7 +98,7 @@ class BackendResolver:
         """Pick the best plugin for *(kind, ecosystem)*.
 
         1. Explicit preference (if available).
-        2. Sort candidates by ``default_priority()`` ascending, pick first available.
+        2. Sort candidates by `default_priority()` ascending, pick first available.
         """
         kind, ecosystem = key
         candidates = self._backend_plugins.get(key, [])

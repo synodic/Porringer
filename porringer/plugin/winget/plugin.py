@@ -23,7 +23,7 @@ class WingetEnvironment(Environment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Winget belongs to the ``system`` ecosystem."""
+        """Winget belongs to the `system` ecosystem."""
         return 'system'
 
     @staticmethod
@@ -37,7 +37,7 @@ class WingetEnvironment(Environment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Winget wraps the ``winget`` CLI."""
+        """Winget wraps the `winget` CLI."""
         return 'winget'
 
     @override
@@ -183,3 +183,69 @@ class WingetEnvironment(Environment):
             A list of packages
         """
         return []
+
+    @override
+    async def async_install(self, params: PackageParameters) -> Package | None:
+        """Asynchronously installs the given package using winget.
+
+        Overrides the base to add `--accept-source-agreements` and
+        other winget-specific flags.
+        """
+        if params.progress_callback is None:
+            return await super().async_install(params)
+
+        pkg = params.package
+        args = [
+            'winget',
+            'install',
+            '--id',
+            pkg.name,
+            '--accept-source-agreements',
+            '--accept-package-agreements',
+            '-e',
+        ]
+        if pkg.constraint:
+            args.extend(['--version', pkg.constraint])
+        if params.dry:
+            logging.getLogger('porringer.winget.install').info(f'[dry-run] Would run: {" ".join(args)}')
+            return Package(name=pkg.name, version=None)
+
+        return await self._async_streaming_run(
+            args=args,
+            params=params,
+            phase='installing',
+            verb='install',
+        )
+
+    @override
+    async def async_upgrade(self, params: PackageParameters) -> Package | None:
+        """Asynchronously upgrades the given package using winget.
+
+        Overrides the base to add `--accept-source-agreements` and
+        other winget-specific flags.
+        """
+        if params.progress_callback is None:
+            return await super().async_upgrade(params)
+
+        pkg = params.package
+        args = [
+            'winget',
+            'upgrade',
+            '--id',
+            pkg.name,
+            '--accept-source-agreements',
+            '--accept-package-agreements',
+            '-e',
+        ]
+        if pkg.constraint:
+            args.extend(['--version', pkg.constraint])
+        if params.dry:
+            logging.getLogger('porringer.winget.upgrade').info(f'[dry-run] Would run: {" ".join(args)}')
+            return Package(name=pkg.name, version=None)
+
+        return await self._async_streaming_run(
+            args=args,
+            params=params,
+            phase='upgrading',
+            verb='upgrade',
+        )

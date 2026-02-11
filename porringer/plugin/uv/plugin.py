@@ -27,9 +27,9 @@ class UvEnvironment(Environment, RuntimeConsumer):
         self._cached_packages: list[Package] | None = None
 
     def _python_args(self) -> list[str]:
-        """Return ``['--python', '<path>']`` when an override is active.
+        """Return `['--python', '<path>']` when an override is active.
 
-        Reads from ``self.runtime_executable`` (set by the sync engine
+        Reads from `self.runtime_executable` (set by the sync engine
         via a runtime provider).  Returns an empty list when no override
         is set.
         """
@@ -40,7 +40,7 @@ class UvEnvironment(Environment, RuntimeConsumer):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """UV belongs to the ``python`` ecosystem."""
+        """UV belongs to the `python` ecosystem."""
         return 'python'
 
     @staticmethod
@@ -64,7 +64,7 @@ class UvEnvironment(Environment, RuntimeConsumer):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """UV wraps the ``uv`` CLI."""
+        """UV wraps the `uv` CLI."""
         return 'uv'
 
     @override
@@ -75,7 +75,14 @@ class UvEnvironment(Environment, RuntimeConsumer):
     @override
     def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via uv."""
-        return ['uv', 'pip', 'install', '--upgrade', *self._python_args(), package.specifier]
+        return [
+            'uv',
+            'pip',
+            'install',
+            '--upgrade',
+            *self._python_args(),
+            package.specifier,
+        ]
 
     @override
     def install(self, params: PackageParameters) -> Package | None:
@@ -168,7 +175,7 @@ class UvEnvironment(Environment, RuntimeConsumer):
 
     @override
     def packages(self) -> list[Package]:
-        """Gathers installed packages using ``uv pip list --format=json``.
+        """Gathers installed packages using `uv pip list --format=json`.
 
         Results are cached per-instance so multiple calls within a single
         sync run don't shell out repeatedly.

@@ -13,7 +13,7 @@ class MockProjectEnvironment(ProjectEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Mock manages the ``python`` ecosystem."""
+        """Mock manages the `python` ecosystem."""
         return 'python'
 
     @classmethod

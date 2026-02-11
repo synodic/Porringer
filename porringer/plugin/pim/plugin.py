@@ -38,7 +38,7 @@ class PimEnvironment(Environment, RuntimeProvider):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """PIM belongs to the ``python`` ecosystem."""
+        """PIM belongs to the `python` ecosystem."""
         return 'python'
 
     @staticmethod
@@ -70,7 +70,7 @@ class PimEnvironment(Environment, RuntimeProvider):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """PIM wraps the ``py`` CLI."""
+        """PIM wraps the `py` CLI."""
         return 'py'
 
     @staticmethod
@@ -96,14 +96,14 @@ class PimEnvironment(Environment, RuntimeProvider):
     def resolve_executable(self, tag: str) -> Path | None:
         """Return the path to the Python interpreter for a managed runtime.
 
-        Uses ``py -<tag> -c "import sys; print(sys.executable)"`` to ask
+        Uses `py -<tag> -c "import sys; print(sys.executable)"` to ask
         the Python Install Manager where the given runtime lives.
 
         Args:
-            tag: The Python version tag (e.g. ``"3.14"``, ``"3.12"``).
+            tag: The Python version tag (e.g. `"3.14"`, `"3.12"`).
 
         Returns:
-            Absolute path to the interpreter, or ``None`` if not installed.
+            Absolute path to the interpreter, or `None` if not installed.
         """
         logger = logging.getLogger('porringer.pim.resolve_executable')
         try:

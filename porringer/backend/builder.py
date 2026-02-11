@@ -1,6 +1,6 @@
 """Builder — generic plugin discovery and construction.
 
-Provides :meth:`Builder.find_plugins` and :meth:`Builder.build_plugins`
+Provides `Builder.find_plugins()` and `Builder.build_plugins()`
 for discovering and instantiating plugins from any entry-point group
 without per-kind boilerplate.
 """
@@ -38,13 +38,13 @@ class Builder:
     ) -> list[PluginInformation[T]]:
         """Search for registered plugins in an entry-point group.
 
-        Scans ``porringer.<group>`` for classes that are subclasses of
+        Scans `porringer.<group>` for classes that are subclasses of
         *base_class* and returns plugin-info wrappers for each.
 
         Args:
-            group: Entry-point group suffix (e.g. ``'environment'``).
+            group: Entry-point group suffix (e.g. `'environment'`).
             base_class: Expected base class; incompatible types are skipped.
-            check_dependencies: If ``True``, validates plugin dependencies
+            check_dependencies: If `True`, validates plugin dependencies
                 and filters out plugins with unmet required dependencies.
 
         Returns:
