@@ -75,7 +75,13 @@ _STRATEGY_VERB: dict[SyncStrategy, str] = {
 
 @dataclass(frozen=True)
 class _ExecutionPhaseContext:
-    """Shared context for execution phase operations."""
+    """Shared context for execution phase operations.
+
+    Used by post-sync commands and as a grab-bag for phases that
+    need access to discovered plugins, parameters, and the event
+    queue.  Project-sync and SCM phases receive their directory
+    arguments directly rather than through this context.
+    """
 
     environments: dict[str, Environment]
     project_environments: dict[str, ProjectEnvironment] | None
@@ -1107,8 +1113,12 @@ class SyncCommands:
         return results
 
     @staticmethod
-    def _determine_working_dir(parameters: SetupParameters, path: Path) -> Path:
-        """Determine the working directory for command execution.
+    def _determine_fallback_dir(parameters: SetupParameters, path: Path) -> Path:
+        """Determine the fallback working directory for SCM and post-sync commands.
+
+        Project-sync actions use per-plugin auto-discovery instead of
+        this method.  This fallback is used by SCM clone and post-sync
+        command phases only.
 
         Args:
             parameters: Setup parameters that may specify a project directory.
@@ -1125,12 +1135,16 @@ class SyncCommands:
         self,
         project_actions: list[SetupAction],
         context: _ExecutionPhaseContext,
+        manifest_directory: Path,
     ) -> list[SetupActionResult]:
         """Execute or skip project sync actions depending on context.
 
         Args:
             project_actions: The project-kind actions to process.
             context: Execution phase context with parameters and flags.
+            manifest_directory: Directory containing the manifest file,
+                used as the starting point for per-plugin project root
+                auto-discovery.
 
         Returns:
             Results for each project action.
@@ -1139,7 +1153,7 @@ class SyncCommands:
             return await self._execute_project_sync_actions(
                 project_actions,
                 context.project_environments,
-                context.working_dir,
+                manifest_directory,
                 context.parameters,
                 context.event_queue,
             )
@@ -1191,7 +1205,8 @@ class SyncCommands:
         scm_environments = self._discover_plugins('scm', ScmEnvironment)
 
         skip_project = parameters.project_directory is False
-        working_dir = self._determine_working_dir(parameters, path)
+        fallback_dir = self._determine_fallback_dir(parameters, path)
+        manifest_directory = path if path.is_dir() else path.parent
 
         # Populate CLI commands for all resolved actions
         for action in actions:
@@ -1265,9 +1280,10 @@ class SyncCommands:
                         project_environments=project_environments,
                         parameters=parameters,
                         skip_project=skip_project,
-                        working_dir=working_dir,
+                        working_dir=fallback_dir,
                         event_queue=event_queue,
                     ),
+                    manifest_directory,
                 )
             )
 
@@ -1277,7 +1293,7 @@ class SyncCommands:
                 await self._execute_scm_actions(
                     phases[PluginKind.SCM],
                     scm_environments,
-                    working_dir,
+                    fallback_dir,
                     parameters,
                     event_queue,
                 )
@@ -1290,7 +1306,7 @@ class SyncCommands:
                 project_environments=project_environments,
                 parameters=parameters,
                 skip_project=skip_project,
-                working_dir=working_dir,
+                working_dir=fallback_dir,
                 event_queue=event_queue,
             )
             results.extend(await self._execute_command_actions(phases[None], context))
@@ -1433,19 +1449,24 @@ class SyncCommands:
         self,
         project_sync_actions: list[SetupAction],
         project_environments: dict[str, ProjectEnvironment] | None,
-        working_dir: Path,
+        manifest_directory: Path,
         parameters: SetupParameters,
         event_queue: asyncio.Queue[ProgressEvent | None] | None,
     ) -> list[SetupActionResult]:
         """Execute PROJECT_SYNC actions sequentially.
 
         Each action invokes the resolved project-environment plugin's
-        `ProjectEnvironment.sync()` method in the manifest directory.
+        ``ProjectEnvironment.sync()`` method.  When
+        ``parameters.project_directory`` is an explicit ``Path`` it is
+        used as the working directory for every plugin.  Otherwise each
+        plugin auto-discovers its project root by walking ancestor
+        directories of *manifest_directory* looking for its ecosystem's
+        marker file (e.g. ``package.json``, ``pyproject.toml``).
 
         Args:
             project_sync_actions: The project sync actions.
             project_environments: Dict of project-environment plugins.
-            working_dir: Working directory (manifest location).
+            manifest_directory: Directory containing the manifest file.
             parameters: Setup parameters (dry-run, etc.).
             event_queue: Optional queue for progress events.
 
@@ -1458,7 +1479,7 @@ class SyncCommands:
             if event_queue is not None:
                 event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
 
-            result = await self._execute_project_sync(action, project_environments, working_dir, parameters)
+            result = await self._execute_project_sync(action, project_environments, manifest_directory, parameters)
 
             results.append(result)
             if event_queue is not None:
@@ -1475,15 +1496,22 @@ class SyncCommands:
     async def _execute_project_sync(
         action: SetupAction,
         project_environments: dict[str, ProjectEnvironment] | None,
-        working_dir: Path,
+        manifest_directory: Path,
         parameters: SetupParameters,
     ) -> SetupActionResult:
         """Execute a single PROJECT_SYNC action.
 
+        When ``parameters.project_directory`` is an explicit ``Path``
+        it is used unconditionally.  Otherwise the plugin's
+        ``resolve_project_root()`` is called to auto-discover the
+        project root from *manifest_directory*.  If discovery fails
+        (no marker found), *manifest_directory* is used as fallback
+        and a warning is logged.
+
         Args:
             action: The project sync action.
             project_environments: Dict of project-environment plugins.
-            working_dir: Working directory.
+            manifest_directory: Directory containing the manifest file.
             parameters: Setup parameters.
 
         Returns:
@@ -1496,7 +1524,36 @@ class SyncCommands:
             )
 
         proj_env = proj_envs[action.installer]
-        params = ProjectSyncParameters(directory=working_dir, dry=parameters.dry_run)
+
+        # Determine the effective directory for this plugin
+        effective_dir: Path
+        if isinstance(parameters.project_directory, Path):
+            # Explicit override — use as-is
+            effective_dir = parameters.project_directory
+        else:
+            # Auto-discover per-plugin project root
+            discovered = type(proj_env).resolve_project_root(manifest_directory)
+            if discovered is not None:
+                effective_dir = discovered
+                if discovered != manifest_directory:
+                    logger.info(
+                        "Auto-discovered %s project root for '%s': %s",
+                        proj_env.ecosystem(),
+                        action.installer,
+                        discovered,
+                    )
+            else:
+                effective_dir = manifest_directory
+                marker = type(proj_env).project_marker()
+                if marker is not None:
+                    logger.warning(
+                        "No '%s' found in ancestors of %s; falling back to manifest directory for %s project sync",
+                        marker,
+                        manifest_directory,
+                        proj_env.ecosystem(),
+                    )
+
+        params = ProjectSyncParameters(directory=effective_dir, dry=parameters.dry_run)
 
         try:
             loop = asyncio.get_running_loop()

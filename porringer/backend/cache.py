@@ -108,10 +108,11 @@ class DirectoryCacheManager:
     # --- Directory Operations ---
 
     def add_directory(self, path: Path, name: str | None = None, validate: bool = True) -> ManifestDirectory:
-        """Add a directory to the cache.
+        """Add a directory or manifest file path to the cache.
 
         Args:
-            path: Path to the directory.
+            path: Path to a directory containing a manifest, or
+                directly to a manifest file (e.g. ``porringer.json``).
             name: Optional display name for the directory.
             validate: If True, validate path exists.
 
@@ -202,17 +203,15 @@ class DirectoryCacheManager:
     # --- Validation ---
 
     def validate_directories(self) -> list[tuple[ManifestDirectory, str]]:
-        """Validate all directories exist.
+        """Validate all directory entries exist.
 
         Returns:
-            List of (directory, error_message) for invalid directories.
+            List of (directory, error_message) for invalid entries.
         """
         invalid: list[tuple[ManifestDirectory, str]] = []
         for directory in self.list_directories():
             if not directory.path.exists():
                 invalid.append((directory, f'Path does not exist: {directory.path}'))
-            elif not directory.path.is_dir():
-                invalid.append((directory, f'Path is not a directory: {directory.path}'))
         return invalid
 
     def clear(self) -> None:

@@ -18,9 +18,16 @@ from porringer.core.schema import PackageRef, PlatformScoped, PluginKind
 
 
 class ManifestDirectory(BaseModel):
-    """A directory containing manifest files."""
+    """A directory or file path referencing a manifest.
 
-    path: Path = Field(description='Absolute path to directory')
+    The path may point to a directory containing a manifest file
+    (``porringer.json`` or ``pyproject.toml``), or directly to a
+    manifest file.  When the path is a file, the sync engine uses
+    the file's parent directory as the starting point for
+    project-root discovery.
+    """
+
+    path: Path = Field(description='Absolute path to a directory or manifest file')
     name: str | None = Field(default=None, description='Optional display name/alias')
 
 
@@ -362,9 +369,13 @@ class SetupParameters(BaseModel):
         default=None,
         description=(
             'Controls where project-sync and post-sync actions run. '
-            'None (default) infers the working directory from the manifest path. '
-            'A Path overrides the working directory. '
-            'False skips project-sync and post-sync actions entirely.'
+            'None (default) lets each project-environment plugin auto-discover '
+            'its project root by walking ancestor directories from the manifest '
+            'location looking for an ecosystem-specific marker file '
+            '(e.g. pyproject.toml for Python, package.json for Node). '
+            'A Path overrides the working directory for all plugins, '
+            'disabling per-ecosystem auto-discovery. '
+            'False skips project-sync actions entirely.'
         ),
     )
     timeout: int = Field(default=300, description='Timeout in seconds for post-sync commands')
