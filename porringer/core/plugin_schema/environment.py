@@ -1,6 +1,5 @@
 """Plugin utilities for package environments"""
 
-import asyncio
 import logging
 import re
 import subprocess
@@ -19,7 +18,7 @@ from porringer.core.schema import (
     PorringerModel,
 )
 from porringer.schema import SetupAction, SubActionProgress
-from porringer.utility.utility import async_run_command_streaming
+from porringer.utility.utility import StreamProgress, run_command, stream_command
 
 
 class PackageParameters(PorringerModel):
@@ -167,10 +166,9 @@ class Environment(ToolBasedPlugin):
     async def async_install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package identified by its name.
 
-        When `params.progress_callback` is set, streams subprocess output
-        line-by-line via `async_run_command_streaming()` using the
-        command returned by `install_command()`.  Otherwise wraps the
-        synchronous `install()` in an executor.
+        Uses a native async subprocess via `install_command()`.  When
+        `params.progress_callback` is set, output is streamed
+        line-by-line; otherwise output is collected silently.
 
         Subclasses only need to override this when the streaming command
         differs from `install_command()` or when post-install logic
@@ -182,23 +180,17 @@ class Environment(ToolBasedPlugin):
         Returns:
             The package, or None if installation failed
         """
+        args = list(self.install_command(params.package))
         if params.progress_callback is not None:
-            return await self._async_streaming_run(
-                args=list(self.install_command(params.package)),
-                params=params,
-                phase='installing',
-                verb='install',
-            )
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.install, params)
+            return await self._stream_command(args=args, params=params, phase='installing', verb='install')
+        return await self._run_command(args=args, params=params, verb='install')
 
     async def async_upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrades the given package.
 
-        When `params.progress_callback` is set, streams subprocess output
-        line-by-line via `async_run_command_streaming()` using the
-        command returned by `upgrade_command()`.  Otherwise wraps the
-        synchronous `upgrade()` in an executor.
+        Uses a native async subprocess via `upgrade_command()`.  When
+        `params.progress_callback` is set, output is streamed
+        line-by-line; otherwise output is collected silently.
 
         Subclasses only need to override this when the streaming command
         differs from `upgrade_command()` or when post-upgrade logic
@@ -210,19 +202,14 @@ class Environment(ToolBasedPlugin):
         Returns:
             The package, or None if the upgrade failed.
         """
+        args = list(self.upgrade_command(params.package))
         if params.progress_callback is not None:
-            return await self._async_streaming_run(
-                args=list(self.upgrade_command(params.package)),
-                params=params,
-                phase='upgrading',
-                verb='upgrade',
-            )
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.upgrade, params)
+            return await self._stream_command(args=args, params=params, phase='upgrading', verb='upgrade')
+        return await self._run_command(args=args, params=params, verb='upgrade')
 
     # --- Helpers ----------------------------------------------------------
 
-    def _make_action(self, description: str, package: PackageRef | None = None) -> SetupAction:
+    def _build_action(self, description: str, package: PackageRef | None = None) -> SetupAction:
         """Build a `SetupAction` populated from this plugin's metadata.
 
         Uses `plugin_kind()`, `ecosystem()`, and `tool_name()`
@@ -236,7 +223,42 @@ class Environment(ToolBasedPlugin):
             package=package,
         )
 
-    async def _async_streaming_run(
+    async def _run_command(
+        self,
+        *,
+        args: list[str],
+        params: PackageParameters,
+        verb: str,
+    ) -> Package | None:
+        """Run *args* as a native async subprocess without streaming.
+
+        Replaces the legacy `run_in_executor(self.install)` pattern with
+        a truly non-blocking async subprocess.
+
+        Args:
+            args: Command and arguments to run.
+            params: Package parameters.
+            verb: Human-readable verb for log messages (e.g. `"install"`).
+
+        Returns:
+            The installed/upgraded package, or `None` on failure.
+        """
+        logger = logging.getLogger(f'porringer.{self.tool_name()}.{verb}')
+        try:
+            result = await run_command(args)
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                return None
+        except FileNotFoundError:
+            logger.error(f'{self.tool_name()} not found')
+            return None
+        except Exception as e:
+            logger.error(f'Failed to {verb} {params.package.name}: {e}')
+            return None
+        return Package(name=params.package.name, version=None)
+
+    async def _stream_command(
         self,
         *,
         args: list[str],
@@ -247,7 +269,7 @@ class Environment(ToolBasedPlugin):
         """Run *args* with line-by-line streaming and standard error handling.
 
         Constructs the `SetupAction` automatically from plugin
-        metadata and delegates to `async_run_command_streaming()`.
+        metadata and delegates to `stream_command()`.
 
         Args:
             args: Command and arguments to run.
@@ -260,16 +282,18 @@ class Environment(ToolBasedPlugin):
         """
         assert params.progress_callback is not None
         logger = logging.getLogger(f'porringer.{self.tool_name()}.{verb}')
-        action = self._make_action(
+        action = self._build_action(
             description=f'{verb.capitalize()} {params.package.specifier}',
             package=params.package,
         )
         try:
-            result = await async_run_command_streaming(
+            result = await stream_command(
                 args,
-                action=action,
-                progress_callback=params.progress_callback,
-                phase=phase,
+                progress=StreamProgress(
+                    action=action,
+                    callback=params.progress_callback,
+                    phase=phase,
+                ),
             )
             logger.info(result.stdout)
             if result.returncode != 0:
