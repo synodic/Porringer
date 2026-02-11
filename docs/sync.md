@@ -150,8 +150,37 @@ porringer sync --all
 
 ## Project Directory Override
 
-By default, project-sync backends and post-sync commands run in the manifest's
-parent directory.  Use `--project-dir` to point them elsewhere:
+By default, each project-sync backend auto-discovers its own project root
+by walking ancestor directories from the manifest's location, looking for
+the ecosystem's marker file:
+
+| Ecosystem | Marker file      |
+| --------- | ---------------- |
+| `python`  | `pyproject.toml` |
+| `node`    | `package.json`   |
+| `deno`    | `deno.json`      |
+
+This means the manifest can live in a subdirectory while the project root
+remains higher up:
+
+```
+my-project/
+  package.json          ← Node project root (auto-discovered)
+  pyproject.toml        ← Python project root (auto-discovered)
+  .porringer/
+    porringer.json      ← manifest file
+```
+
+```shell
+porringer sync --path my-project/.porringer
+```
+
+Each ecosystem independently discovers its own root, so a Python plugin
+and a Node plugin can resolve to different directories from the same
+manifest.  If no marker is found, the manifest's directory is used as
+fallback (with a warning).
+
+Use `--project-dir` to override auto-discovery for all ecosystems:
 
 ```shell
 porringer sync --path manifest.json --project-dir ./my-project

@@ -4,9 +4,13 @@ A `ProjectEnvironment` plugin wraps a project dependency manager
 (PDM, Poetry, uv) and delegates venv creation, dependency resolution,
 and lock-file synchronisation entirely to the underlying tool.
 
-The sync engine invokes `ProjectEnvironment.sync()` in the
-manifest's directory after all per-package actions have completed so
-that the tool itself is already installed (e.g. via pipx).
+The sync engine invokes `ProjectEnvironment.sync()` after all
+per-package actions have completed so that the tool itself is already
+installed (e.g. via pipx).  When the manifest file lives in a
+subdirectory of the project root, each plugin auto-discovers the
+correct project root by walking ancestor directories looking for its
+ecosystem's marker file (e.g. ``package.json`` for Node,
+``pyproject.toml`` for Python).
 """
 
 import logging
@@ -21,6 +25,13 @@ from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import PluginKind, PluginParameters, PorringerModel
 
 logger = logging.getLogger(__name__)
+
+# Default mapping from ecosystem name to the file that marks a project root.
+ECOSYSTEM_MARKERS: dict[str, str] = {
+    'python': 'pyproject.toml',
+    'node': 'package.json',
+    'deno': 'deno.json',
+}
 
 
 class ProjectSyncParameters(PorringerModel):
@@ -108,6 +119,82 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
         Examples: `"python"`, `"node"`, `"deno"`.
         """
         ...
+
+    @classmethod
+    def project_marker(cls) -> str | None:
+        """Return the filename that marks this ecosystem's project root.
+
+        The sync engine uses this marker to auto-discover the project
+        root when the manifest file lives in a subdirectory.  It walks
+        ancestor directories starting from the manifest's location
+        and returns the first directory containing this file.
+
+        The default implementation looks up `ecosystem()` in a
+        built-in mapping:
+
+        ==========  ================
+        Ecosystem   Marker
+        ==========  ================
+        ``python``  ``pyproject.toml``
+        ``node``    ``package.json``
+        ``deno``    ``deno.json``
+        ==========  ================
+
+        Override this method when a plugin uses a non-standard marker
+        or when multiple markers should be checked.
+
+        Returns:
+            Filename to search for, or ``None`` to disable
+            auto-discovery (always use the manifest directory).
+        """
+        return ECOSYSTEM_MARKERS.get(cls.ecosystem())
+
+    @classmethod
+    def resolve_project_root(
+        cls,
+        search_from: Path,
+        *,
+        boundary: Path | None = None,
+    ) -> Path | None:
+        """Walk ancestor directories looking for `project_marker()`.
+
+        Starting from *search_from* (inclusive) and moving towards the
+        filesystem root, return the first directory that contains the
+        marker file returned by `project_marker()`.
+
+        Args:
+            search_from: Directory to start the search from
+                (typically the manifest's parent directory).
+            boundary: Optional upper-bound directory.  The search
+                will not ascend above this path.  When ``None``, the
+                search continues to the filesystem root.
+
+        Returns:
+            The discovered project root, or ``None`` if the marker
+            was not found (or ``project_marker()`` returns ``None``).
+        """
+        marker = cls.project_marker()
+        if marker is None:
+            return None
+
+        current = search_from.resolve()
+        boundary_resolved = boundary.resolve() if boundary is not None else None
+
+        while True:
+            if (current / marker).exists():
+                return current
+
+            # Stop if we've reached the boundary
+            if boundary_resolved is not None and current == boundary_resolved:
+                break
+
+            parent = current.parent
+            # Stop at the filesystem root
+            if parent == current:
+                break
+            current = parent
+
+        return None
 
     def sync_command(self) -> list[str]:
         """Return the CLI command for syncing the project.
