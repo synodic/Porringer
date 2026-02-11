@@ -9,8 +9,8 @@ class BunProjectEnvironment(ProjectEnvironment):
     """Project environment managed by Bun.
 
     Delegates dependency resolution and lock-file synchronisation to
-    ``bun install`` inside the project directory.  Bun is npm-compatible:
-    it reads ``package.json``, uses ``node_modules``, and installs from
+    `bun install` inside the project directory.  Bun is npm-compatible:
+    it reads `package.json`, uses `node_modules`, and installs from
     the npm registry.
     """
 
@@ -19,7 +19,7 @@ class BunProjectEnvironment(ProjectEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Bun project belongs to the ``node`` ecosystem."""
+        """Bun project belongs to the `node` ecosystem."""
         return 'node'
 
     @staticmethod
@@ -37,5 +37,5 @@ class BunProjectEnvironment(ProjectEnvironment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Bun project wraps the ``bun`` CLI."""
+        """Bun project wraps the `bun` CLI."""
         return 'bun'

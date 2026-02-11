@@ -9,7 +9,7 @@ class UvProjectEnvironment(ProjectEnvironment):
     """Project environment managed by uv.
 
     Delegates venv creation, dependency resolution, and lock-file
-    synchronisation to ``uv sync``.
+    synchronisation to `uv sync`.
     """
 
     _sync_verb: str = 'sync'
@@ -17,7 +17,7 @@ class UvProjectEnvironment(ProjectEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """UV project belongs to the ``python`` ecosystem."""
+        """UV project belongs to the `python` ecosystem."""
         return 'python'
 
     @staticmethod
@@ -35,5 +35,5 @@ class UvProjectEnvironment(ProjectEnvironment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """UV project wraps the ``uv`` CLI."""
+        """UV project wraps the `uv` CLI."""
         return 'uv'

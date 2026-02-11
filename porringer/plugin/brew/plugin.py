@@ -37,7 +37,7 @@ class BrewEnvironment(Environment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Homebrew belongs to the ``system`` ecosystem."""
+        """Homebrew belongs to the `system` ecosystem."""
         return 'system'
 
     @staticmethod
@@ -53,7 +53,7 @@ class BrewEnvironment(Environment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Homebrew wraps the ``brew`` CLI."""
+        """Homebrew wraps the `brew` CLI."""
         return 'brew'
 
     @override
@@ -221,6 +221,36 @@ class BrewEnvironment(Environment):
 
         version = self.__class__._get_formula_version(formula)
         return Package(name=pkg.name, version=version)
+
+    @override
+    async def async_install(self, params: PackageParameters) -> Package | None:
+        """Asynchronously installs a formula using Homebrew.
+
+        Delegates streaming to the base class, then resolves the
+        installed version via `brew info`.
+        """
+        result = await super().async_install(params)
+        if result is not None and result.version is None:
+            result = Package(
+                name=result.name,
+                version=self.__class__._get_formula_version(result.name),
+            )
+        return result
+
+    @override
+    async def async_upgrade(self, params: PackageParameters) -> Package | None:
+        """Asynchronously upgrades a formula using Homebrew.
+
+        Delegates streaming to the base class, then resolves the
+        installed version via `brew info`.
+        """
+        result = await super().async_upgrade(params)
+        if result is not None and result.version is None:
+            result = Package(
+                name=result.name,
+                version=self.__class__._get_formula_version(result.name),
+            )
+        return result
 
     @override
     def packages(self) -> list[Package]:

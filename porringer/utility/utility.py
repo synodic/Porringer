@@ -6,14 +6,17 @@ import os
 import re
 import subprocess
 import sys
-from typing import Any, NamedTuple, NewType
+from collections.abc import Callable
+from typing import Any, Literal, NamedTuple, NewType
 
-TypeName = NewType('TypeName', str)
-TypeGroup = NewType('TypeGroup', str)
+from porringer.schema import SetupAction, SubActionProgress
+
+TypeName = NewType("TypeName", str)
+TypeGroup = NewType("TypeGroup", str)
 
 
-class AsyncRunResult(NamedTuple):
-    """Result of an async subprocess run."""
+class CommandResult(NamedTuple):
+    """Result of a subprocess run (sync or async)."""
 
     returncode: int
     stdout: str
@@ -25,7 +28,7 @@ async def async_run_command(
     *,
     timeout: float | None = None,
     cancellation_check: asyncio.Event | None = None,
-) -> AsyncRunResult:
+) -> CommandResult:
     """Run a command asynchronously using asyncio subprocess.
 
     Uses modern asyncio.timeout() context manager (Python 3.11+) for
@@ -37,7 +40,7 @@ async def async_run_command(
         cancellation_check: Optional Event that, when set, triggers cancellation.
 
     Returns:
-        AsyncRunResult with returncode, stdout, and stderr.
+        CommandResult with returncode, stdout, and stderr.
 
     Raises:
         asyncio.TimeoutError: If the command times out.
@@ -73,7 +76,7 @@ async def async_run_command(
             # Cancellation requested - kill process
             process.kill()
             await process.wait()
-            raise asyncio.CancelledError('Operation cancelled')
+            raise asyncio.CancelledError("Operation cancelled")
 
         return communicate_task.result()
 
@@ -85,26 +88,130 @@ async def async_run_command(
         await process.wait()
         raise
 
-    return AsyncRunResult(
+    return CommandResult(
         returncode=process.returncode or 0,
-        stdout=stdout_bytes.decode('utf-8', errors='replace'),
-        stderr=stderr_bytes.decode('utf-8', errors='replace'),
+        stdout=stdout_bytes.decode("utf-8", errors="replace"),
+        stderr=stderr_bytes.decode("utf-8", errors="replace"),
     )
 
 
-class RunResult(NamedTuple):
-    """Result of a subprocess run."""
+async def async_run_command_streaming(
+    args: list[str],
+    *,
+    action: SetupAction,
+    progress_callback: Callable[[SubActionProgress], None],
+    phase: str = "running",
+    timeout: float | None = None,
+    cancellation_check: asyncio.Event | None = None,
+) -> CommandResult:
+    """Run a command asynchronously, streaming stdout/stderr line-by-line.
 
-    returncode: int
-    stdout: str
-    stderr: str
+    Each line of output is emitted as a `SubActionProgress` event
+    with the `output` and `stream` fields set, enabling real-time
+    display in an execution log panel.
+
+    Args:
+        args: Command and arguments to run.
+        action: The parent setup action for progress events.
+        progress_callback: Callback to receive per-line progress updates.
+        phase: The phase label to use for output events (default `'running'`).
+        timeout: Optional timeout in seconds.
+        cancellation_check: Optional Event that, when set, triggers cancellation.
+
+    Returns:
+        CommandResult with returncode, stdout, and stderr.
+
+    Raises:
+        asyncio.TimeoutError: If the command times out.
+        asyncio.CancelledError: If cancelled via cancellation_check.
+        FileNotFoundError: If the command is not found.
+    """
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    async def read_stream(
+        stream: asyncio.StreamReader,
+        stream_name: Literal["stdout", "stderr"],
+        lines: list[str],
+    ) -> None:
+        """Read a stream line-by-line and emit progress events."""
+        async for raw_line in stream:
+            line = raw_line.decode("utf-8", errors="replace").rstrip()
+            lines.append(line)
+            progress_callback(
+                SubActionProgress(
+                    action=action,
+                    phase=phase,
+                    output=line,
+                    stream=stream_name,
+                )
+            )
+
+    async def run_with_streaming() -> None:
+        """Stream both pipes and await process completion."""
+        tasks = []
+        if process.stdout:
+            tasks.append(
+                asyncio.create_task(read_stream(process.stdout, "stdout", stdout_lines))
+            )
+        if process.stderr:
+            tasks.append(
+                asyncio.create_task(read_stream(process.stderr, "stderr", stderr_lines))
+            )
+
+        if cancellation_check is not None:
+            cancel_task = asyncio.create_task(cancellation_check.wait())
+
+            async def _gather_streams() -> None:
+                await asyncio.gather(*tasks)
+
+            stream_task = asyncio.create_task(_gather_streams())
+
+            done, pending = await asyncio.wait(
+                [stream_task, cancel_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for task in pending:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+            if cancel_task in done:
+                process.kill()
+                await process.wait()
+                raise asyncio.CancelledError("Operation cancelled")
+        else:
+            await asyncio.gather(*tasks)
+
+        await process.wait()
+
+    try:
+        async with asyncio.timeout(timeout):
+            await run_with_streaming()
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        raise
+
+    return CommandResult(
+        returncode=process.returncode or 0,
+        stdout="\n".join(stdout_lines),
+        stderr="\n".join(stderr_lines),
+    )
 
 
 def run_command(
     args: list[str],
     *,
     timeout: float | None = None,
-) -> RunResult:
+) -> CommandResult:
     """Run a command synchronously with standard output capture.
 
     Args:
@@ -112,7 +219,7 @@ def run_command(
         timeout: Optional timeout in seconds.
 
     Returns:
-        RunResult with returncode, stdout, and stderr.
+        CommandResult with returncode, stdout, and stderr.
 
     Raises:
         subprocess.TimeoutExpired: If the command times out.
@@ -126,7 +233,7 @@ def run_command(
         timeout=timeout,
     )
 
-    return RunResult(
+    return CommandResult(
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
@@ -140,7 +247,7 @@ class TypeID(NamedTuple):
     group: TypeGroup
 
 
-_canonicalize_regex = re.compile(r'((?<=[a-z])[A-Z]|(?<!\A)[A-Z](?=[a-z]))')
+_canonicalize_regex = re.compile(r"((?<=[a-z])[A-Z]|(?<!\A)[A-Z](?=[a-z]))")
 
 
 def canonicalize_name(name: str) -> TypeID:
@@ -152,9 +259,9 @@ def canonicalize_name(name: str) -> TypeID:
     Returns:
         The type identifier
     """
-    sub = re.sub(_canonicalize_regex, r' \1', name)
-    values = sub.split(' ')
-    result = ''.join(values[:-1])
+    sub = re.sub(_canonicalize_regex, r" \1", name)
+    values = sub.split(" ")
+    result = "".join(values[:-1])
     return TypeID(TypeName(result.lower()), TypeGroup(values[-1].lower()))
 
 
@@ -179,4 +286,4 @@ def is_pipx_installation() -> bool:
     Returns:
         True if running in a pipx venv, False otherwise.
     """
-    return sys.prefix.split(os.sep)[-3:-1] == ['pipx', 'venvs']
+    return sys.prefix.split(os.sep)[-3:-1] == ["pipx", "venvs"]

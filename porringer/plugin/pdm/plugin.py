@@ -9,13 +9,13 @@ class PdmProjectEnvironment(ProjectEnvironment):
     """Project environment managed by PDM.
 
     Delegates venv creation, dependency resolution, and lock-file
-    synchronisation to ``pdm install``.
+    synchronisation to `pdm install`.
     """
 
     @staticmethod
     @override
     def ecosystem() -> str:
-        """PDM belongs to the ``python`` ecosystem."""
+        """PDM belongs to the `python` ecosystem."""
         return 'python'
 
     @staticmethod
@@ -33,5 +33,5 @@ class PdmProjectEnvironment(ProjectEnvironment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """PDM wraps the ``pdm`` CLI."""
+        """PDM wraps the `pdm` CLI."""
         return 'pdm'

@@ -23,7 +23,7 @@ class PnpmEnvironment(Environment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Pnpm belongs to the ``node`` ecosystem."""
+        """Pnpm belongs to the `node` ecosystem."""
         return 'node'
 
     @staticmethod
@@ -35,7 +35,7 @@ class PnpmEnvironment(Environment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Pnpm wraps the ``pnpm`` CLI."""
+        """Pnpm wraps the `pnpm` CLI."""
         return 'pnpm'
 
     @override
@@ -78,7 +78,7 @@ class PnpmEnvironment(Environment):
 
     @override
     def search(self, package: PackageRef) -> Package | None:
-        """Pnpm does not provide a search CLI; returns ``None``."""
+        """Pnpm does not provide a search CLI; returns `None`."""
         return None
 
     @override
@@ -135,7 +135,7 @@ class PnpmEnvironment(Environment):
     def packages(self) -> list[Package]:
         """Gathers globally installed pnpm packages.
 
-        Uses ``pnpm list -g --json --depth=0`` to list top-level global
+        Uses `pnpm list -g --json --depth=0` to list top-level global
         packages and parses the JSON output.
 
         Returns:

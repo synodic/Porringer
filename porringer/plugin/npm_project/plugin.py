@@ -9,7 +9,7 @@ class NpmProjectEnvironment(ProjectEnvironment):
     """Project environment managed by npm.
 
     Delegates dependency resolution and lock-file synchronisation to
-    ``npm install`` inside the project directory.
+    `npm install` inside the project directory.
     """
 
     _sync_verb: str = 'install'
@@ -17,7 +17,7 @@ class NpmProjectEnvironment(ProjectEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Npm project belongs to the ``node`` ecosystem."""
+        """Npm project belongs to the `node` ecosystem."""
         return 'node'
 
     @staticmethod
@@ -35,5 +35,5 @@ class NpmProjectEnvironment(ProjectEnvironment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Npm project wraps the ``npm`` CLI."""
+        """Npm project wraps the `npm` CLI."""
         return 'npm'

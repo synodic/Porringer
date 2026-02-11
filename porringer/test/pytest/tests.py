@@ -67,7 +67,7 @@ class ProjectEnvironmentUnitTests[T: ProjectEnvironment](
 ):
     """Base class for all project-environment unit tests.
 
-    Custom implementations of :class:`ProjectEnvironment` should inherit
+    Custom implementations of `ProjectEnvironment` should inherit
     from this class for their tests.
     """
 
@@ -120,7 +120,7 @@ class ScmEnvironmentIntegrationTests[T: ScmEnvironment](
 class ScmEnvironmentUnitTests[T: ScmEnvironment](PluginUnitTests[T], ScmEnvironmentTests[T], metaclass=ABCMeta):
     """Base class for all SCM-environment unit tests.
 
-    Custom implementations of :class:`ScmEnvironment` should inherit
+    Custom implementations of `ScmEnvironment` should inherit
     from this class for their tests.
     """
 

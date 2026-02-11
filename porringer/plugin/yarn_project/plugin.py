@@ -15,14 +15,14 @@ class YarnProjectEnvironment(ProjectEnvironment):
     """Project environment managed by Yarn Berry (v4+).
 
     Delegates dependency resolution and lock-file synchronisation to
-    ``yarn install`` inside the project directory.
+    `yarn install` inside the project directory.
 
-    Yarn Berry removed ``yarn global``, so this plugin is
+    Yarn Berry removed `yarn global`, so this plugin is
     **ProjectEnvironment-only** — there is no corresponding
-    ``YarnEnvironment`` for global package installs.
+    `YarnEnvironment` for global package installs.
 
-    Overrides :meth:`sync` because Yarn Berry does not support
-    ``--dry-run``.
+    Overrides `sync()` because Yarn Berry does not support
+    `--dry-run`.
     """
 
     _sync_verb: str = 'install'
@@ -30,7 +30,7 @@ class YarnProjectEnvironment(ProjectEnvironment):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Yarn project belongs to the ``node`` ecosystem."""
+        """Yarn project belongs to the `node` ecosystem."""
         return 'node'
 
     @staticmethod
@@ -48,21 +48,21 @@ class YarnProjectEnvironment(ProjectEnvironment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Yarn project wraps the ``yarn`` CLI."""
+        """Yarn project wraps the `yarn` CLI."""
         return 'yarn'
 
     @override
     def sync(self, params: ProjectSyncParameters) -> bool:
-        """Run ``yarn install`` in the project directory.
+        """Run `yarn install` in the project directory.
 
-        Yarn Berry does not support ``--dry-run``.  In dry-run mode the
+        Yarn Berry does not support `--dry-run`.  In dry-run mode the
         command is logged but not executed.
 
         Args:
             params: Sync parameters (directory, dry-run flag).
 
         Returns:
-            ``True`` on success, ``False`` on failure.
+            `True` on success, `False` on failure.
         """
         args = list(self.sync_command())
         if params.dry:

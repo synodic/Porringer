@@ -14,7 +14,6 @@ from porringer.core.plugin_schema.environment import (
 )
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import Package, PackageRef, PluginKind
-from porringer.utility.utility import async_run_command
 
 
 def _get_pipx_venvs_dir() -> Path:
@@ -51,7 +50,7 @@ class PipxEnvironment(Environment, RuntimeConsumer):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Pipx belongs to the ``python`` ecosystem."""
+        """Pipx belongs to the `python` ecosystem."""
         return 'python'
 
     @staticmethod
@@ -81,7 +80,7 @@ class PipxEnvironment(Environment, RuntimeConsumer):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Pipx wraps the ``pipx`` CLI."""
+        """Pipx wraps the `pipx` CLI."""
         return 'pipx'
 
     @override
@@ -113,28 +112,6 @@ class PipxEnvironment(Environment, RuntimeConsumer):
             return None
         except subprocess.SubprocessError as e:
             logger.error(f'Failed to install {params.package.name}: {e}')
-            return None
-        except Exception as e:
-            logger.error(f'Failed to install {params.package.name}: {e}')
-            return None
-        return Package(name=params.package.name, version=None)
-
-    @override
-    async def async_install(self, params: PackageParameters) -> Package | None:
-        """Asynchronously installs the given package using pipx."""
-        logger = logging.getLogger('porringer.pipx.install')
-        args = ['pipx', 'install', params.package.specifier]
-        if params.dry:
-            logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.package.name, version=None)
-        try:
-            result = await async_run_command(args)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except TimeoutError:
-            logger.error(f'Timeout installing {params.package.name}')
             return None
         except Exception as e:
             logger.error(f'Failed to install {params.package.name}: {e}')

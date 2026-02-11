@@ -66,7 +66,7 @@ class ManifestDiagnostic:
     """A single diagnostic produced by manifest validation.
 
     Args:
-        field: Dot-path to the relevant field (e.g. ``"packages.python"``, ``"preferences.python"``).
+        field: Dot-path to the relevant field (e.g. `"packages.python"`, `"preferences.python"`).
         message: Human-readable description of the problem or concern.
         code: Machine-readable diagnostic code.
         severity: Whether this diagnostic is an error or a warning.
@@ -107,7 +107,7 @@ class ManifestValidationResult:
 class SkipReason(Enum):
     """Machine-readable reason an action was skipped.
 
-    Use ``SetupActionResult.message`` for the human-readable detail.
+    Use `SetupActionResult.message` for the human-readable detail.
     """
 
     ALREADY_INSTALLED = auto()
@@ -118,18 +118,18 @@ class SkipReason(Enum):
 class SetupAction:
     """A single action to perform during setup.
 
-    The ``kind`` field is the primary discriminator:
+    The `kind` field is the primary discriminator:
 
-    * :attr:`PluginKind.PACKAGE`, :attr:`PluginKind.TOOL`,
-      :attr:`PluginKind.RUNTIME` — install/upgrade a single package.
-    * :attr:`PluginKind.PROJECT` — sync a project lock-file / venv.
-    * :attr:`PluginKind.SCM` — clone a repository.
-    * ``None`` — run a post-sync shell command.
+    * `PluginKind.PACKAGE`, `PluginKind.TOOL`,
+      `PluginKind.RUNTIME` — install/upgrade a single package.
+    * `PluginKind.PROJECT` — sync a project lock-file / venv.
+    * `PluginKind.SCM` — clone a repository.
+    * `None` — run a post-sync shell command.
 
     Args:
         description: Human-readable description of the action.
-        kind: The plugin kind, or ``None`` for post-sync commands.
-        ecosystem: The ecosystem identifier (e.g. ``"python"``, ``"node"``).
+        kind: The plugin kind, or `None` for post-sync commands.
+        ecosystem: The ecosystem identifier (e.g. `"python"`, `"node"`).
         installer: The plugin name (for PACKAGE/TOOL/RUNTIME/PROJECT/SCM).
         package: The package reference (for PACKAGE/TOOL/RUNTIME/SCM).
         command: The command to run (for post-sync commands).
@@ -156,7 +156,7 @@ class SetupActionResult:
         success: Whether the action succeeded.
         message: Optional human-readable detail (error on failure, description on skip).
         skipped: Whether the action was skipped.
-        skip_reason: Machine-readable skip code (see :class:`SkipReason`).
+        skip_reason: Machine-readable skip code (see `SkipReason`).
     """
 
     action: SetupAction
@@ -175,15 +175,19 @@ class SubActionProgress:
 
     Args:
         action: The parent setup action this progress belongs to.
-        phase: Current phase (e.g. ``"downloading"``, ``"installing"``, ``"verifying"``).
-        progress: 0.0–1.0 completion fraction, or ``None`` if indeterminate.
-        message: Human-readable status line (e.g. ``"Downloading ruff-0.8.0.whl (2.1 MB)"``).
+        phase: Current phase (e.g. `"downloading"`, `"installing"`, `"verifying"`).
+        progress: 0.0–1.0 completion fraction, or `None` if indeterminate.
+        message: Human-readable status line (e.g. `"Downloading ruff-0.8.0.whl (2.1 MB)"`).
+        output: Raw output line from the subprocess, for log panel display.
+        stream: Which subprocess stream the output came from (`"stdout"` or `"stderr"`).
     """
 
     action: SetupAction
     phase: str
     progress: float | None = None
     message: str | None = None
+    output: str | None = None
+    stream: Literal['stdout', 'stderr'] | None = None
 
 
 class ProgressEventKind(Enum):
@@ -200,16 +204,16 @@ class ProgressEventKind(Enum):
 class ProgressEvent:
     """A single progress event from the setup execution stream.
 
-    Consumers iterate over ``AsyncIterator[ProgressEvent]`` to observe
+    Consumers iterate over `AsyncIterator[ProgressEvent]` to observe
     action lifecycle and sub-action detail updates.
 
     Args:
         kind: What this event represents.
-        action: The setup action this event relates to (``None`` for ``MANIFEST_LOADED`` / ``MANIFEST_FAILED``).
-        result: Action result (set only for ``ACTION_COMPLETED``).
-        sub_action: Sub-action detail (set only for ``SUB_ACTION_PROGRESS``).
-        manifest: Per-manifest preview (set only for ``MANIFEST_LOADED``).
-        failed_path: Path and error message (set only for ``MANIFEST_FAILED``).
+        action: The setup action this event relates to (`None` for `MANIFEST_LOADED` / `MANIFEST_FAILED`).
+        result: Action result (set only for `ACTION_COMPLETED`).
+        sub_action: Sub-action detail (set only for `SUB_ACTION_PROGRESS`).
+        manifest: Per-manifest preview (set only for `MANIFEST_LOADED`).
+        failed_path: Path and error message (set only for `MANIFEST_FAILED`).
     """
 
     kind: ProgressEventKind
@@ -270,7 +274,7 @@ class PackageSpec(PlatformScoped):
     @model_validator(mode='before')
     @classmethod
     def _coerce_string(cls, data: str | dict) -> dict:  # type: ignore[override]
-        """Allow plain strings as shorthand for ``{"name": "..."}``."""
+        """Allow plain strings as shorthand for `{"name": "..."}`."""
         if isinstance(data, str):
             return {'name': data}
         return data  # type: ignore[return-value]
@@ -279,14 +283,14 @@ class PackageSpec(PlatformScoped):
 class SetupManifest(BaseModel):
     """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer].
 
-    Manifest entries are grouped by **kind** (``packages``, ``tools``,
-    ``projects``, ``runtimes``), each containing a dict keyed by
-    **ecosystem** (e.g. ``"python"``, ``"node"``, ``"system"``).
+    Manifest entries are grouped by **kind** (`packages`, `tools`,
+    `projects`, `runtimes`), each containing a dict keyed by
+    **ecosystem** (e.g. `"python"`, `"node"`, `"system"`).
 
     Ecosystem names are free-form strings declared by plugins — the core
     schema does not enumerate them.  A third-party Cargo plugin declaring
-    ``ecosystem() = "rust"`` "just works" with
-    ``"packages": {"rust": ["serde"]}`` — zero core changes required.
+    `ecosystem() = "rust"` "just works" with
+    `"packages": {"rust": ["serde"]}` — zero core changes required.
     """
 
     version: str = Field(default='1', description='Manifest schema version')
@@ -321,9 +325,9 @@ class SetupManifest(BaseModel):
     post_sync: list[str] = Field(default_factory=list, description='Commands to run after state synchronisation')
 
     def iter_sections(self) -> Iterator[tuple[PluginKind, str, list[PackageSpec]]]:
-        """Yield ``(kind, ecosystem, packages)`` for every non-empty section.
+        """Yield `(kind, ecosystem, packages)` for every non-empty section.
 
-        Replaces the repeated ``for kind in PluginKind: getattr(…)``
+        Replaces the repeated `for kind in PluginKind: getattr(…)`
         pattern used throughout the sync engine.
         """
         for kind in PluginKind:
@@ -448,9 +452,9 @@ class BatchSetupResults:
     def skips(self) -> list[SetupActionResult]:
         """All skipped action results.
 
-        Each result carries ``skip_reason`` (:class:`SkipReason` enum),
-        ``message`` (human-readable detail), and ``action`` (with
-        ``action_type``, ``kind``, ``ecosystem``, ``installer``) for programmatic
+        Each result carries `skip_reason` (`SkipReason` enum),
+        `message` (human-readable detail), and `action` (with
+        `action_type`, `kind`, `ecosystem`, `installer`) for programmatic
         inspection.
         """
         return [r for m in self.manifest_results for r in m.results if r.skipped]
@@ -464,7 +468,7 @@ class ListPluginResults:
         name: The name of the plugin.
         version: The version of the plugin.
         installed: Whether the underlying package manager is available on the system.
-        tool_version: The PEP 440 version of the underlying CLI tool, or ``None``
+        tool_version: The PEP 440 version of the underlying CLI tool, or `None`
             if the tool is unavailable or its version could not be determined.
     """
 

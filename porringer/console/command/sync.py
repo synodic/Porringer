@@ -408,9 +408,9 @@ def _execute_with_progress(
 ) -> BatchSetupResults:
     """Execute installation with progress display.
 
-    Uses ``execute_stream`` to receive ``ProgressEvent`` items and updates
+    Uses `execute_stream` to receive `ProgressEvent` items and updates
     a Rich progress bar accordingly.  Manifests are discovered via
-    ``MANIFEST_LOADED`` events emitted by the stream — no separate preview
+    `MANIFEST_LOADED` events emitted by the stream — no separate preview
     step is required.
 
     Args:
@@ -510,7 +510,7 @@ def sync_default(
 
     When --project-dir is omitted, project-sync and post-sync commands run in
     the manifest's parent directory.  Pass --project-dir explicitly to override,
-    or use the API with ``project_directory=False`` to skip project backends.
+    or use the API with `project_directory=False` to skip project backends.
 
     Strategies:
       minimal — Install packages that aren't already present (default).

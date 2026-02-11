@@ -12,17 +12,17 @@ class PoetryProjectEnvironment(ProjectEnvironment):
     """Project environment managed by Poetry.
 
     Delegates venv creation, dependency resolution, and lock-file
-    synchronisation to ``poetry install``.
+    synchronisation to `poetry install`.
 
-    Overrides :meth:`sync` because Poetry requires a separate
-    ``poetry env use <path>`` step to select a non-default interpreter,
-    unlike PDM/uv which accept ``--python`` inline.
+    Overrides `sync()` because Poetry requires a separate
+    `poetry env use <path>` step to select a non-default interpreter,
+    unlike PDM/uv which accept `--python` inline.
     """
 
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Poetry belongs to the ``python`` ecosystem."""
+        """Poetry belongs to the `python` ecosystem."""
         return 'python'
 
     @staticmethod
@@ -40,24 +40,24 @@ class PoetryProjectEnvironment(ProjectEnvironment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Poetry wraps the ``poetry`` CLI."""
+        """Poetry wraps the `poetry` CLI."""
         return 'poetry'
 
     @override
     def sync_command(self) -> list[str]:
-        """Return the bare ``poetry install`` command.
+        """Return the bare `poetry install` command.
 
-        Poetry does not accept ``--python`` inline; runtime selection
-        is handled by a separate ``poetry env use`` step in :meth:`sync`.
+        Poetry does not accept `--python` inline; runtime selection
+        is handled by a separate `poetry env use` step in `sync()`.
         """
         return [self.tool_name(), self._sync_verb]
 
     @override
     def sync(self, params: ProjectSyncParameters) -> bool:
-        """Runs ``poetry install`` in the project directory.
+        """Runs `poetry install` in the project directory.
 
         If a runtime provider has resolved a Python interpreter, calls
-        ``poetry env use <path>`` first so that Poetry targets the
+        `poetry env use <path>` first so that Poetry targets the
         correct runtime.
 
         Args:

@@ -18,8 +18,8 @@ from porringer.core.schema import Package, PackageRef, PluginKind
 class PyenvEnvironment(Environment, RuntimeProvider):
     """Manages Python runtimes via pyenv (Linux / macOS).
 
-    Uses ``pyenv`` to install, list, and manage Python interpreter
-    versions.  Implements :class:`RuntimeProvider` so the sync engine
+    Uses `pyenv` to install, list, and manage Python interpreter
+    versions.  Implements `RuntimeProvider` so the sync engine
     can resolve the filesystem path to a managed interpreter.
 
     CLI Reference:
@@ -32,7 +32,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Pyenv belongs to the ``python`` ecosystem."""
+        """Pyenv belongs to the `python` ecosystem."""
         return 'python'
 
     @staticmethod
@@ -64,7 +64,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Pyenv wraps the ``pyenv`` CLI."""
+        """Pyenv wraps the `pyenv` CLI."""
         return 'pyenv'
 
     @override
@@ -85,14 +85,14 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     def resolve_executable(self, tag: str) -> Path | None:
         """Return the path to the Python interpreter for a pyenv-managed runtime.
 
-        Uses ``pyenv prefix <tag>`` to find the install directory, then
-        appends ``bin/python``.
+        Uses `pyenv prefix <tag>` to find the install directory, then
+        appends `bin/python`.
 
         Args:
-            tag: The Python version (e.g. ``"3.14.0"``, ``"3.12.4"``).
+            tag: The Python version (e.g. `"3.14.0"`, `"3.12.4"`).
 
         Returns:
-            Absolute path to the interpreter, or ``None`` if not installed.
+            Absolute path to the interpreter, or `None` if not installed.
         """
         logger = logging.getLogger('porringer.pyenv.resolve_executable')
         try:
@@ -124,11 +124,11 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         """Installs a Python runtime using pyenv.
 
         Args:
-            params: Installation parameters; ``package.name`` is the version
-                    string (e.g. ``"3.14.0"``).
+            params: Installation parameters; `package.name` is the version
+                    string (e.g. `"3.14.0"`).
 
         Returns:
-            The installed package, or ``None`` on failure.
+            The installed package, or `None` on failure.
         """
         logger = logging.getLogger('porringer.pyenv.install')
         version = params.package.name
@@ -159,13 +159,13 @@ class PyenvEnvironment(Environment, RuntimeProvider):
 
     @override
     def search(self, package: PackageRef) -> Package | None:
-        """Searches for an available Python version via ``pyenv install --list``.
+        """Searches for an available Python version via `pyenv install --list`.
 
         Args:
             package: The version reference to search for.
 
         Returns:
-            The package if a matching version is found, or ``None``.
+            The package if a matching version is found, or `None`.
         """
         logger = logging.getLogger('porringer.pyenv.search')
         target = package.name.strip()
@@ -193,13 +193,13 @@ class PyenvEnvironment(Environment, RuntimeProvider):
 
     @override
     def uninstall(self, params: UninstallParameters) -> list[Package | None]:
-        """Uninstalls Python runtimes via ``pyenv uninstall -f``.
+        """Uninstalls Python runtimes via `pyenv uninstall -f`.
 
         Args:
             params: Uninstall parameters.
 
         Returns:
-            List of uninstalled packages (``None`` for failures).
+            List of uninstalled packages (`None` for failures).
         """
         logger = logging.getLogger('porringer.pyenv.uninstall')
         results: list[Package | None] = []
@@ -238,14 +238,14 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades (reinstalls) a Python runtime via pyenv.
 
-        Pyenv doesn't have a native upgrade; we reinstall with ``-s`` to
+        Pyenv doesn't have a native upgrade; we reinstall with `-s` to
         skip if already the latest patch.
 
         Args:
             params: Upgrade parameters.
 
         Returns:
-            The upgraded package, or ``None`` on failure.
+            The upgraded package, or `None` on failure.
         """
         logger = logging.getLogger('porringer.pyenv.upgrade')
         version = params.package.name
@@ -276,7 +276,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
 
     @override
     def packages(self) -> list[Package]:
-        """Lists installed Python runtimes via ``pyenv versions --bare``.
+        """Lists installed Python runtimes via `pyenv versions --bare`.
 
         Returns:
             A list of installed Python runtime packages.

@@ -17,14 +17,14 @@ class BunEnvironment(Environment):
 
     Provides methods to install, search, uninstall, upgrade, and list
     Node.js packages using Bun as the backend package manager.  Bun is
-    npm-compatible: it reads ``package.json``, uses ``node_modules``,
+    npm-compatible: it reads `package.json`, uses `node_modules`,
     and installs from the npm registry.
     """
 
     @staticmethod
     @override
     def ecosystem() -> str:
-        """Bun belongs to the ``node`` ecosystem."""
+        """Bun belongs to the `node` ecosystem."""
         return 'node'
 
     @staticmethod
@@ -36,7 +36,7 @@ class BunEnvironment(Environment):
     @classmethod
     @override
     def tool_name(cls) -> str:
-        """Bun wraps the ``bun`` CLI."""
+        """Bun wraps the `bun` CLI."""
         return 'bun'
 
     @override
@@ -76,7 +76,7 @@ class BunEnvironment(Environment):
 
     @override
     def search(self, package: PackageRef) -> Package | None:
-        """Bun does not provide a search CLI; returns ``None``."""
+        """Bun does not provide a search CLI; returns `None`."""
         return None
 
     @override

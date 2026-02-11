@@ -15,7 +15,7 @@ class PluginKind(Enum):
 
     Plugins declare their kind so the manifest can group entries by
     operation type rather than by ecosystem.  New ecosystems require
-    zero changes to this enum — only a new ``ecosystem()`` string
+    zero changes to this enum — only a new `ecosystem()` string
     from the plugin.
     """
 
@@ -48,8 +48,8 @@ class PorringerModel(BaseModel):
 class PlatformScoped(BaseModel):
     """Mixin for models that can be scoped to specific platforms.
 
-    When ``platforms`` is empty the entry applies everywhere.
-    Otherwise, the entry is only applicable when ``sys.platform``
+    When `platforms` is empty the entry applies everywhere.
+    Otherwise, the entry is only applicable when `sys.platform`
     appears in the list.
     """
 
@@ -73,8 +73,8 @@ class PackageRef(PorringerModel):
     """A package reference with an optional version constraint.
 
     Represents a package identifier that may include a PEP 440 version specifier
-    (e.g. ``"ruff>=0.8.0"``, ``"pydantic>=2,<3"``). A bare name such as ``"pytest"``
-    is also valid (constraint will be ``None``).
+    (e.g. `"ruff>=0.8.0"`, `"pydantic>=2,<3"`). A bare name such as `"pytest"`
+    is also valid (constraint will be `None`).
 
     Can be constructed in several ways::
 
@@ -101,9 +101,9 @@ class PackageRef(PorringerModel):
     def _split_spec(spec: str) -> dict[str, str | None]:
         """Decompose a specifier string into name and constraint components.
 
-        Tries PEP 440 parsing first (via :class:`packaging.requirements.Requirement`).
+        Tries PEP 440 parsing first (via `packaging.requirements.Requirement`).
         On failure, falls back to a lenient splitter that handles npm-style
-        specifiers such as ``@scope/name@^4.0.0`` or ``lodash@~4.18``.
+        specifiers such as `@scope/name@^4.0.0` or `lodash@~4.18`.
 
         The constraint is stored as a raw string — no semver interpretation.
         Plugins and underlying tools are responsible for passing it to their
@@ -130,10 +130,10 @@ class PackageRef(PorringerModel):
         """Lenient parser for non-PEP-440 package specifiers.
 
         Handles:
-        - ``@scope/name@constraint`` → name=``@scope/name``, constraint
-        - ``@scope/name``            → name=``@scope/name``, no constraint
-        - ``name@constraint``        → name, constraint
-        - ``name``                   → name, no constraint
+        - `@scope/name@constraint` → name=`@scope/name`, constraint
+        - `@scope/name`            → name=`@scope/name`, no constraint
+        - `name@constraint`        → name, constraint
+        - `name`                   → name, no constraint
         """
         spec = spec.strip()
         if not spec:
@@ -176,7 +176,7 @@ class PackageRef(PorringerModel):
         """The full specifier string (name + constraint) suitable for CLI commands.
 
         Examples:
-            ``"ruff>=0.8.0"``, ``"pytest"``
+            `"ruff>=0.8.0"`, `"pytest"`
         """
         if self.constraint:
             return f'{self.name}{self.constraint}'
@@ -226,16 +226,16 @@ class Plugin(Protocol):
     def ecosystem() -> str | None:
         """Return the ecosystem this plugin belongs to.
 
-        A free-form identifier such as ``"python"``, ``"node"``,
-        ``"system"``, or ``"deno"``.  New ecosystems (e.g. ``"rust"``)
+        A free-form identifier such as `"python"`, `"node"`,
+        `"system"`, or `"deno"`.  New ecosystems (e.g. `"rust"`)
         can be introduced by third-party plugins without any changes to
         the core.
 
-        Return ``None`` for plugins that don't participate in backend
+        Return `None` for plugins that don't participate in backend
         resolution (e.g. pure provider plugins).
 
         Returns:
-            The ecosystem identifier string, or ``None``.
+            The ecosystem identifier string, or `None`.
         """
         raise NotImplementedError
 
@@ -243,7 +243,7 @@ class Plugin(Protocol):
     def plugin_kind() -> PluginKind:
         """Return the kind of operation this plugin performs.
 
-        Defaults to :attr:`PluginKind.PACKAGE`.  Override in subclasses
+        Defaults to `PluginKind.PACKAGE`.  Override in subclasses
         for tools, projects, or runtimes.
 
         Returns:
@@ -256,7 +256,7 @@ class Plugin(Protocol):
         """Return the default priority for resolver ordering.
 
         Lower values are preferred.  When multiple plugins share the same
-        ``(plugin_kind, ecosystem)`` pair the resolver picks the first
+        `(plugin_kind, ecosystem)` pair the resolver picks the first
         available one sorted by this value ascending.
 
         Platform-specific plugins should return a high value (e.g. 999)
@@ -274,24 +274,24 @@ class Plugin(Protocol):
 
         Plugins that depend on external tools can override this to check
         whether the required executables exist.  The default implementation
-        always returns ``True``.
+        always returns `True`.
 
         Returns:
-            ``True`` if the plugin is available, ``False`` otherwise.
+            `True` if the plugin is available, `False` otherwise.
         """
         return True
 
     @staticmethod
     def package_name_validator() -> str | None:
-        """Return the validation scheme for package names, or ``None``.
+        """Return the validation scheme for package names, or `None`.
 
         Well-known values:
 
-        * ``"pep440"`` — validate via :class:`packaging.requirements.Requirement`
-        * ``None`` — accept any non-empty name (the default)
+        * `"pep440"` — validate via `packaging.requirements.Requirement`
+        * `None` — accept any non-empty name (the default)
 
         Returns:
-            A validation scheme identifier, or ``None``.
+            A validation scheme identifier, or `None`.
         """
         return None
 
