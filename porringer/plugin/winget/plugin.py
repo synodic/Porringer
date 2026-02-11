@@ -210,7 +210,7 @@ class WingetEnvironment(Environment):
             logging.getLogger('porringer.winget.install').info(f'[dry-run] Would run: {" ".join(args)}')
             return Package(name=pkg.name, version=None)
 
-        return await self._async_streaming_run(
+        return await self._stream_command(
             args=args,
             params=params,
             phase='installing',
@@ -243,7 +243,7 @@ class WingetEnvironment(Environment):
             logging.getLogger('porringer.winget.upgrade').info(f'[dry-run] Would run: {" ".join(args)}')
             return Package(name=pkg.name, version=None)
 
-        return await self._async_streaming_run(
+        return await self._stream_command(
             args=args,
             params=params,
             phase='upgrading',

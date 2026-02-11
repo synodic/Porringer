@@ -18,20 +18,20 @@ from porringer.core.plugin_schema.environment import (
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import Package, PackageRef, PluginKind, PluginParameters
 from porringer.schema import SetupAction, SubActionProgress
-from porringer.utility.utility import async_run_command
+from porringer.utility.utility import run_command
 
 # Regex patterns for parsing pip output
 _DOWNLOADING_PATTERN = re.compile(
-    r"Downloading\s+(\S+)\s+\(([^)]+)\)",
+    r'Downloading\s+(\S+)\s+\(([^)]+)\)',
 )
 _DOWNLOAD_PROGRESS_PATTERN = re.compile(
-    r"(\d+(?:\.\d+)?)\s*[kMG]?B.*?(\d+)%",
+    r'(\d+(?:\.\d+)?)\s*[kMG]?B.*?(\d+)%',
 )
 _INSTALLING_PATTERN = re.compile(
-    r"Installing collected packages?:\s*(.*)",
+    r'Installing collected packages?:\s*(.*)',
 )
 _ALREADY_SATISFIED_PATTERN = re.compile(
-    r"Requirement already satisfied",
+    r'Requirement already satisfied',
 )
 
 
@@ -69,7 +69,7 @@ class PipEnvironment(Environment, RuntimeConsumer):
     @override
     def ecosystem() -> str:
         """Pip belongs to the `python` ecosystem."""
-        return "python"
+        return 'python'
 
     @staticmethod
     @override
@@ -81,19 +81,19 @@ class PipEnvironment(Environment, RuntimeConsumer):
     @override
     def package_name_validator() -> str:
         """Python packages use PEP 440 validation."""
-        return "pep440"
+        return 'pep440'
 
     @classmethod
     @override
     def consumed_runtime_kind(cls) -> str:
         """Pip consumes a Python runtime."""
-        return "python"
+        return 'python'
 
     @classmethod
     @override
     def tool_name(cls) -> str:
         """Pip wraps the `pip` CLI."""
-        return "pip"
+        return 'pip'
 
     @classmethod
     @override
@@ -109,22 +109,22 @@ class PipEnvironment(Environment, RuntimeConsumer):
         Returns:
             True if `pip` or `python` is found on PATH, False otherwise.
         """
-        return shutil.which("pip") is not None or shutil.which("python") is not None
+        return shutil.which('pip') is not None or shutil.which('python') is not None
 
     @override
     def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via pip."""
-        return [self.python_command, "-m", "pip", "install", package.specifier]
+        return [self.python_command, '-m', 'pip', 'install', package.specifier]
 
     @override
     def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via pip."""
         return [
             self.python_command,
-            "-m",
-            "pip",
-            "install",
-            "--upgrade",
+            '-m',
+            'pip',
+            'install',
+            '--upgrade',
             package.specifier,
         ]
 
@@ -137,10 +137,10 @@ class PipEnvironment(Environment, RuntimeConsumer):
     @override
     def install(self, params: PackageParameters) -> Package | None:
         """Installs the given package identified by its name using pip."""
-        logger = logging.getLogger("porringer.pip.install")
+        logger = logging.getLogger('porringer.pip.install')
         args = list(self.install_command(params.package))
         if params.dry:
-            args.append("--dry-run")
+            args.append('--dry-run')
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
             logger.info(result.stdout)
@@ -148,13 +148,13 @@ class PipEnvironment(Environment, RuntimeConsumer):
                 logger.error(result.stderr)
                 return None
         except FileNotFoundError:
-            logger.error("Python not found. Install Python from https://python.org")
+            logger.error('Python not found. Install Python from https://python.org')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f"Failed to install {params.package.name}: {e}")
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f"Failed to install {params.package.name}: {e}")
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
         return Package(name=params.package.name, version=None)
 
@@ -164,12 +164,12 @@ class PipEnvironment(Environment, RuntimeConsumer):
 
         When a progress_callback is provided, streams stderr line-by-line to
         report download and install phases. Otherwise falls back to the simple
-        `async_run_command` path for zero overhead.
+        `run_command` path for zero overhead.
         """
-        logger = logging.getLogger("porringer.pip.install")
+        logger = logging.getLogger('porringer.pip.install')
         args = list(self.install_command(params.package))
         if params.dry:
-            args.append("--dry-run")
+            args.append('--dry-run')
 
         if params.progress_callback is None:
             # Fast path — no streaming needed
@@ -178,21 +178,19 @@ class PipEnvironment(Environment, RuntimeConsumer):
         return await self._async_install_with_progress(args, params, logger)
 
     @staticmethod
-    async def _async_install_simple(
-        args: list[str], package: PackageRef, logger: logging.Logger
-    ) -> Package | None:
+    async def _async_install_simple(args: list[str], package: PackageRef, logger: logging.Logger) -> Package | None:
         """Install without progress streaming."""
         try:
-            result = await async_run_command(args)
+            result = await run_command(args)
             logger.info(result.stdout)
             if result.returncode != 0:
                 logger.error(result.stderr)
                 return None
         except TimeoutError:
-            logger.error(f"Timeout installing {package.name}")
+            logger.error(f'Timeout installing {package.name}')
             return None
         except Exception as e:
-            logger.error(f"Failed to install {package.name}: {e}")
+            logger.error(f'Failed to install {package.name}: {e}')
             return None
         return Package(name=package.name, version=None)
 
@@ -206,9 +204,9 @@ class PipEnvironment(Environment, RuntimeConsumer):
         assert params.progress_callback is not None  # guaranteed by caller
 
         action = SetupAction(
-            description=f"Install {params.package.specifier}",
+            description=f'Install {params.package.specifier}',
             kind=PluginKind.PACKAGE,
-            installer="pip",
+            installer='pip',
             package=params.package,
         )
 
@@ -219,21 +217,21 @@ class PipEnvironment(Environment, RuntimeConsumer):
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError:
-            logger.error(f"Python not found while installing {params.package.name}")
+            logger.error(f'Python not found while installing {params.package.name}')
             return None
 
         # Report initial phase
         params.progress_callback(
             SubActionProgress(
                 action=action,
-                phase="resolving",
+                phase='resolving',
                 progress=None,
-                message=f"Resolving {params.package.specifier}...",
+                message=f'Resolving {params.package.specifier}...',
             )
         )
 
         stderr_lines: list[str] = []
-        stdout_data = b""
+        stdout_data = b''
 
         async def read_stdout() -> None:
             nonlocal stdout_data
@@ -244,33 +242,31 @@ class PipEnvironment(Environment, RuntimeConsumer):
             assert process.stderr is not None
             assert params.progress_callback is not None
             async for raw_line in process.stderr:
-                line = raw_line.decode("utf-8", errors="replace").rstrip()
+                line = raw_line.decode('utf-8', errors='replace').rstrip()
                 stderr_lines.append(line)
 
                 # Emit raw output line for log panel display
                 params.progress_callback(
                     SubActionProgress(
                         action=action,
-                        phase="running",
+                        phase='running',
                         output=line,
-                        stream="stderr",
+                        stream='stderr',
                     )
                 )
 
                 # Also emit parsed progress events for structured updates
-                PipEnvironment._parse_progress_line(
-                    line, action, params.progress_callback
-                )
+                PipEnvironment._parse_progress_line(line, action, params.progress_callback)
 
         try:
             await asyncio.gather(read_stdout(), read_stderr_lines())
             await process.wait()
         except Exception as e:
-            logger.error(f"Failed to install {params.package.name}: {e}")
+            logger.error(f'Failed to install {params.package.name}: {e}')
             return None
 
         # Emit stdout lines as output events
-        stdout_text = stdout_data.decode("utf-8", errors="replace")
+        stdout_text = stdout_data.decode('utf-8', errors='replace')
         logger.info(stdout_text)
         for line in stdout_text.splitlines():
             stripped = line.rstrip()
@@ -278,23 +274,23 @@ class PipEnvironment(Environment, RuntimeConsumer):
                 params.progress_callback(
                     SubActionProgress(
                         action=action,
-                        phase="running",
+                        phase='running',
                         output=stripped,
-                        stream="stdout",
+                        stream='stdout',
                     )
                 )
 
         if process.returncode != 0:
-            logger.error("\n".join(stderr_lines))
+            logger.error('\n'.join(stderr_lines))
             return None
 
         # Report completion
         params.progress_callback(
             SubActionProgress(
                 action=action,
-                phase="done",
+                phase='done',
                 progress=1.0,
-                message=f"Installed {params.package.name}",
+                message=f'Installed {params.package.name}',
             )
         )
 
@@ -315,13 +311,13 @@ class PipEnvironment(Environment, RuntimeConsumer):
         if match:
             url = match.group(1)
             size = match.group(2)
-            filename = url.rsplit("/", 1)[-1].split("#")[0]
+            filename = url.rsplit('/', 1)[-1].split('#')[0]
             callback(
                 SubActionProgress(
                     action=action,
-                    phase="downloading",
+                    phase='downloading',
                     progress=0.0,
-                    message=f"Downloading {filename} ({size})",
+                    message=f'Downloading {filename} ({size})',
                 )
             )
             return
@@ -333,7 +329,7 @@ class PipEnvironment(Environment, RuntimeConsumer):
             callback(
                 SubActionProgress(
                     action=action,
-                    phase="downloading",
+                    phase='downloading',
                     progress=pct / 100.0,
                     message=None,
                 )
@@ -347,9 +343,9 @@ class PipEnvironment(Environment, RuntimeConsumer):
             callback(
                 SubActionProgress(
                     action=action,
-                    phase="installing",
+                    phase='installing',
                     progress=None,
-                    message=f"Installing {packages_str}",
+                    message=f'Installing {packages_str}',
                 )
             )
             return
@@ -359,7 +355,7 @@ class PipEnvironment(Environment, RuntimeConsumer):
             callback(
                 SubActionProgress(
                     action=action,
-                    phase="verifying",
+                    phase='verifying',
                     progress=1.0,
                     message=line.strip(),
                 )
@@ -381,16 +377,14 @@ class PipEnvironment(Environment, RuntimeConsumer):
     @override
     def uninstall(self, params: UninstallParameters) -> list[Package | None]:
         """Uninstalls the given list of packages using pip."""
-        logger = logging.getLogger("porringer.pip.uninstall")
+        logger = logging.getLogger('porringer.pip.uninstall')
         results: list[Package | None] = []
         for pkg in params.packages:
-            args = [self.python_command, "-m", "pip", "uninstall", "-y", pkg.name]
+            args = [self.python_command, '-m', 'pip', 'uninstall', '-y', pkg.name]
             if params.dry:
-                args.append("--dry-run")
+                args.append('--dry-run')
             try:
-                result = subprocess.run(
-                    args, capture_output=True, text=True, check=False
-                )
+                result = subprocess.run(args, capture_output=True, text=True, check=False)
                 logger.info(result.stdout)
                 if result.returncode == 0:
                     results.append(Package(name=pkg.name, version=None))
@@ -398,24 +392,24 @@ class PipEnvironment(Environment, RuntimeConsumer):
                     logger.error(result.stderr)
                     results.append(None)
             except FileNotFoundError:
-                logger.error("Python not found")
+                logger.error('Python not found')
                 results.append(None)
             except subprocess.SubprocessError as e:
-                logger.error(f"Failed to uninstall {pkg.name}: {e}")
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
             except Exception as e:
-                logger.error(f"Failed to uninstall {pkg.name}: {e}")
+                logger.error(f'Failed to uninstall {pkg.name}: {e}')
                 results.append(None)
         return results
 
     @override
     def upgrade(self, params: PackageParameters) -> Package | None:
         """Upgrades the given package using pip."""
-        logger = logging.getLogger("porringer.pip.upgrade")
+        logger = logging.getLogger('porringer.pip.upgrade')
         pkg = params.package
         args = list(self.upgrade_command(pkg))
         if params.dry:
-            args.append("--dry-run")
+            args.append('--dry-run')
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False)
             logger.info(result.stdout)
@@ -423,13 +417,13 @@ class PipEnvironment(Environment, RuntimeConsumer):
                 logger.error(result.stderr)
                 return None
         except FileNotFoundError:
-            logger.error("Python not found")
+            logger.error('Python not found')
             return None
         except subprocess.SubprocessError as e:
-            logger.error(f"Failed to upgrade {pkg.name}: {e}")
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
         except Exception as e:
-            logger.error(f"Failed to upgrade {pkg.name}: {e}")
+            logger.error(f'Failed to upgrade {pkg.name}: {e}')
             return None
         return Package(name=pkg.name, version=None)
 
@@ -452,7 +446,7 @@ class PipEnvironment(Environment, RuntimeConsumer):
         if self._cached_packages is not None:
             return self._cached_packages
 
-        logger = logging.getLogger("porringer.pip.packages")
+        logger = logging.getLogger('porringer.pip.packages')
 
         # Try pip list first
         packages = self._list_packages_via_pip(logger, self.python_command)
@@ -461,7 +455,7 @@ class PipEnvironment(Environment, RuntimeConsumer):
             return self._cached_packages
 
         # Fallback: importlib.metadata (works without pip module installed)
-        logger.debug("pip module unavailable, falling back to importlib.metadata")
+        logger.debug('pip module unavailable, falling back to importlib.metadata')
         packages = self._list_packages_via_importlib(logger, self.python_command)
         if packages is not None:
             self._cached_packages = packages
@@ -471,9 +465,7 @@ class PipEnvironment(Environment, RuntimeConsumer):
         return self._cached_packages
 
     @staticmethod
-    def _list_packages_via_pip(
-        logger: logging.Logger, python: str = "python"
-    ) -> list[Package] | None:
+    def _list_packages_via_pip(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
         """List packages using `python -m pip list --format=json`.
 
         Args:
@@ -485,31 +477,29 @@ class PipEnvironment(Environment, RuntimeConsumer):
         """
         try:
             result = subprocess.run(
-                [python, "-m", "pip", "list", "--format=json"],
+                [python, '-m', 'pip', 'list', '--format=json'],
                 capture_output=True,
                 text=True,
                 check=True,
             )
             entries: list[dict[str, str]] = json.loads(result.stdout)
             return [
-                Package(name=entry["name"], version=entry.get("version"))
+                Package(name=entry['name'], version=entry.get('version'))
                 for entry in entries
-                if entry.get("name") is not None
+                if entry.get('name') is not None
             ]
         except subprocess.CalledProcessError as e:
-            logger.debug(f"pip list failed (pip module may not be installed): {e}")
+            logger.debug(f'pip list failed (pip module may not be installed): {e}')
             return None
         except (json.JSONDecodeError, KeyError) as e:
-            logger.warning(f"Failed to parse pip package list: {e}")
+            logger.warning(f'Failed to parse pip package list: {e}')
             return []
         except FileNotFoundError:
-            logger.warning("Python not found on PATH; cannot list pip packages")
+            logger.warning('Python not found on PATH; cannot list pip packages')
             return []
 
     @staticmethod
-    def _list_packages_via_importlib(
-        logger: logging.Logger, python: str = "python"
-    ) -> list[Package] | None:
+    def _list_packages_via_importlib(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
         """List packages using `importlib.metadata` via subprocess.
 
         This fallback works in any Python environment, even when the pip
@@ -523,30 +513,30 @@ class PipEnvironment(Environment, RuntimeConsumer):
             A list of packages, or `None` on failure.
         """
         script = (
-            "import json, importlib.metadata; "
+            'import json, importlib.metadata; '
             'print(json.dumps([{"name": d.metadata.get("Name"), "version": d.version} '
-            "for d in importlib.metadata.distributions() "
+            'for d in importlib.metadata.distributions() '
             'if d.metadata.get("Name") is not None]))'
         )
         try:
             result = subprocess.run(
-                [python, "-c", script],
+                [python, '-c', script],
                 capture_output=True,
                 text=True,
                 check=True,
             )
             entries: list[dict[str, str]] = json.loads(result.stdout)
             return [
-                Package(name=entry["name"], version=entry.get("version"))
+                Package(name=entry['name'], version=entry.get('version'))
                 for entry in entries
-                if entry.get("name") is not None
+                if entry.get('name') is not None
             ]
         except subprocess.CalledProcessError as e:
-            logger.warning(f"importlib.metadata fallback failed: {e}")
+            logger.warning(f'importlib.metadata fallback failed: {e}')
             return None
         except (json.JSONDecodeError, KeyError) as e:
-            logger.warning(f"Failed to parse importlib.metadata output: {e}")
+            logger.warning(f'Failed to parse importlib.metadata output: {e}')
             return None
         except FileNotFoundError:
-            logger.warning("Python not found on PATH; cannot list packages")
+            logger.warning('Python not found on PATH; cannot list packages')
             return None
