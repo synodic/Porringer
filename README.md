@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/porringer-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/porringer-light.svg">
-    <img width=25% alt="Porringer Logo" src="docs/images/porringer-light.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/synodic/porringer/development/docs/images/porringer-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/synodic/porringer/development/docs/images/porringer-light.svg">
+    <img width=25% alt="Porringer Logo" src="https://raw.githubusercontent.com/synodic/porringer/development/docs/images/porringer-light.svg">
   </picture>
   <br>
   <em>A meta-package manager for all porridges</em>
