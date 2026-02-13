@@ -112,7 +112,7 @@ class DirectoryCacheManager:
 
         Args:
             path: Path to a directory containing a manifest, or
-                directly to a manifest file (e.g. ``porringer.json``).
+                directly to a manifest file (e.g. `porringer.json`).
             name: Optional display name for the directory.
             validate: If True, validate path exists.
 

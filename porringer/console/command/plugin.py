@@ -5,13 +5,7 @@ from typing import Annotated
 import typer
 
 from porringer.api import API
-from porringer.backend.schema import (
-    PluginInstallParameters,
-    PluginUninstallParameters,
-    PluginUpdateParameters,
-)
 from porringer.console.schema import Configuration
-from porringer.schema import ListPluginsParameters
 from porringer.utility.exception import PluginError
 
 app = typer.Typer()
@@ -30,8 +24,7 @@ def plugin_list(
 
     api = API(configuration.local_configuration)
 
-    list_parameters = ListPluginsParameters()
-    results = api.plugin.list(list_parameters)
+    results = api.plugin.list()
 
     if not results:
         configuration.console.print('[yellow]No plugins found[/yellow]')
@@ -39,7 +32,9 @@ def plugin_list(
         for result in results:
             tool_ver = str(result.tool_version) if result.tool_version else 'n/a'
             status = '[green]installed[/green]' if result.installed else '[red]not installed[/red]'
-            configuration.console.print(f'{result.name} v{result.version} (tool: {tool_ver}) {status}')
+            configuration.console.print(
+                f'{result.name} [{result.kind.value}] v{result.version} (tool: {tool_ver}) {status}'
+            )
 
 
 @app.command('install')
@@ -55,8 +50,7 @@ def plugin_install(
 
     for plugin in plugins:
         try:
-            params = PluginInstallParameters(name=plugin, dry=dry_run)
-            result = api.plugin.install(params)
+            result = api.plugin.install(plugin, dry_run=dry_run)
 
             if result.success:
                 configuration.console.print(f'[green]{result.message}[/green]')
@@ -79,8 +73,7 @@ def plugin_update(
 
     api = API(configuration.local_configuration)
 
-    params = PluginUpdateParameters(names=plugins, dry=dry_run)
-    results = api.plugin.update(params)
+    results = api.plugin.update(plugins, dry_run=dry_run)
 
     has_failure = False
     for result in results:
@@ -105,8 +98,7 @@ def plugin_uninstall(
 
     api = API(configuration.local_configuration)
 
-    params = PluginUninstallParameters(names=plugins, dry=dry_run)
-    results = api.plugin.uninstall(params)
+    results = api.plugin.uninstall(plugins, dry_run=dry_run)
 
     has_failure = False
     for result in results:

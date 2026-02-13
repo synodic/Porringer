@@ -1,7 +1,7 @@
 """Presence test using the python-dev example manifest.
 
-Verifies that pip packages declared in ``examples/python-dev/porringer.json``
-which also appear in ``pyproject.toml`` dependency groups are detected as
+Verifies that pip packages declared in `examples/python-dev/porringer.json`
+which also appear in `pyproject.toml` dependency groups are detected as
 already installed when dry-running inside the development environment.
 """
 

@@ -35,29 +35,6 @@ ARROW = '→'
 
 
 @dataclass
-class ManifestOptions:
-    """Options for manifest sync operations.
-
-    Attributes:
-        path: Path to manifest file or directory.
-        all_cached: Use all cached directories.
-        dry_run: Preview without executing.
-        timeout: Timeout in seconds for commands.
-        fail_fast: Stop on first error.
-        strategy: Sync strategy (minimal, latest, or exact).
-        project_directory: Working directory for project-sync and post-sync actions.
-    """
-
-    path: Path | None = None
-    all_cached: bool = False
-    dry_run: bool = False
-    timeout: int = DEFAULT_TIMEOUT
-    fail_fast: bool = True
-    strategy: SyncStrategy = SyncStrategy.MINIMAL
-    project_directory: Path | None = None
-
-
-@dataclass
 class _ProgressState:
     """Execution progress state for streaming updates."""
 
@@ -328,12 +305,30 @@ def _display_results(
     _display_summary(configuration, results, dry_run, strategy)
 
 
-def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> None:
+def _handle_manifest(
+    configuration: Configuration,
+    *,
+    path: Path | None = None,
+    all_cached: bool = False,
+    dry_run: bool = False,
+    timeout: int = DEFAULT_TIMEOUT,
+    fail_fast: bool = True,
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
+    project_directory: Path | None = None,
+    plugins: list[str] | None = None,
+) -> None:
     """Handle manifest install execution.
 
     Args:
         configuration: CLI configuration.
-        options: Manifest options.
+        path: Path to manifest file or directory.
+        all_cached: Use all cached directories.
+        dry_run: Preview without executing.
+        timeout: Timeout in seconds for commands.
+        fail_fast: Stop on first error.
+        strategy: Sync strategy.
+        project_directory: Working directory for project-sync and post-sync actions.
+        plugins: Plugin names to include. `None` means all plugins.
 
     Raises:
         typer.Exit: On error.
@@ -341,37 +336,40 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
     api = _create_api(configuration)
 
     # Determine what paths to use
-    if options.all_cached:
+    if all_cached:
         setup_params = SetupParameters(
             paths=None,
-            project_directory=options.project_directory,
-            timeout=options.timeout,
-            fail_fast=options.fail_fast,
-            dry_run=options.dry_run,
-            strategy=options.strategy,
+            project_directory=project_directory,
+            timeout=timeout,
+            fail_fast=fail_fast,
+            dry_run=dry_run,
+            strategy=strategy,
+            plugins=plugins,
         )
-    elif options.path:
-        if not options.path.exists():
-            configuration.console.print(f'[red]Error:[/red] Path does not exist: {options.path}')
+    elif path:
+        if not path.exists():
+            configuration.console.print(f'[red]Error:[/red] Path does not exist: {path}')
             raise typer.Exit(EXIT_FAILURE)
-        resolved_path = options.path.resolve()
+        resolved_path = path.resolve()
         setup_params = SetupParameters(
             paths=resolved_path,
-            project_directory=options.project_directory,
-            timeout=options.timeout,
-            fail_fast=options.fail_fast,
-            dry_run=options.dry_run,
-            strategy=options.strategy,
+            project_directory=project_directory,
+            timeout=timeout,
+            fail_fast=fail_fast,
+            dry_run=dry_run,
+            strategy=strategy,
+            plugins=plugins,
         )
     else:
         # Default to current directory
         setup_params = SetupParameters(
             paths=Path('.').resolve(),
-            project_directory=options.project_directory,
-            timeout=options.timeout,
-            fail_fast=options.fail_fast,
-            dry_run=options.dry_run,
-            strategy=options.strategy,
+            project_directory=project_directory,
+            timeout=timeout,
+            fail_fast=fail_fast,
+            dry_run=dry_run,
+            strategy=strategy,
+            plugins=plugins,
         )
 
     # For dry runs, use the simple sync method (no progress bar needed).
@@ -395,7 +393,7 @@ def _handle_manifest(configuration: Configuration, options: ManifestOptions) -> 
         configuration.console.print('[yellow]No actions to execute[/yellow]')
         return
 
-    _display_results(configuration, execute_results, options.dry_run, options.strategy)
+    _display_results(configuration, execute_results, dry_run, strategy)
 
     if not execute_results.success:
         raise typer.Exit(EXIT_FAILURE)
@@ -502,6 +500,13 @@ def sync_default(
             help='Sync strategy: minimal (default), latest, or exact',
         ),
     ] = 'minimal',
+    plugin: Annotated[
+        list[str] | None,
+        typer.Option(
+            '--plugin',
+            help='Only include actions from these plugins (repeatable). Omit to include all.',
+        ),
+    ] = None,
 ) -> None:
     """Synchronise the local environment with a manifest.
 
@@ -536,7 +541,8 @@ def sync_default(
         configuration.console.print(f"[red]Error:[/red] Invalid strategy '{strategy}'. Use: minimal, latest, or exact")
         raise typer.Exit(EXIT_FAILURE)
 
-    options = ManifestOptions(
+    _handle_manifest(
+        configuration,
         path=path,
         all_cached=all_cached,
         dry_run=dry_run,
@@ -544,6 +550,5 @@ def sync_default(
         fail_fast=fail_fast,
         strategy=sync_strategy,
         project_directory=project_dir.resolve() if project_dir else None,
+        plugins=plugin if plugin else None,
     )
-
-    _handle_manifest(configuration, options)

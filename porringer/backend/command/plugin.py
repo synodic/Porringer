@@ -5,19 +5,18 @@ import logging
 import subprocess
 import sys
 from importlib import metadata
+from pathlib import Path
 
 from porringer.backend.builder import Builder
-from porringer.backend.resolver import resolve_list_plugins_parameters
-from porringer.backend.schema import (
-    PluginInstallParameters,
-    PluginOperationResult,
-    PluginUninstallParameters,
-    PluginUpdateParameters,
-)
+from porringer.backend.resolver import build_plugin_info
+from porringer.backend.schema import PluginOperationResult
 from porringer.core.plugin_schema.environment import Environment
-from porringer.schema import ListPluginResults, ListPluginsParameters
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.schema import Package, Plugin, PluginKind
+from porringer.schema import PluginInfo
 from porringer.utility.exception import PluginError
-from porringer.utility.utility import is_pipx_installation
+from porringer.utility.utility import canonicalize_type, is_pipx_installation
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +29,69 @@ class PluginCommands:
         pass
 
     @staticmethod
-    def list(parameters: ListPluginsParameters) -> list[ListPluginResults]:
-        """Lists the plugins.
+    def list(*, kinds: builtins.list[PluginKind] | None = None) -> builtins.list[PluginInfo]:
+        """Lists all registered plugins across every plugin group.
+
+        Discovers `environment` (package / tool / runtime),
+        `project_environment` (project sync), and `scm` (source control)
+        plugins.  Results can be filtered by `kinds`.
 
         Args:
-            parameters: The list command parameters.
+            kinds: Only include plugins matching these kinds. `None` returns all.
 
         Returns:
-            A list of registered plugins.
+            A list of registered plugins, optionally filtered by kind.
         """
         logger.info('Listing plugins')
 
+        # Environment plugins (package, tool, runtime)
         environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
-
         environments = Builder.build_plugins(environment_types)
 
-        return resolve_list_plugins_parameters(environments)
+        # Project-environment plugins (project sync)
+        project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
+        projects = Builder.build_plugins(project_types)
+
+        # SCM plugins (source control)
+        scm_types = Builder.find_plugins('scm', ScmEnvironment)
+        scm_plugins = Builder.build_plugins(scm_types)
+
+        all_plugins: builtins.list[Plugin] = [*environments, *projects, *scm_plugins]
+
+        return build_plugin_info(all_plugins, kinds=kinds)
+
+    @staticmethod
+    def list_packages(plugin_name: str, project_path: Path) -> builtins.list[Package]:
+        """List packages installed in a plugin's environment.
+
+        Discovers the named plugin among `environment` plugins,
+        initialises it, and returns the packages it reports as installed
+        for the given project path.
+
+        Args:
+            plugin_name: The canonical plugin name to query.
+            project_path: Path to the project directory.
+
+        Returns:
+            The packages managed by the named plugin.
+
+        Raises:
+            PluginError: If the plugin is not found or not available.
+        """
+        logger.info(f'Listing packages for plugin: {plugin_name}')
+
+        environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
+        environments = Builder.build_plugins(environment_types)
+
+        for env in environments:
+            canonicalized = canonicalize_type(type(env))
+            if canonicalized.name == plugin_name:
+                if not type(env).is_available():
+                    raise PluginError(f"Plugin '{plugin_name}' is not available on this system")
+                return env.packages()
+
+        available = [canonicalize_type(type(e)).name for e in environments]
+        raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(sorted(available))}")
 
     @staticmethod
     def _get_existing_plugin_packages() -> set[str]:
@@ -61,7 +107,7 @@ class PluginCommands:
         return packages
 
     @staticmethod
-    def install(parameters: PluginInstallParameters) -> PluginOperationResult:
+    def install(name: str, *, dry_run: bool = False) -> PluginOperationResult:
         """Install a plugin package.
 
         Installs the specified PyPI package and validates that it provides
@@ -69,7 +115,8 @@ class PluginCommands:
         is uninstalled.
 
         Args:
-            parameters: The install parameters including package name.
+            name: PyPI package name to install.
+            dry_run: If `True`, only report what would be done.
 
         Returns:
             PluginOperationResult indicating success or failure.
@@ -77,23 +124,23 @@ class PluginCommands:
         Raises:
             PluginError: If installation fails or package is not a valid plugin.
         """
-        logger.info(f'Installing plugin: {parameters.name}')
+        logger.info(f'Installing plugin: {name}')
 
         # Get plugins before installation for comparison
         plugins_before = PluginCommands._get_existing_plugin_packages()
 
         # Build installation command
         if is_pipx_installation():
-            args = ['pipx', 'inject', 'porringer', parameters.name]
+            args = ['pipx', 'inject', 'porringer', name]
         else:
-            args = [sys.executable, '-m', 'pip', 'install', parameters.name]
+            args = [sys.executable, '-m', 'pip', 'install', name]
 
-        if parameters.dry:
+        if dry_run:
             # For dry run, just show what would be done
             cmd_str = ' '.join(args)
             logger.info(f'Dry run: would execute: {cmd_str}')
             return PluginOperationResult(
-                plugin_name=parameters.name,
+                plugin_name=name,
                 success=True,
                 message=f'Would install: {cmd_str}',
             )
@@ -103,48 +150,41 @@ class PluginCommands:
             if result.returncode != 0:
                 logger.error(f'Installation failed: {result.stderr}')
                 return PluginOperationResult(
-                    plugin_name=parameters.name,
+                    plugin_name=name,
                     success=False,
                     message=f'Installation failed: {result.stderr.strip()}',
                 )
         except FileNotFoundError as e:
             logger.error(f'Command not found: {e}')
             return PluginOperationResult(
-                plugin_name=parameters.name,
+                plugin_name=name,
                 success=False,
                 message=f'Command not found: {e}',
             )
         except subprocess.SubprocessError as e:
             logger.error(f'Subprocess error: {e}')
             return PluginOperationResult(
-                plugin_name=parameters.name,
+                plugin_name=name,
                 success=False,
                 message=f'Subprocess error: {e}',
             )
 
         # Validate that the package provides a porringer.environment entry point
-        # We need to reload entry points to see newly installed packages
-        # Clear the entry_points cache by accessing fresh metadata
         plugins_after = PluginCommands._get_existing_plugin_packages()
         new_plugins = plugins_after - plugins_before
 
         if not new_plugins:
-            # The package installed but doesn't provide any porringer.environment entry points
-            # Uninstall it and report error
-            logger.warning(
-                f"Package '{parameters.name}' does not provide a porringer.environment entry point. Uninstalling."
-            )
-            PluginCommands._uninstall_package(parameters.name)
+            logger.warning(f"Package '{name}' does not provide a porringer.environment entry point. Uninstalling.")
+            PluginCommands._uninstall_package(name)
             raise PluginError(
-                f"Package '{parameters.name}' is not a valid Porringer plugin "
-                '(missing porringer.environment entry point)'
+                f"Package '{name}' is not a valid Porringer plugin (missing porringer.environment entry point)"
             )
 
-        logger.info(f'Successfully installed plugin: {parameters.name}')
+        logger.info(f'Successfully installed plugin: {name}')
         return PluginOperationResult(
-            plugin_name=parameters.name,
+            plugin_name=name,
             success=True,
-            message=f"Successfully installed plugin '{parameters.name}'",
+            message=f"Successfully installed plugin '{name}'",
         )
 
     @staticmethod
@@ -165,18 +205,19 @@ class PluginCommands:
         return subprocess.run(args, capture_output=True, text=True, check=False)
 
     @staticmethod
-    def uninstall(parameters: PluginUninstallParameters) -> builtins.list[PluginOperationResult]:
+    def uninstall(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
         """Uninstall plugin packages.
 
         Args:
-            parameters: The uninstall parameters including package names.
+            names: Package names to uninstall.
+            dry_run: If `True`, only report what would be done.
 
         Returns:
             List of PluginOperationResult for each package.
         """
         results: list[PluginOperationResult] = []
 
-        for name in parameters.names:
+        for name in names:
             logger.info(f'Uninstalling plugin: {name}')
 
             # Build uninstall command
@@ -185,7 +226,7 @@ class PluginCommands:
             else:
                 args = [sys.executable, '-m', 'pip', 'uninstall', '-y', name]
 
-            if parameters.dry:
+            if dry_run:
                 cmd_str = ' '.join(args)
                 logger.info(f'Dry run: would execute: {cmd_str}')
                 results.append(
@@ -239,18 +280,19 @@ class PluginCommands:
         return results
 
     @staticmethod
-    def update(parameters: PluginUpdateParameters) -> builtins.list[PluginOperationResult]:
+    def update(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
         """Update plugin packages.
 
         Args:
-            parameters: The update parameters including package names.
+            names: Package names to update.
+            dry_run: If `True`, only report what would be done.
 
         Returns:
             List of PluginOperationResult for each package.
         """
         results: list[PluginOperationResult] = []
 
-        for name in parameters.names:
+        for name in names:
             logger.info(f'Updating plugin: {name}')
 
             # Build update command
@@ -259,7 +301,7 @@ class PluginCommands:
             else:
                 args = [sys.executable, '-m', 'pip', 'install', '--upgrade', name]
 
-            if parameters.dry:
+            if dry_run:
                 cmd_str = ' '.join(args)
                 logger.info(f'Dry run: would execute: {cmd_str}')
                 results.append(

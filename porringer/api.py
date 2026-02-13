@@ -5,7 +5,7 @@ from porringer.backend.command.plugin import PluginCommands
 from porringer.backend.command.self import SelfCommands
 from porringer.backend.command.sync import SyncCommands
 from porringer.backend.resolver import resolve_configuration
-from porringer.backend.schema import Configuration, GlobalConfiguration
+from porringer.backend.schema import GlobalConfiguration
 from porringer.schema import (
     LocalConfiguration,
 )
@@ -28,10 +28,10 @@ class API:
         if global_configuration is None:
             global_configuration = GlobalConfiguration()
 
-        self.configuration: Configuration = resolve_configuration(local_configuration, global_configuration)
+        configuration = resolve_configuration(local_configuration, global_configuration)
 
         # Cache manager for directory storage
-        self.cache = DirectoryCacheManager(self.configuration.data_directory)
+        self.cache = DirectoryCacheManager(configuration.data_directory)
 
         self.plugin = PluginCommands()
         self.updates = SelfCommands()

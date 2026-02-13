@@ -554,8 +554,8 @@ class TestManifestValidation:
         """Invalid PEP 440 package specifier under a Python backend produces a warning.
 
         Non-PEP-440 names are accepted by PackageRef (lenient parser) so the
-        manifest loads, but ``_validate_package_names`` flags them as
-        ``INVALID_PACKAGE_NAME`` warnings for Python backends.
+        manifest loads, but `_validate_package_names` flags them as
+        `INVALID_PACKAGE_NAME` warnings for Python backends.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -611,10 +611,10 @@ class TestManifestValidation:
     def test_multiple_errors_and_warnings(test_api: API) -> None:
         """Multiple issues are all reported in a single result.
 
-        With the lenient PackageRef parser, ``!!!bad!!!`` and
-        ``also-bad[>=`` are now accepted at schema-load time.  The
-        manifest still fails validation because version ``99`` is
-        unsupported and ``fake_backend`` is unknown.
+        With the lenient PackageRef parser, `!!!bad!!!` and
+        `also-bad[>=` are now accepted at schema-load time.  The
+        manifest still fails validation because version `99` is
+        unsupported and `fake_backend` is unknown.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
