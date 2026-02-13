@@ -23,7 +23,7 @@ class TestProjectDirectorySkip:
     def test_false_skips_project_sync_not_post_sync(test_api: API) -> None:
         """Post-sync commands still execute when project_directory is False.
 
-        Only PROJECT_SYNC actions are skipped — ``post_sync`` commands are
+        Only PROJECT_SYNC actions are skipped — `post_sync` commands are
         independent of the project directory setting.
         """
         with tempfile.TemporaryDirectory() as tmpdir:

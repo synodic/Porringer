@@ -578,9 +578,17 @@ class SyncCommands:
     def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
         """Parse a manifest and build the action plan without executing.
 
-        This is a low-level utility for manifest inspection (e.g. validating
-        that a manifest produces the expected actions).  For execution and
-        dry-run, use `execute_stream()` or `run()` instead.
+        The returned `SetupResults.actions` list contains `SetupAction`
+        objects with the following fields useful for introspection:
+
+        * `installer` — canonical plugin name (e.g. `"uv"`, `"brew"`).
+        * `kind` — `PluginKind` enum (`PACKAGE`, `TOOL`, `RUNTIME`,
+          `PROJECT`, `SCM`) or `None` for post-sync commands.
+        * `ecosystem` — ecosystem identifier (e.g. `"python"`, `"node"`).
+        * `package` — `PackageRef` with name and optional version constraint.
+
+        This method is also available as a module-level convenience:
+        `porringer.parse_manifest(path)`.
 
         Args:
             path: Path to manifest file or directory containing one.
@@ -1456,12 +1464,12 @@ class SyncCommands:
         """Execute PROJECT_SYNC actions sequentially.
 
         Each action invokes the resolved project-environment plugin's
-        ``ProjectEnvironment.sync()`` method.  When
-        ``parameters.project_directory`` is an explicit ``Path`` it is
+        `ProjectEnvironment.sync()` method.  When
+        `parameters.project_directory` is an explicit `Path` it is
         used as the working directory for every plugin.  Otherwise each
         plugin auto-discovers its project root by walking ancestor
         directories of *manifest_directory* looking for its ecosystem's
-        marker file (e.g. ``package.json``, ``pyproject.toml``).
+        marker file (e.g. `package.json`, `pyproject.toml`).
 
         Args:
             project_sync_actions: The project sync actions.
@@ -1501,9 +1509,9 @@ class SyncCommands:
     ) -> SetupActionResult:
         """Execute a single PROJECT_SYNC action.
 
-        When ``parameters.project_directory`` is an explicit ``Path``
+        When `parameters.project_directory` is an explicit `Path`
         it is used unconditionally.  Otherwise the plugin's
-        ``resolve_project_root()`` is called to auto-discover the
+        `resolve_project_root()` is called to auto-discover the
         project root from *manifest_directory*.  If discovery fails
         (no marker found), *manifest_directory* is used as fallback
         and a warning is logged.
@@ -1710,6 +1718,12 @@ class SyncCommands:
                             break
                         continue
 
+                    # Filter actions to only included plugins
+                    if parameters.plugins:
+                        preview.actions = [
+                            a for a in preview.actions if a.installer is None or a.installer in parameters.plugins
+                        ]
+
                     # Emit MANIFEST_LOADED so consumers know the action plan
                     queue.put_nowait(
                         ProgressEvent(
@@ -1767,6 +1781,13 @@ class SyncCommands:
         for path in paths:
             try:
                 preview = self.parse_manifest(path, strategy=parameters.strategy)
+
+                # Filter actions to only included plugins
+                if parameters.plugins:
+                    preview.actions = [
+                        a for a in preview.actions if a.installer is None or a.installer in parameters.plugins
+                    ]
+
                 previews.append(preview)
             except ManifestError as e:
                 failed_paths.append((path, str(e.error)))

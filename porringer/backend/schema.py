@@ -29,30 +29,6 @@ class Configuration(BaseModel):
     data_directory: DirectoryPath
 
 
-# --- Plugin Command Parameters ---
-
-
-class PluginInstallParameters(BaseModel):
-    """Parameters for installing a plugin."""
-
-    name: str = Field(description='The PyPI package name of the plugin to install')
-    dry: bool = Field(default=False, description='If True, show what would be done without executing')
-
-
-class PluginUninstallParameters(BaseModel):
-    """Parameters for uninstalling plugins."""
-
-    names: list[str] = Field(description='The PyPI package names of the plugins to remove')
-    dry: bool = Field(default=False, description='If True, show what would be done without executing')
-
-
-class PluginUpdateParameters(BaseModel):
-    """Parameters for updating plugins."""
-
-    names: list[str] = Field(description='The PyPI package names of the plugins to update')
-    dry: bool = Field(default=False, description='If True, show what would be done without executing')
-
-
 @dataclass
 class PluginOperationResult:
     """Result of a plugin operation (install/uninstall/update).

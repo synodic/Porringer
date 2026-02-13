@@ -1,11 +1,11 @@
 """Presence test using the python-bootstrap example manifest.
 
 Verifies that the dry-run presence check works correctly for the
-``examples/python-bootstrap/porringer.json`` manifest.
+`examples/python-bootstrap/porringer.json` manifest.
 
 Actions whose backing installer is available and whose package is
 already installed should be skipped.  Actions with deferred
-installers (``installer=None`` — no provider on PATH) pass through
+installers (`installer=None` — no provider on PATH) pass through
 dry-run as not-skipped because presence cannot be checked.
 """
 
@@ -49,7 +49,7 @@ class TestBootstrapPresence:
     def test_dry_run_actions_succeed(dry_run_results: list[SetupActionResult]) -> None:
         """All dry-run actions should complete successfully.
 
-        Actions with ``installer=None`` (deferred) succeed as no-ops.
+        Actions with `installer=None` (deferred) succeed as no-ops.
         Actions with a resolved installer succeed by either skipping
         (already-installed) or reporting they would install.
         """
@@ -80,10 +80,10 @@ class TestBootstrapPresence:
 
     @staticmethod
     def test_pipx_skipped_when_installed(dry_run_results: list[SetupActionResult]) -> None:
-        """If ``pipx`` is installed as a pip package, its PACKAGE action should be skipped.
+        """If `pipx` is installed as a pip package, its PACKAGE action should be skipped.
 
-        The presence check uses ``pip list`` (not PATH), so we guard
-        with ``importlib.metadata`` which matches pip's view.
+        The presence check uses `pip list` (not PATH), so we guard
+        with `importlib.metadata` which matches pip's view.
         """
         try:
             importlib.metadata.distribution('pipx')

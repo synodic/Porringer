@@ -21,7 +21,7 @@ class ManifestDirectory(BaseModel):
     """A directory or file path referencing a manifest.
 
     The path may point to a directory containing a manifest file
-    (``porringer.json`` or ``pyproject.toml``), or directly to a
+    (`porringer.json` or `pyproject.toml`), or directly to a
     manifest file.  When the path is a file, the sync engine uses
     the file's parent directory as the starting point for
     project-root discovery.
@@ -36,13 +36,6 @@ class DirectoryCache(BaseModel):
 
     version: str = Field(default='1', description='Cache schema version')
     directories: list[ManifestDirectory] = Field(default_factory=list, description='Registered directories')
-
-
-# --- Command Parameter Schemas ---
-
-
-class ListPluginsParameters(BaseModel):
-    """Parameters for listing available plugins."""
 
 
 # --- Setup Schemas ---
@@ -382,6 +375,13 @@ class SetupParameters(BaseModel):
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
     dry_run: bool = Field(default=False, description='Preview actions without executing them')
     strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal, latest, or exact')
+    plugins: list[str] | None = Field(
+        default=None,
+        description=(
+            'List of plugin names to include. None means all plugins.'
+            ' Only actions handled by named plugins will be executed.'
+        ),
+    )
 
 
 @dataclass
@@ -472,18 +472,20 @@ class BatchSetupResults:
 
 
 @dataclass
-class ListPluginResults:
-    """Results of listing plugins.
+class PluginInfo:
+    """Metadata about a discovered plugin.
 
     Args:
-        name: The name of the plugin.
-        version: The version of the plugin.
-        installed: Whether the underlying package manager is available on the system.
+        name: Canonical plugin name (e.g. `"uv"`, `"pip"`).
+        kind: The plugin kind (package, tool, project, runtime, scm).
+        version: The version of the plugin distribution.
+        installed: Whether the underlying tool is available on the system.
         tool_version: The PEP 440 version of the underlying CLI tool, or `None`
             if the tool is unavailable or its version could not be determined.
     """
 
     name: str
+    kind: PluginKind
     version: Version
     installed: bool
     tool_version: Version | None

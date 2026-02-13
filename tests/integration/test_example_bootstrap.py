@@ -1,10 +1,10 @@
 """Bootstrap example tests.
 
-Validates that the ``examples/python-bootstrap/porringer.json`` manifest
+Validates that the `examples/python-bootstrap/porringer.json` manifest
 produces the correct phased action plan, including deferred tool/runtime
 resolution and post-sync commands.
 
-Runtime and tool actions may have ``installer=None`` (deferred) when
+Runtime and tool actions may have `installer=None` (deferred) when
 the backing CLI tool is not on PATH — this is expected and correct.
 """
 
@@ -39,7 +39,7 @@ class TestBootstrapPreview:
     def test_runtime_action_present(preview: SetupResults) -> None:
         """A RUNTIME action for Python 3.14 should be in the plan.
 
-        The action may have ``installer=None`` (deferred) when no
+        The action may have `installer=None` (deferred) when no
         runtime provider (pim/pyenv) is available on the current
         platform.
         """
@@ -60,7 +60,7 @@ class TestBootstrapPreview:
     def test_tool_actions_present(preview: SetupResults) -> None:
         """A TOOL action for pdm should be in the plan.
 
-        The tool action may have ``installer=None`` (deferred) if pipx
+        The tool action may have `installer=None` (deferred) if pipx
         is not currently available — this is expected and correct.
         """
         tool_actions = [a for a in preview.actions if a.kind == PluginKind.TOOL and a.ecosystem == 'python']
@@ -70,7 +70,7 @@ class TestBootstrapPreview:
 
     @staticmethod
     def test_post_sync_command_present(preview: SetupResults) -> None:
-        """A RUN_COMMAND action for ``pdm install`` should be in the plan."""
+        """A RUN_COMMAND action for `pdm install` should be in the plan."""
         command_actions = [a for a in preview.actions if a.kind is None]
         assert len(command_actions) == 1
         assert command_actions[0].command == ['pdm', 'install']

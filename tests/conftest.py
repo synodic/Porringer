@@ -22,9 +22,9 @@ from porringer.schema import (
 
 
 def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
-    """Drain ``execute_stream`` and build ``BatchSetupResults`` from emitted events.
+    """Drain `execute_stream` and build `BatchSetupResults` from emitted events.
 
-    This is a test helper that calls ``execute_stream`` directly — no
+    This is a test helper that calls `execute_stream` directly — no
     separate preview step is needed.
     """
     manifests: list[SetupResults] = []

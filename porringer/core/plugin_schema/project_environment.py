@@ -9,8 +9,8 @@ per-package actions have completed so that the tool itself is already
 installed (e.g. via pipx).  When the manifest file lives in a
 subdirectory of the project root, each plugin auto-discovers the
 correct project root by walking ancestor directories looking for its
-ecosystem's marker file (e.g. ``package.json`` for Node,
-``pyproject.toml`` for Python).
+ecosystem's marker file (e.g. `package.json` for Node,
+`pyproject.toml` for Python).
 """
 
 import logging
@@ -135,16 +135,16 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
         ==========  ================
         Ecosystem   Marker
         ==========  ================
-        ``python``  ``pyproject.toml``
-        ``node``    ``package.json``
-        ``deno``    ``deno.json``
+        `python`  `pyproject.toml`
+        `node`    `package.json`
+        `deno`    `deno.json`
         ==========  ================
 
         Override this method when a plugin uses a non-standard marker
         or when multiple markers should be checked.
 
         Returns:
-            Filename to search for, or ``None`` to disable
+            Filename to search for, or `None` to disable
             auto-discovery (always use the manifest directory).
         """
         return ECOSYSTEM_MARKERS.get(cls.ecosystem())
@@ -166,12 +166,12 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
             search_from: Directory to start the search from
                 (typically the manifest's parent directory).
             boundary: Optional upper-bound directory.  The search
-                will not ascend above this path.  When ``None``, the
+                will not ascend above this path.  When `None`, the
                 search continues to the filesystem root.
 
         Returns:
-            The discovered project root, or ``None`` if the marker
-            was not found (or ``project_marker()`` returns ``None``).
+            The discovered project root, or `None` if the marker
+            was not found (or `project_marker()` returns `None`).
         """
         marker = cls.project_marker()
         if marker is None:

@@ -3,11 +3,11 @@
 Validates that deferred resolution works correctly when platform-
 specific plugins are unavailable:
 
-- ``pim`` requires the Windows ``py`` launcher
-- ``pyenv`` requires the Unix ``pyenv`` CLI
+- `pim` requires the Windows `py` launcher
+- `pyenv` requires the Unix `pyenv` CLI
 
 When neither is available, a RUNTIME action should still appear in
-the preview with ``installer=None`` (deferred), rather than being
+the preview with `installer=None` (deferred), rather than being
 silently dropped.
 """
 

@@ -66,7 +66,7 @@ def _mock_subprocess(
 
 
 class TestVenvWithPip:
-    """Simulate a virtual environment where ``python -m pip`` works normally."""
+    """Simulate a virtual environment where `python -m pip` works normally."""
 
     @staticmethod
     def test_lists_packages(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,7 +83,7 @@ class TestVenvWithPip:
 
     @staticmethod
     def test_skips_entries_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
-        """Entries missing a ``name`` key are silently dropped."""
+        """Entries missing a `name` key are silently dropped."""
         pip_json = json.dumps([
             {'name': 'ruff', 'version': '0.15.0'},
             {'version': '1.0.0'},
@@ -109,10 +109,10 @@ class TestVenvWithPip:
 
 
 class TestVenvWithoutPip:
-    """Simulate a uv-created venv with no ``pip`` but ``importlib.metadata``.
+    """Simulate a uv-created venv with no `pip` but `importlib.metadata`.
 
     This tests the fallback mechanism that uses importlib.metadata when
-    ``python -m pip`` is not available to enumerate installed distributions.
+    `python -m pip` is not available to enumerate installed distributions.
     """
 
     @staticmethod
@@ -156,7 +156,7 @@ class TestGlobalEnvironment:
 
     @staticmethod
     def test_python_not_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
-        """When ``python`` is not found, return empty without crashing."""
+        """When `python` is not found, return empty without crashing."""
 
         def run(*a: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
             raise FileNotFoundError
@@ -240,9 +240,9 @@ class TestCaching:
 
 
 class TestPythonCommand:
-    """Verify ``python_command`` resolves to the running interpreter.
+    """Verify `python_command` resolves to the running interpreter.
 
-    On CI the bare string ``'python'`` can resolve via PATH to a *different*
+    On CI the bare string `'python'` can resolve via PATH to a *different*
     Python that lacks the project's dev dependencies, causing dry-run presence
     checks to silently fail.  These tests ensure the fallback always points at
     the same interpreter that is executing the test suite.
@@ -250,7 +250,7 @@ class TestPythonCommand:
 
     @staticmethod
     def test_default_is_sys_executable() -> None:
-        """Without a runtime provider the command must be ``sys.executable``."""
+        """Without a runtime provider the command must be `sys.executable`."""
         env = _make_env()
         assert env.python_command == sys.executable
 
@@ -269,9 +269,9 @@ class TestPythonCommand:
 
 
 class TestLivePackages:
-    """Run ``packages()`` against the real interpreter (no mocking).
+    """Run `packages()` against the real interpreter (no mocking).
 
-    This catches the scenario where ``python_command`` resolves to a Python
+    This catches the scenario where `python_command` resolves to a Python
     that does *not* have the project's dependencies — the exact failure mode
     observed on Windows and Linux CI.
     """

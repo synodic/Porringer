@@ -10,13 +10,8 @@ from packaging.version import Version
 from porringer.api import API
 from porringer.backend.builder import Builder
 from porringer.backend.command.plugin import PluginCommands
-from porringer.backend.schema import (
-    PluginInstallParameters,
-    PluginUninstallParameters,
-    PluginUpdateParameters,
-)
 from porringer.core.plugin_schema.environment import Environment
-from porringer.schema import ListPluginsParameters, LocalConfiguration
+from porringer.schema import LocalConfiguration
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import is_pipx_installation
 
@@ -34,8 +29,7 @@ class TestCommandPlugin:
         config = LocalConfiguration()
         api = API(config)
 
-        params = ListPluginsParameters()
-        results = api.plugin.list(params)
+        results = api.plugin.list()
 
         assert results
         # Each result should have an installed status based on is_available()
@@ -81,8 +75,7 @@ class TestPluginInstall:
         commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
-            params = PluginInstallParameters(name='some-plugin', dry=True)
-            result = commands.install(params)
+            result = commands.install('some-plugin', dry_run=True)
 
             assert result.success
             assert 'Would install' in result.message
@@ -95,8 +88,7 @@ class TestPluginInstall:
         commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
-            params = PluginInstallParameters(name='some-plugin', dry=True)
-            result = commands.install(params)
+            result = commands.install('some-plugin', dry_run=True)
 
             assert result.success
             assert 'Would install' in result.message
@@ -116,8 +108,7 @@ class TestPluginInstall:
             patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
             patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
         ):
-            params = PluginInstallParameters(name='nonexistent-plugin', dry=False)
-            result = commands.install(params)
+            result = commands.install('nonexistent-plugin')
 
             assert not result.success
             assert 'failed' in result.message.lower()
@@ -138,10 +129,8 @@ class TestPluginInstall:
             patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
             patch.object(commands, '_get_existing_plugin_packages', return_value=set()),
         ):
-            params = PluginInstallParameters(name='not-a-plugin', dry=False)
-
             with pytest.raises(PluginError) as exc_info:
-                commands.install(params)
+                commands.install('not-a-plugin')
 
             assert 'not a valid Porringer plugin' in str(exc_info.value)
 
@@ -154,8 +143,7 @@ class TestPluginInstall:
             patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True),
             patch('porringer.backend.command.plugin.subprocess.run', side_effect=FileNotFoundError('pipx not found')),
         ):
-            params = PluginInstallParameters(name='some-plugin', dry=False)
-            result = commands.install(params)
+            result = commands.install('some-plugin')
 
             assert not result.success
             assert 'not found' in result.message.lower()
@@ -170,8 +158,7 @@ class TestPluginUninstall:
         commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
-            params = PluginUninstallParameters(names=['some-plugin'], dry=True)
-            results = commands.uninstall(params)
+            results = commands.uninstall(['some-plugin'], dry_run=True)
 
             assert len(results) == 1
             assert results[0].success
@@ -184,8 +171,7 @@ class TestPluginUninstall:
         commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
-            params = PluginUninstallParameters(names=['some-plugin'], dry=True)
-            results = commands.uninstall(params)
+            results = commands.uninstall(['some-plugin'], dry_run=True)
 
             assert len(results) == 1
             assert results[0].success
@@ -206,8 +192,7 @@ class TestPluginUninstall:
             patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
             patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
         ):
-            params = PluginUninstallParameters(names=['plugin-a', 'plugin-b', 'plugin-c'], dry=False)
-            results = commands.uninstall(params)
+            results = commands.uninstall(['plugin-a', 'plugin-b', 'plugin-c'])
 
             assert len(results) == NUM_PLUGINS_MULTIPLE
             assert all(r.success for r in results)
@@ -237,8 +222,7 @@ class TestPluginUninstall:
             patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
             patch('porringer.backend.command.plugin.subprocess.run', side_effect=mock_run),
         ):
-            params = PluginUninstallParameters(names=['plugin-ok', 'plugin-fail'], dry=False)
-            results = commands.uninstall(params)
+            results = commands.uninstall(['plugin-ok', 'plugin-fail'])
 
             assert len(results) == NUM_PLUGINS_PARTIAL
             assert results[0].success
@@ -254,8 +238,7 @@ class TestPluginUpdate:
         commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False):
-            params = PluginUpdateParameters(names=['some-plugin'], dry=True)
-            results = commands.update(params)
+            results = commands.update(['some-plugin'], dry_run=True)
 
             assert len(results) == 1
             assert results[0].success
@@ -268,8 +251,7 @@ class TestPluginUpdate:
         commands = PluginCommands()
 
         with patch('porringer.backend.command.plugin.is_pipx_installation', return_value=True):
-            params = PluginUpdateParameters(names=['some-plugin'], dry=True)
-            results = commands.update(params)
+            results = commands.update(['some-plugin'], dry_run=True)
 
             assert len(results) == 1
             assert results[0].success
@@ -290,8 +272,7 @@ class TestPluginUpdate:
             patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
             patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
         ):
-            params = PluginUpdateParameters(names=['some-plugin'], dry=False)
-            results = commands.update(params)
+            results = commands.update(['some-plugin'])
 
             assert len(results) == 1
             assert results[0].success
@@ -310,8 +291,7 @@ class TestPluginUpdate:
             patch('porringer.backend.command.plugin.is_pipx_installation', return_value=False),
             patch('porringer.backend.command.plugin.subprocess.run', return_value=mock_result),
         ):
-            params = PluginUpdateParameters(names=['nonexistent-plugin'], dry=False)
-            results = commands.update(params)
+            results = commands.update(['nonexistent-plugin'])
 
             assert len(results) == 1
             assert not results[0].success
