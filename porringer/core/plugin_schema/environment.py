@@ -308,8 +308,20 @@ class Environment(ToolBasedPlugin):
         return Package(name=params.package.name, version=None)
 
     @abstractmethod
-    def packages(self) -> list[Package]:
-        """Gathers installed packages in the given environment
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+        """Gathers installed packages in the given environment.
+
+        When *project_path* is provided, plugins that manage
+        project-scoped virtual environments (pip, uv) should discover
+        the project's venv (e.g. ``<project_path>/.venv``) and list
+        packages from that interpreter instead of the global/PATH one.
+        Plugins that are inherently global (pipx, apt, brew, winget)
+        may ignore this parameter.
+
+        Args:
+            project_path: Optional path to a project directory.  When
+                set, the listing is scoped to the project's virtual
+                environment.
 
         Returns:
             A list of packages

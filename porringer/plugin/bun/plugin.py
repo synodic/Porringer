@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -127,11 +128,15 @@ class BunEnvironment(Environment):
         return Package(name=pkg.name, version=None)
 
     @override
-    def packages(self) -> list[Package]:
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed Bun packages.
 
         Bun does not provide a JSON list for globally installed packages;
-        returns an empty list.
+        returns an empty list.  *project_path* is accepted for interface
+        compatibility.
+
+        Args:
+            project_path: Unused.
 
         Returns:
             An empty list.

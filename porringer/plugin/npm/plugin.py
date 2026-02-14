@@ -3,6 +3,7 @@
 import json
 import logging
 import subprocess
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -149,11 +150,15 @@ class NpmEnvironment(Environment):
         return Package(name=pkg.name, version=None)
 
     @override
-    def packages(self) -> list[Package]:
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed npm packages.
 
-        Uses `npm ls -g --json --depth=0` to list top-level global
-        packages and parses the JSON output.
+        Uses ``npm ls -g --json --depth=0`` to list top-level global
+        packages and parses the JSON output.  *project_path* is
+        accepted for interface compatibility but ignored for now.
+
+        Args:
+            project_path: Unused.
 
         Returns:
             A list of installed packages.

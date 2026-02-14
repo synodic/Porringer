@@ -621,6 +621,8 @@ class SyncCommands:
         action: SetupAction,
         environments: dict[str, Environment],
         strategy: SyncStrategy = SyncStrategy.MINIMAL,
+        *,
+        project_path: Path | None = None,
     ) -> SetupActionResult:
         """Simulates executing an action in dry-run mode.
 
@@ -635,13 +637,14 @@ class SyncCommands:
             action: The action to simulate.
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy (affects skip logic for packages).
+            project_path: Optional project directory for scoped package queries.
 
         Returns:
             The simulated result.
         """
         match action.kind:
             case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
-                return SyncCommands._dry_run_package_action(action, environments, strategy)
+                return SyncCommands._dry_run_package_action(action, environments, strategy, project_path=project_path)
             case PluginKind.PROJECT | PluginKind.SCM:
                 return SetupActionResult(action=action, success=True)
             case None:
@@ -655,6 +658,8 @@ class SyncCommands:
         action: SetupAction,
         environments: dict[str, Environment],
         strategy: SyncStrategy,
+        *,
+        project_path: Path | None = None,
     ) -> SetupActionResult:
         """Simulate a package action in dry-run mode."""
         if action.installer is None or action.package is None or action.installer not in environments:
@@ -665,7 +670,7 @@ class SyncCommands:
         validator = type(env).package_name_validator()
 
         try:
-            installed_packages = environments[action.installer].packages()
+            installed_packages = environments[action.installer].packages(project_path=project_path)
             is_installed, installed_detail = SyncCommands._is_package_installed(
                 action.package, installed_packages, validator, action.kind
             )
@@ -804,6 +809,8 @@ class SyncCommands:
         environments: dict[str, Environment],
         strategy: SyncStrategy,
         event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+        *,
+        project_path: Path | None = None,
     ) -> SetupActionResult:
         """Execute a package install or upgrade based on the strategy.
 
@@ -816,6 +823,7 @@ class SyncCommands:
             environments: Dict of instantiated environment plugins.
             strategy: The sync strategy.
             event_queue: Optional queue to emit sub-action events into.
+            project_path: Optional project directory for scoped package queries.
 
         Returns:
             The result of the operation.
@@ -835,7 +843,9 @@ class SyncCommands:
         validator = type(environment).package_name_validator()
         try:
             loop = asyncio.get_running_loop()
-            installed_packages = await loop.run_in_executor(None, environment.packages)
+            installed_packages = await loop.run_in_executor(
+                None, lambda: environment.packages(project_path=project_path)
+            )
             is_installed, installed_detail = SyncCommands._is_package_installed(
                 action.package, installed_packages, validator, action.kind
             )
@@ -937,6 +947,8 @@ class SyncCommands:
         environments: dict[str, Environment],
         parameters: SetupParameters,
         event_queue: asyncio.Queue[ProgressEvent | None] | None,
+        *,
+        project_path: Path | None = None,
     ) -> tuple[list[SetupActionResult], bool]:
         """Execute PACKAGE actions with parallel support.
 
@@ -945,7 +957,9 @@ class SyncCommands:
         """
         if parameters.dry_run:
             return (
-                self._dry_run_package_actions(package_actions, environments, parameters.strategy, event_queue),
+                self._dry_run_package_actions(
+                    package_actions, environments, parameters.strategy, event_queue, project_path=project_path
+                ),
                 True,
             )
 
@@ -956,7 +970,7 @@ class SyncCommands:
         # Execute parallel actions concurrently
         if parallel_actions:
             parallel_results, should_continue = await self._run_parallel_packages(
-                parallel_actions, environments, parameters, event_queue
+                parallel_actions, environments, parameters, event_queue, project_path=project_path
             )
             results.extend(parallel_results)
             if not should_continue:
@@ -964,7 +978,7 @@ class SyncCommands:
 
         # Execute sequential actions one at a time
         sequential_results, should_continue = await self._run_sequential_packages(
-            sequential_actions, environments, parameters, event_queue
+            sequential_actions, environments, parameters, event_queue, project_path=project_path
         )
         results.extend(sequential_results)
 
@@ -976,11 +990,13 @@ class SyncCommands:
         environments: dict[str, Environment],
         strategy: SyncStrategy,
         event_queue: asyncio.Queue[ProgressEvent | None] | None,
+        *,
+        project_path: Path | None = None,
     ) -> list[SetupActionResult]:
         """Execute dry-run for package actions."""
         results: list[SetupActionResult] = []
         for action in package_actions:
-            result = self._dry_run_action(action, environments, strategy)
+            result = self._dry_run_action(action, environments, strategy, project_path=project_path)
             results.append(result)
             if event_queue is not None:
                 event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
@@ -1017,13 +1033,17 @@ class SyncCommands:
         environments: dict[str, Environment],
         parameters: SetupParameters,
         event_queue: asyncio.Queue[ProgressEvent | None] | None,
+        *,
+        project_path: Path | None = None,
     ) -> tuple[list[SetupActionResult], bool]:
         """Run package actions sequentially."""
         results: list[SetupActionResult] = []
         for action in sequential_actions:
             if event_queue is not None:
                 event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
-            result = await self._execute_package(action, environments, parameters.strategy, event_queue)
+            result = await self._execute_package(
+                action, environments, parameters.strategy, event_queue, project_path=project_path
+            )
             results.append(result)
             if event_queue is not None:
                 event_queue.put_nowait(
@@ -1040,6 +1060,8 @@ class SyncCommands:
         environments: dict[str, Environment],
         parameters: SetupParameters,
         event_queue: asyncio.Queue[ProgressEvent | None] | None,
+        *,
+        project_path: Path | None = None,
     ) -> tuple[list[SetupActionResult], bool]:
         """Run package actions in parallel using TaskGroup.
 
@@ -1056,7 +1078,9 @@ class SyncCommands:
             if event_queue is not None:
                 event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
             try:
-                result = await self._execute_package(action, environments, parameters.strategy, event_queue)
+                result = await self._execute_package(
+                    action, environments, parameters.strategy, event_queue, project_path=project_path
+                )
             except Exception as e:
                 result = SetupActionResult(action=action, success=False, message=str(e))
             if event_queue is not None:
@@ -1244,6 +1268,7 @@ class SyncCommands:
                 environments,
                 parameters,
                 event_queue,
+                project_path=manifest_directory,
             )
             results.extend(package_results)
             if not should_continue:
@@ -1269,6 +1294,7 @@ class SyncCommands:
                 environments,
                 parameters,
                 event_queue,
+                project_path=manifest_directory,
             )
             results.extend(tool_results)
             if not should_continue:

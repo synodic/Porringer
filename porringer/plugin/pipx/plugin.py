@@ -187,8 +187,15 @@ class PipxEnvironment(Environment, RuntimeConsumer):
         return Package(name=pkg.name, version=None)
 
     @override
-    def packages(self) -> list[Package]:
-        """Gathers installed packages in the given environment
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+        """Gathers installed packages in the given environment.
+
+        pipx manages isolated CLI tool installations globally, so
+        *project_path* is accepted for interface compatibility but
+        has no effect on the result.
+
+        Args:
+            project_path: Unused.  pipx is inherently global.
 
         Returns:
             A list of packages
