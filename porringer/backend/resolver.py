@@ -58,11 +58,11 @@ def build_plugin_info(
             continue
 
         canonicalized = canonicalize_type(plugin_type)
-        installed = plugin_type.is_available()
+        installed = plugin.is_available()
 
         tool_version = None
         if installed and isinstance(plugin, ToolBasedPlugin):
-            tool_version = plugin_type.tool_version()
+            tool_version = plugin.tool_version()
 
         results.append(
             PluginInfo(

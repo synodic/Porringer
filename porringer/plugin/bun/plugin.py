@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
 class BunEnvironment(Environment):
@@ -18,15 +18,9 @@ class BunEnvironment(Environment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Bun belongs to the `node` ecosystem."""
-        return 'node'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """Bun is a lower-priority Node installer (priority 30)."""
-        return 30
+        return Ecosystem('node')
 
     @classmethod
     @override

@@ -1,5 +1,9 @@
 """Exception definitions"""
 
+from __future__ import annotations
+
+from enum import Enum
+
 
 class PorringerError(Exception):
     """Base class for all Porringer exceptions.
@@ -42,6 +46,19 @@ class SetupError(PorringerError):
     """Base class for setup-related errors"""
 
 
+class ManifestErrorCode(Enum):
+    """Machine-readable code carried by :class:`ManifestError`.
+
+    Allows downstream code to classify errors structurally instead of
+    relying on substring matching against the human-readable message.
+    """
+
+    NO_MANIFEST = 'no_manifest'
+    SYNTAX_ERROR = 'syntax_error'
+    LOAD_FAILED = 'load_failed'
+    SCHEMA_INVALID = 'schema_invalid'
+
+
 class ManifestError(SetupError):
     """Raised when there is an error with the setup manifest.
 
@@ -49,7 +66,24 @@ class ManifestError(SetupError):
     - Invalid JSON/TOML syntax
     - Missing required fields
     - Invalid package specifications
+
+    Carries an optional :attr:`code` for structured error classification.
     """
+
+    def __init__(self, error: str, *, code: ManifestErrorCode | None = None) -> None:
+        """Initializes the error.
+
+        Args:
+            error: Human-readable error message.
+            code: Optional machine-readable code for this error.
+        """
+        super().__init__(error)
+        self._code = code
+
+    @property
+    def code(self) -> ManifestErrorCode | None:
+        """Return the machine-readable error code, if set."""
+        return self._code
 
 
 class CommandTimeoutError(SetupError):

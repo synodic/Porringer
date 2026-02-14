@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
 class DenoEnvironment(Environment):
@@ -18,15 +18,9 @@ class DenoEnvironment(Environment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Deno belongs to the `deno` ecosystem."""
-        return 'deno'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """Deno is the sole Deno installer (priority 10)."""
-        return 10
+        return Ecosystem('deno')
 
     @classmethod
     @override

@@ -11,7 +11,8 @@ from typer.testing import CliRunner
 from porringer.api import API
 from porringer.backend.command.sync import SyncCommands
 from porringer.console.entry import app
-from porringer.core.schema import PluginKind
+from porringer.core.plugin_schema.environment import Environment
+from porringer.core.schema import Ecosystem, PluginKind
 from porringer.schema import (
     ManifestValidationCode,
     PackageSpec,
@@ -24,6 +25,7 @@ from porringer.utility.exception import ManifestError
 
 # Test constants
 EXPECTED_ACTIONS_JSON_MANIFEST = 2  # 1 install + 1 command
+_PY = Ecosystem('python')
 
 # Action indices
 FIRST_ACTION_INDEX = 0
@@ -265,31 +267,31 @@ class TestPackageSpec:
     @staticmethod
     def test_manifest_coerces_string_packages() -> None:
         """String package entries are coerced to PackageSpec objects"""
-        manifest = SetupManifest(packages={'python': ['requests', 'flask']})
-        assert len(manifest.packages['python']) == TWO_PACKAGES
-        assert str(manifest.packages['python'][0].name) == 'requests'
-        assert manifest.packages['python'][0].description is None
+        manifest = SetupManifest(packages={_PY: ['requests', 'flask']})
+        assert len(manifest.packages[_PY]) == TWO_PACKAGES
+        assert str(manifest.packages[_PY][0].name) == 'requests'
+        assert manifest.packages[_PY][0].description is None
 
     @staticmethod
     def test_manifest_accepts_object_packages() -> None:
         """Object package entries are parsed as PackageSpec"""
-        manifest = SetupManifest(packages={'python': [{'name': 'ruff', 'description': 'Fast linter'}]})
-        assert str(manifest.packages['python'][0].name) == 'ruff'
-        assert manifest.packages['python'][0].description == 'Fast linter'
+        manifest = SetupManifest(packages={_PY: [{'name': 'ruff', 'description': 'Fast linter'}]})
+        assert str(manifest.packages[_PY][0].name) == 'ruff'
+        assert manifest.packages[_PY][0].description == 'Fast linter'
 
     @staticmethod
     def test_manifest_mixed_string_and_object_packages() -> None:
         """Manifest accepts a mix of string and object package entries"""
         manifest = SetupManifest(
             packages={
-                'python': [
+                _PY: [
                     'requests',
                     {'name': 'ruff', 'description': 'Fast linter'},
                     'pytest',
                 ]
             }
         )
-        pkgs = manifest.packages['python']
+        pkgs = manifest.packages[_PY]
         assert len(pkgs) == THREE_PACKAGES
         assert str(pkgs[0].name) == 'requests'
         assert pkgs[0].description is None
@@ -337,15 +339,15 @@ class TestPackageSpec:
     @staticmethod
     def test_string_coercion_has_empty_platforms() -> None:
         """String package entries should have empty platforms (all platforms)"""
-        manifest = SetupManifest(packages={'python': ['requests']})
-        assert manifest.packages['python'][0].platforms == []
-        assert manifest.packages['python'][0].is_applicable() is True
+        manifest = SetupManifest(packages={_PY: ['requests']})
+        assert manifest.packages[_PY][0].platforms == []
+        assert manifest.packages[_PY][0].is_applicable() is True
 
     @staticmethod
     def test_object_with_platforms_parsed() -> None:
         """Object package entries with platforms should be parsed correctly"""
-        manifest = SetupManifest(packages={'python': [{'name': 'pywin32', 'platforms': ['win32']}]})
-        spec = manifest.packages['python'][0]
+        manifest = SetupManifest(packages={_PY: [{'name': 'pywin32', 'platforms': ['win32']}]})
+        spec = manifest.packages[_PY][0]
         assert str(spec.name) == 'pywin32'
         assert spec.platforms == ['win32']
 
@@ -877,16 +879,14 @@ class TestPackageSpecPlugins:
     @staticmethod
     def test_string_coercion_has_empty_plugins() -> None:
         """String package entries should have empty plugins list"""
-        manifest = SetupManifest(packages={'python': ['requests']})
-        assert manifest.packages['python'][0].plugins == []
+        manifest = SetupManifest(packages={_PY: ['requests']})
+        assert manifest.packages[_PY][0].plugins == []
 
     @staticmethod
     def test_manifest_tools_with_plugins() -> None:
         """Manifest tools section accepts packages with plugins"""
-        manifest = SetupManifest(
-            tools={'python': [{'name': 'pdm', 'plugins': ['cppython']}, 'ruff']}
-        )
-        pkgs = manifest.tools['python']
+        manifest = SetupManifest(tools={_PY: [{'name': 'pdm', 'plugins': ['cppython']}, 'ruff']})
+        pkgs = manifest.tools[_PY]
         assert len(pkgs) == 2
         assert len(pkgs[0].plugins) == 1
         assert pkgs[0].plugins[0].name == 'cppython'
@@ -919,13 +919,15 @@ class TestPackageSpecPlugins:
 
             # Second action: inject cppython into pdm
             assert str(results.actions[SECOND_ACTION_INDEX].package) == 'cppython'
-            assert results.actions[SECOND_ACTION_INDEX].inject_into is not None
-            assert results.actions[SECOND_ACTION_INDEX].inject_into.name == 'pdm'
+            second = results.actions[SECOND_ACTION_INDEX]
+            assert second.inject_into is not None
+            assert second.inject_into.name == 'pdm'
 
             # Third action: inject pdm-bump into pdm
             assert str(results.actions[THIRD_ACTION_INDEX].package) == 'pdm-bump'
-            assert results.actions[THIRD_ACTION_INDEX].inject_into is not None
-            assert results.actions[THIRD_ACTION_INDEX].inject_into.name == 'pdm'
+            third = results.actions[THIRD_ACTION_INDEX]
+            assert third.inject_into is not None
+            assert third.inject_into.name == 'pdm'
 
             # Fourth action: install ruff (no injection)
             assert str(results.actions[FOURTH_ACTION_INDEX].package) == 'ruff'
@@ -934,10 +936,8 @@ class TestPackageSpecPlugins:
     @staticmethod
     def test_injection_action_description_contains_inject() -> None:
         """Injection actions should have 'Inject' in their description"""
-        manifest = SetupManifest(
-            tools={'python': [{'name': 'pdm', 'plugins': ['cppython']}]}
-        )
-        environments = SyncCommands._discover_plugins('environment', object, check_dependencies=True)
+        manifest = SetupManifest(tools={_PY: [{'name': 'pdm', 'plugins': ['cppython']}]})
+        environments: dict[str, Environment] = {}
         actions = SyncCommands._build_actions(manifest, environments)
 
         injection_actions = [a for a in actions if a.inject_into is not None]
@@ -956,7 +956,7 @@ class TestPackageSpecPlugins:
             },
         }
         manifest = SetupManifest.model_validate(data)
-        spec = manifest.tools['python'][0]
+        spec = manifest.tools[_PY][0]
         assert spec.plugins[0].name == 'cppython'
         assert spec.plugins[0].constraint == '>=0.5'
 

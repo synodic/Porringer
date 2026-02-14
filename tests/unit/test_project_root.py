@@ -12,6 +12,7 @@ from pathlib import Path
 from porringer.core.plugin_schema.project_environment import (
     ECOSYSTEM_MARKERS,
 )
+from porringer.core.schema import Ecosystem
 from porringer.test.mock.project_environment import MockProjectEnvironment
 
 # ---------------------------------------------------------------------------
@@ -23,8 +24,8 @@ class _NodeProjectEnv(MockProjectEnvironment):
     """Mock project environment for the `node` ecosystem."""
 
     @staticmethod
-    def ecosystem() -> str:
-        return 'node'
+    def ecosystem() -> Ecosystem:
+        return Ecosystem('node')
 
     @classmethod
     def consumed_runtime_kind(cls) -> str:
@@ -35,8 +36,8 @@ class _DenoProjectEnv(MockProjectEnvironment):
     """Mock project environment for the `deno` ecosystem."""
 
     @staticmethod
-    def ecosystem() -> str:
-        return 'deno'
+    def ecosystem() -> Ecosystem:
+        return Ecosystem('deno')
 
     @classmethod
     def consumed_runtime_kind(cls) -> str:
@@ -47,8 +48,8 @@ class _UnknownProjectEnv(MockProjectEnvironment):
     """Mock project environment for an unregistered ecosystem."""
 
     @staticmethod
-    def ecosystem() -> str:
-        return 'unknown_ecosystem'
+    def ecosystem() -> Ecosystem:
+        return Ecosystem('unknown_ecosystem')
 
     @classmethod
     def consumed_runtime_kind(cls) -> str:
@@ -86,7 +87,7 @@ class TestProjectMarker:
     @staticmethod
     def test_all_known_ecosystems_covered() -> None:
         """Every entry in ECOSYSTEM_MARKERS is reachable."""
-        assert set(ECOSYSTEM_MARKERS.keys()) == {'python', 'node', 'deno'}
+        assert set(ECOSYSTEM_MARKERS.keys()) == {Ecosystem('python'), Ecosystem('node'), Ecosystem('deno')}
 
 
 # ---------------------------------------------------------------------------

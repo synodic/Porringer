@@ -21,10 +21,6 @@ logger = logging.getLogger(__name__)
 class Builder:
     """Helper class for building Porringer projects"""
 
-    def __init__(self) -> None:
-        """Initializes the builder"""
-        pass
-
     # ------------------------------------------------------------------
     # Generic discovery & construction
     # ------------------------------------------------------------------
@@ -55,7 +51,7 @@ class Builder:
         for entry_point in list(metadata.entry_points(group=f'porringer.{group}')):
             try:
                 loaded_type = entry_point.load()
-            except ModuleNotFoundError as e:
+            except Exception as e:
                 logger.warning(f"Plugin '{entry_point.name}' could not be loaded: {e}. Skipping")
                 continue
 
@@ -64,6 +60,17 @@ class Builder:
             if entry_point.dist is None:
                 logger.error(f"Plugin '{canonicalized.name}' is not installed. Skipping")
                 continue
+
+            # Warn when the entry-point name diverges from the canonical
+            # name derived from the class.  This helps catch mismatches
+            # that would make preferences or plugin filters fail silently.
+            if entry_point.name != canonicalized.name:
+                logger.warning(
+                    "Entry-point name '%s' differs from canonical name '%s' for %s",
+                    entry_point.name,
+                    canonicalized.name,
+                    loaded_type.__name__,
+                )
 
             if not issubclass(loaded_type, base_class):
                 logger.warning(
@@ -125,17 +132,13 @@ class Builder:
             PluginDependencyError: If a required dependency is missing
         """
         # Build a set of available plugin names
-        available_plugins: set[str] = set()
-        for plugin_info in plugins:
-            canonicalized = canonicalize_type(plugin_info.type)
-            available_plugins.add(canonicalized.name)
+        available_plugins = {canonicalize_type(info.type).name for info in plugins}
 
         resolved_plugins: list[PluginInformation[T]] = []
 
         for plugin_info in plugins:
             plugin_name = canonicalize_type(plugin_info.type).name
             dependencies = plugin_info.type.dependencies()
-            can_load = True
 
             for dep in dependencies:
                 # Skip dependencies that don't apply to the current platform
@@ -157,8 +160,7 @@ class Builder:
                 else:
                     logger.debug(f"Plugin '{plugin_name}' dependency on '{dep.plugin}' satisfied")
 
-            if can_load:
-                resolved_plugins.append(plugin_info)
+            resolved_plugins.append(plugin_info)
 
         return resolved_plugins
 

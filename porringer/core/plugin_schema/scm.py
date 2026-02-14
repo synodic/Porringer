@@ -11,7 +11,7 @@ from abc import abstractmethod
 from pathlib import Path
 
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
-from porringer.core.schema import PluginKind, PluginParameters
+from porringer.core.schema import Ecosystem, PluginKind, PluginParameters
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class ScmEnvironment(ToolBasedPlugin):
 
     @staticmethod
     @abstractmethod
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Return the ecosystem this SCM environment belongs to.
 
         Examples: `"git"`, `"hg"`.

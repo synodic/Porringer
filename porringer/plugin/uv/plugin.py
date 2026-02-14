@@ -9,7 +9,7 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Package, PackageRef, PluginParameters
+from porringer.core.schema import Ecosystem, Package, PackageRef, PluginParameters
 
 
 class UvEnvironment(Environment, RuntimeConsumer):
@@ -38,15 +38,9 @@ class UvEnvironment(Environment, RuntimeConsumer):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """UV belongs to the `python` ecosystem."""
-        return 'python'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """UV is the preferred Python installer (priority 10)."""
-        return 10
+        return Ecosystem('python')
 
     @staticmethod
     @override

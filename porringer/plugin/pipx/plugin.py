@@ -7,7 +7,7 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Package, PackageRef, PluginKind
+from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
 
 
 def _get_pipx_venvs_dir() -> Path:
@@ -43,21 +43,15 @@ class PipxEnvironment(Environment, RuntimeConsumer):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Pipx belongs to the `python` ecosystem."""
-        return 'python'
+        return Ecosystem('python')
 
     @staticmethod
     @override
     def plugin_kind() -> PluginKind:
         """Pipx installs CLI tools in isolated environments."""
         return PluginKind.TOOL
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """Pipx is the preferred Python tool installer (priority 10)."""
-        return 10
 
     @staticmethod
     @override

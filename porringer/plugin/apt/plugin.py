@@ -10,7 +10,7 @@ from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
 )
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
 class AptEnvironment(Environment):
@@ -40,17 +40,15 @@ class AptEnvironment(Environment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """APT belongs to the `system` ecosystem."""
-        return 'system'
+        return Ecosystem('system')
 
     @staticmethod
     @override
-    def default_priority() -> int:
-        """Preferred on Linux (10), unavailable elsewhere (999)."""
-        if sys.platform in {'win32', 'darwin'}:
-            return 999
-        return 10
+    def is_supported() -> bool:
+        """Supported on Linux only."""
+        return sys.platform not in {'win32', 'darwin'}
 
     @classmethod
     @override

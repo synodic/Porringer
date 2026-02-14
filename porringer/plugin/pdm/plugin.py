@@ -3,6 +3,7 @@
 from typing import override
 
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.schema import Ecosystem
 
 
 class PdmProjectEnvironment(ProjectEnvironment):
@@ -14,15 +15,9 @@ class PdmProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """PDM belongs to the `python` ecosystem."""
-        return 'python'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """PDM is a secondary Python project manager (priority 20)."""
-        return 20
+        return Ecosystem('python')
 
     @classmethod
     @override

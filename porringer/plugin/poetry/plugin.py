@@ -6,6 +6,7 @@ from porringer.core.plugin_schema.project_environment import (
     ProjectEnvironment,
     ProjectSyncParameters,
 )
+from porringer.core.schema import Ecosystem
 
 
 class PoetryProjectEnvironment(ProjectEnvironment):
@@ -21,15 +22,9 @@ class PoetryProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Poetry belongs to the `python` ecosystem."""
-        return 'python'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """Poetry is a lower-priority Python project manager (priority 30)."""
-        return 30
+        return Ecosystem('python')
 
     @classmethod
     @override

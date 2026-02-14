@@ -149,14 +149,14 @@ class TestPackageRefFrozen:
         """Name attribute is immutable."""
         ref = PackageRef(name='ruff')
         with pytest.raises(ValidationError):
-            ref.name = 'other'  # type: ignore[misc]
+            ref.name = 'other'
 
     @staticmethod
     def test_cannot_set_constraint() -> None:
         """Constraint attribute is immutable."""
         ref = PackageRef(name='ruff')
         with pytest.raises(ValidationError):
-            ref.constraint = '>=1.0'  # type: ignore[misc]
+            ref.constraint = '>=1.0'
 
 
 class TestPackageRefRoundTrip:

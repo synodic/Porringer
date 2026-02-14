@@ -9,7 +9,7 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeProvider
-from porringer.core.schema import Package, PackageRef, PluginDependency, PluginKind
+from porringer.core.schema import Ecosystem, Package, PackageRef, PluginDependency, PluginKind
 
 
 class PimEnvironment(Environment, RuntimeProvider):
@@ -33,9 +33,9 @@ class PimEnvironment(Environment, RuntimeProvider):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """PIM belongs to the `python` ecosystem."""
-        return 'python'
+        return Ecosystem('python')
 
     @staticmethod
     @override
@@ -45,11 +45,9 @@ class PimEnvironment(Environment, RuntimeProvider):
 
     @staticmethod
     @override
-    def default_priority() -> int:
-        """Preferred on Windows (10), unavailable elsewhere (999)."""
-        if sys.platform == 'win32':
-            return 10
-        return 999
+    def is_supported() -> bool:
+        """Supported on Windows only."""
+        return sys.platform == 'win32'
 
     @staticmethod
     @override
