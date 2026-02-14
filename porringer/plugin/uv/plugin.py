@@ -3,6 +3,8 @@
 import json
 import logging
 import subprocess
+import sys
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -25,6 +27,7 @@ class UvEnvironment(Environment, RuntimeConsumer):
         """Initializes the uv environment plugin."""
         super().__init__(parameters)
         self._cached_packages: list[Package] | None = None
+        self._cached_python: str | None = None
 
     def _python_args(self) -> list[str]:
         """Return `['--python', '<path>']` when an override is active.
@@ -173,22 +176,63 @@ class UvEnvironment(Environment, RuntimeConsumer):
             return None
         return Package(name=pkg.name, version=None)
 
-    @override
-    def packages(self) -> list[Package]:
-        """Gathers installed packages using `uv pip list --format=json`.
+    @staticmethod
+    def _discover_venv_python(project_path: Path) -> Path | None:
+        """Discover the Python interpreter inside a project's virtual environment.
 
-        Results are cached per-instance so multiple calls within a single
-        sync run don't shell out repeatedly.
+        Looks for a ``.venv`` directory under *project_path* and returns
+        the path to its Python executable if found.
+
+        Args:
+            project_path: Root directory of the project.
+
+        Returns:
+            Path to the venv Python, or ``None`` if no venv is found.
+        """
+        venv_dir = project_path / '.venv'
+        if not venv_dir.is_dir():
+            return None
+
+        if sys.platform == 'win32':
+            python = venv_dir / 'Scripts' / 'python.exe'
+        else:
+            python = venv_dir / 'bin' / 'python'
+
+        return python if python.is_file() else None
+
+    @override
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+        """Gathers installed packages using ``uv pip list --format=json``.
+
+        When *project_path* is provided, the method discovers the
+        project's virtual environment (``<project_path>/.venv``) and
+        lists packages from that interpreter.  Otherwise it falls back
+        to the runtime-override or the default Python.
+
+        Results are cached per effective interpreter so multiple calls
+        within a single sync run don't shell out repeatedly.
+
+        Args:
+            project_path: Optional project directory.  When set, the
+                listing is scoped to the project's ``.venv``.
 
         Returns:
             A list of installed packages.
         """
-        if self._cached_packages is not None:
+        # Determine the effective Python target
+        effective_args = self._python_args()
+        if project_path is not None:
+            venv_python = self._discover_venv_python(project_path)
+            if venv_python is not None:
+                effective_args = ['--python', str(venv_python)]
+
+        cache_key = str(effective_args)
+        if self._cached_packages is not None and self._cached_python == cache_key:
             return self._cached_packages
 
         logger = logging.getLogger('porringer.uv.packages')
         try:
-            args = ['uv', 'pip', 'list', '--format=json', *self._python_args()]
+            args = ['uv', 'pip', 'list', '--format=json', *effective_args]
             result = subprocess.run(
                 args,
                 capture_output=True,
@@ -198,6 +242,7 @@ class UvEnvironment(Environment, RuntimeConsumer):
             if result.returncode != 0:
                 logger.error('uv pip list failed: %s', result.stderr)
                 self._cached_packages = []
+                self._cached_python = cache_key
                 return self._cached_packages
 
             entries: list[dict[str, str]] = json.loads(result.stdout)
@@ -209,4 +254,5 @@ class UvEnvironment(Environment, RuntimeConsumer):
             logger.error('Failed to list uv packages: %s', e)
             self._cached_packages = []
 
+        self._cached_python = cache_key
         return self._cached_packages

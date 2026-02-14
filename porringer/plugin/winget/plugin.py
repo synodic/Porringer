@@ -3,6 +3,7 @@
 import logging
 import subprocess
 import sys
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -176,8 +177,14 @@ class WingetEnvironment(Environment):
         return Package(name=pkg.name, version=None)
 
     @override
-    def packages(self) -> list[Package]:
-        """Gathers installed packages in the given environment
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+        """Gathers installed packages in the given environment.
+
+        winget manages system packages globally; *project_path* is
+        accepted for interface compatibility but has no effect.
+
+        Args:
+            project_path: Unused.  winget is inherently global.
 
         Returns:
             A list of packages

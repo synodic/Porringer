@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -144,11 +145,15 @@ class DenoEnvironment(Environment):
         return Package(name=pkg.name, version=None)
 
     @override
-    def packages(self) -> list[Package]:
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed Deno scripts.
 
         Deno does not provide a structured list of globally installed
-        scripts; returns an empty list.
+        scripts; returns an empty list.  *project_path* is accepted
+        for interface compatibility.
+
+        Args:
+            project_path: Unused.
 
         Returns:
             An empty list.

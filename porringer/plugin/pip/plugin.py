@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -53,6 +54,7 @@ class PipEnvironment(Environment, RuntimeConsumer):
         """
         super().__init__(parameters)
         self._cached_packages: list[Package] | None = None
+        self._cached_python: str | None = None
 
     @property
     def python_command(self) -> str:
@@ -427,41 +429,84 @@ class PipEnvironment(Environment, RuntimeConsumer):
             return None
         return Package(name=pkg.name, version=None)
 
+    @staticmethod
+    def _discover_venv_python(project_path: Path) -> Path | None:
+        """Discover the Python interpreter inside a project's virtual environment.
+
+        Looks for a ``.venv`` directory under *project_path* and returns
+        the path to its Python executable if found.
+
+        Args:
+            project_path: Root directory of the project.
+
+        Returns:
+            Path to the venv Python, or ``None`` if no venv is found.
+        """
+        venv_dir = project_path / '.venv'
+        if not venv_dir.is_dir():
+            return None
+
+        if sys.platform == 'win32':
+            python = venv_dir / 'Scripts' / 'python.exe'
+        else:
+            python = venv_dir / 'bin' / 'python'
+
+        return python if python.is_file() else None
+
     @override
-    def packages(self) -> list[Package]:
-        """Gathers installed packages visible to the active Python on PATH.
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+        """Gathers installed packages visible to the active Python.
 
-        Tries `python -m pip list --format=json` first.  If the pip module
-        is not installed (common in uv-created virtual environments), falls
-        back to `importlib.metadata` which is part of the standard library
-        and can enumerate installed packages without pip.
+        When *project_path* is provided, the method discovers the
+        project's virtual environment (``<project_path>/.venv``) and
+        lists packages from that interpreter.  Otherwise it falls back
+        to the runtime-override or the system Python on PATH.
 
-        The result is cached for the lifetime of this plugin instance to avoid
-        repeated subprocess invocations (`packages()` is called once per
-        package action).
+        Tries ``python -m pip list --format=json`` first.  If the pip
+        module is not installed (common in uv-created virtual
+        environments), falls back to ``importlib.metadata``.
+
+        The result is cached per effective interpreter path so that
+        multiple calls within a single sync run don't shell out
+        repeatedly.
+
+        Args:
+            project_path: Optional project directory.  When set, the
+                listing is scoped to the project's ``.venv``.
 
         Returns:
             A list of packages
         """
-        if self._cached_packages is not None:
+        # Determine the effective Python interpreter
+        effective_python = self.python_command
+        if project_path is not None:
+            venv_python = self._discover_venv_python(project_path)
+            if venv_python is not None:
+                effective_python = str(venv_python)
+
+        # Use cached result when the interpreter matches
+        if self._cached_packages is not None and self._cached_python == effective_python:
             return self._cached_packages
 
         logger = logging.getLogger('porringer.pip.packages')
 
         # Try pip list first
-        packages = self._list_packages_via_pip(logger, self.python_command)
+        packages = self._list_packages_via_pip(logger, effective_python)
         if packages is not None:
             self._cached_packages = packages
+            self._cached_python = effective_python
             return self._cached_packages
 
         # Fallback: importlib.metadata (works without pip module installed)
         logger.debug('pip module unavailable, falling back to importlib.metadata')
-        packages = self._list_packages_via_importlib(logger, self.python_command)
+        packages = self._list_packages_via_importlib(logger, effective_python)
         if packages is not None:
             self._cached_packages = packages
+            self._cached_python = effective_python
             return self._cached_packages
 
         self._cached_packages = []
+        self._cached_python = effective_python
         return self._cached_packages
 
     @staticmethod

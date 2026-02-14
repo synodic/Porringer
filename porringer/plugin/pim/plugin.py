@@ -294,8 +294,14 @@ class PimEnvironment(Environment, RuntimeProvider):
         return Package(name=pkg.name, version=version or tag)
 
     @override
-    def packages(self) -> list[Package]:
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Lists all installed Python runtimes.
+
+        pim manages Python runtimes globally; *project_path* is
+        accepted for interface compatibility but has no effect.
+
+        Args:
+            project_path: Unused.  pim is inherently global.
 
         Returns:
             A list of installed Python runtime packages

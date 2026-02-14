@@ -1,10 +1,12 @@
 """Porringer CLI plugin command module"""
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.table import Table
 
-from porringer.api import API
+from porringer.backend.command.plugin import PluginCommands
 from porringer.console.schema import Configuration
 from porringer.utility.exception import PluginError
 
@@ -22,9 +24,7 @@ def plugin_list(
     """
     configuration = context.ensure_object(Configuration)
 
-    api = API(configuration.local_configuration)
-
-    results = api.plugin.list()
+    results = PluginCommands.list()
 
     if not results:
         configuration.console.print('[yellow]No plugins found[/yellow]')
@@ -37,6 +37,44 @@ def plugin_list(
             )
 
 
+@app.command('packages')
+def plugin_packages(
+    context: typer.Context,
+    plugin_name: Annotated[str, typer.Argument(help='Plugin name to query (e.g. pipx, pip, uv)')],
+    project_path: Annotated[
+        Path,
+        typer.Option('--project-path', '-p', help='Project directory for scoped package listing'),
+    ] = Path('.'),
+) -> None:
+    """List packages installed via a specific plugin.
+
+    Queries the named plugin's environment and displays all packages it
+    reports as currently installed.  For venv-scoped plugins (pip, uv),
+    the listing can be scoped to a project directory.
+    """
+    configuration = context.ensure_object(Configuration)
+
+    resolved_path = project_path.resolve()
+
+    try:
+        packages = PluginCommands.list_packages(plugin_name, resolved_path)
+    except PluginError as e:
+        configuration.console.print(f'[red]Error: {e.error}[/red]')
+        raise typer.Exit(code=1) from None
+
+    if not packages:
+        configuration.console.print(f'[yellow]No packages found for plugin: {plugin_name}[/yellow]')
+    else:
+        table = Table(title=f'Packages ({plugin_name})')
+        table.add_column('Name', style='cyan')
+        table.add_column('Version', style='green')
+
+        for pkg in sorted(packages, key=lambda p: p.name.lower()):
+            table.add_row(pkg.name, pkg.version or 'n/a')
+
+        configuration.console.print(table)
+
+
 @app.command('install')
 def plugin_install(
     context: typer.Context,
@@ -46,11 +84,9 @@ def plugin_install(
     """Install plugins from PyPI"""
     configuration = context.ensure_object(Configuration)
 
-    api = API(configuration.local_configuration)
-
     for plugin in plugins:
         try:
-            result = api.plugin.install(plugin, dry_run=dry_run)
+            result = PluginCommands.install(plugin, dry_run=dry_run)
 
             if result.success:
                 configuration.console.print(f'[green]{result.message}[/green]')
@@ -71,9 +107,7 @@ def plugin_update(
     """Update installed plugins"""
     configuration = context.ensure_object(Configuration)
 
-    api = API(configuration.local_configuration)
-
-    results = api.plugin.update(plugins, dry_run=dry_run)
+    results = PluginCommands.update(plugins, dry_run=dry_run)
 
     has_failure = False
     for result in results:
@@ -96,9 +130,7 @@ def plugin_uninstall(
     """Remove installed plugins"""
     configuration = context.ensure_object(Configuration)
 
-    api = API(configuration.local_configuration)
-
-    results = api.plugin.uninstall(plugins, dry_run=dry_run)
+    results = PluginCommands.uninstall(plugins, dry_run=dry_run)
 
     has_failure = False
     for result in results:

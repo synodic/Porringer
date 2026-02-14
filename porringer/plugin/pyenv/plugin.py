@@ -275,8 +275,14 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         return Package(name=params.package.name, version=version)
 
     @override
-    def packages(self) -> list[Package]:
-        """Lists installed Python runtimes via `pyenv versions --bare`.
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+        """Lists installed Python runtimes via ``pyenv versions --bare``.
+
+        pyenv manages Python runtimes globally; *project_path* is
+        accepted for interface compatibility but has no effect.
+
+        Args:
+            project_path: Unused.  pyenv is inherently global.
 
         Returns:
             A list of installed Python runtime packages.

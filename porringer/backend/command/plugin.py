@@ -22,11 +22,22 @@ logger = logging.getLogger(__name__)
 
 
 class PluginCommands:
-    """Plugin commands"""
+    """Plugin commands.
 
-    def __init__(self) -> None:
-        """Initialize the PluginCommands class."""
-        pass
+    All methods are static — the class acts as a namespace and does
+    not require instantiation.  Use ``PluginCommands.list()`` directly
+    or via an ``API`` instance.
+    """
+
+    @staticmethod
+    def _discover_environments() -> builtins.list[Environment]:
+        """Discover and build all environment plugins.
+
+        Returns:
+            Instantiated environment plugins with dependencies resolved.
+        """
+        environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
+        return Builder.build_plugins(environment_types)
 
     @staticmethod
     def list(*, kinds: builtins.list[PluginKind] | None = None) -> builtins.list[PluginInfo]:
@@ -44,9 +55,7 @@ class PluginCommands:
         """
         logger.info('Listing plugins')
 
-        # Environment plugins (package, tool, runtime)
-        environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
-        environments = Builder.build_plugins(environment_types)
+        environments = PluginCommands._discover_environments()
 
         # Project-environment plugins (project sync)
         project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
@@ -61,16 +70,22 @@ class PluginCommands:
         return build_plugin_info(all_plugins, kinds=kinds)
 
     @staticmethod
-    def list_packages(plugin_name: str, project_path: Path) -> builtins.list[Package]:
+    def list_packages(plugin_name: str, project_path: Path | None = None) -> builtins.list[Package]:
         """List packages installed in a plugin's environment.
 
         Discovers the named plugin among `environment` plugins,
-        initialises it, and returns the packages it reports as installed
-        for the given project path.
+        initialises it, and returns the packages it reports as installed.
+
+        When *project_path* is a directory, it is forwarded to the
+        plugin's ``packages()`` method so that venv-scoped plugins
+        (pip, uv) can discover the project's virtual environment and
+        list packages from that interpreter.  Globally-scoped plugins
+        (pipx, apt, brew) ignore the parameter.
 
         Args:
             plugin_name: The canonical plugin name to query.
-            project_path: Path to the project directory.
+            project_path: Path to the project directory.  ``None`` queries
+                the global / default environment.
 
         Returns:
             The packages managed by the named plugin.
@@ -80,15 +95,14 @@ class PluginCommands:
         """
         logger.info(f'Listing packages for plugin: {plugin_name}')
 
-        environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
-        environments = Builder.build_plugins(environment_types)
+        environments = PluginCommands._discover_environments()
 
         for env in environments:
             canonicalized = canonicalize_type(type(env))
             if canonicalized.name == plugin_name:
                 if not type(env).is_available():
                     raise PluginError(f"Plugin '{plugin_name}' is not available on this system")
-                return env.packages()
+                return env.packages(project_path=project_path)
 
         available = [canonicalize_type(type(e)).name for e in environments]
         raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(sorted(available))}")

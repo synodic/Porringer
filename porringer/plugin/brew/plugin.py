@@ -4,6 +4,7 @@ import json
 import logging
 import subprocess
 import sys
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -253,8 +254,14 @@ class BrewEnvironment(Environment):
         return result
 
     @override
-    def packages(self) -> list[Package]:
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Lists all installed formulas in Homebrew.
+
+        Homebrew manages system packages globally; *project_path* is
+        accepted for interface compatibility but has no effect.
+
+        Args:
+            project_path: Unused.  Homebrew is inherently global.
 
         Returns:
             A list of installed packages

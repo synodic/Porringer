@@ -1,5 +1,6 @@
 """Mock environment data"""
 
+from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
@@ -70,8 +71,11 @@ class MockEnvironment(Environment):
         return Package(name=params.package.name, version=None)
 
     @override
-    def packages(self) -> list[Package]:
+    def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages in the given environment
+
+        Args:
+            project_path: Unused in mock.
 
         Returns:
             A list of packages
