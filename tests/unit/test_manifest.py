@@ -851,3 +851,120 @@ class TestSyncStrategyUpgrade:
             assert action_result.success is True
             assert action_result.message is not None
             assert 'install' in action_result.message.lower()
+
+
+FIVE_ACTIONS = 5
+FOUR_ACTIONS = 4
+
+
+class TestPackageSpecPlugins:
+    """Tests for the plugins field on PackageSpec and injection actions"""
+
+    @staticmethod
+    def test_package_spec_plugins_default_empty() -> None:
+        """PackageSpec.plugins defaults to an empty list"""
+        spec = PackageSpec(name='pdm')
+        assert spec.plugins == []
+
+    @staticmethod
+    def test_package_spec_plugins_parsed() -> None:
+        """PackageSpec accepts a plugins list of package refs"""
+        spec = PackageSpec.model_validate({'name': 'pdm', 'plugins': ['cppython', 'pdm-bump']})
+        assert len(spec.plugins) == 2
+        assert spec.plugins[0].name == 'cppython'
+        assert spec.plugins[1].name == 'pdm-bump'
+
+    @staticmethod
+    def test_string_coercion_has_empty_plugins() -> None:
+        """String package entries should have empty plugins list"""
+        manifest = SetupManifest(packages={'python': ['requests']})
+        assert manifest.packages['python'][0].plugins == []
+
+    @staticmethod
+    def test_manifest_tools_with_plugins() -> None:
+        """Manifest tools section accepts packages with plugins"""
+        manifest = SetupManifest(
+            tools={'python': [{'name': 'pdm', 'plugins': ['cppython']}, 'ruff']}
+        )
+        pkgs = manifest.tools['python']
+        assert len(pkgs) == 2
+        assert len(pkgs[0].plugins) == 1
+        assert pkgs[0].plugins[0].name == 'cppython'
+        assert len(pkgs[1].plugins) == 0
+
+    @staticmethod
+    def test_build_actions_emits_injection_actions(test_api: API) -> None:
+        """_build_actions emits injection actions after their parent package"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {
+                'version': '1',
+                'tools': {
+                    'python': [
+                        {'name': 'pdm', 'plugins': ['cppython', 'pdm-bump']},
+                        'ruff',
+                    ]
+                },
+            }
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            results = test_api.sync.parse_manifest(Path(tmpdir))
+
+            # pdm + 2 injections + ruff = 4 actions
+            assert len(results.actions) == FOUR_ACTIONS
+
+            # First action: install pdm
+            assert str(results.actions[FIRST_ACTION_INDEX].package) == 'pdm'
+            assert results.actions[FIRST_ACTION_INDEX].inject_into is None
+
+            # Second action: inject cppython into pdm
+            assert str(results.actions[SECOND_ACTION_INDEX].package) == 'cppython'
+            assert results.actions[SECOND_ACTION_INDEX].inject_into is not None
+            assert results.actions[SECOND_ACTION_INDEX].inject_into.name == 'pdm'
+
+            # Third action: inject pdm-bump into pdm
+            assert str(results.actions[THIRD_ACTION_INDEX].package) == 'pdm-bump'
+            assert results.actions[THIRD_ACTION_INDEX].inject_into is not None
+            assert results.actions[THIRD_ACTION_INDEX].inject_into.name == 'pdm'
+
+            # Fourth action: install ruff (no injection)
+            assert str(results.actions[FOURTH_ACTION_INDEX].package) == 'ruff'
+            assert results.actions[FOURTH_ACTION_INDEX].inject_into is None
+
+    @staticmethod
+    def test_injection_action_description_contains_inject() -> None:
+        """Injection actions should have 'Inject' in their description"""
+        manifest = SetupManifest(
+            tools={'python': [{'name': 'pdm', 'plugins': ['cppython']}]}
+        )
+        environments = SyncCommands._discover_plugins('environment', object, check_dependencies=True)
+        actions = SyncCommands._build_actions(manifest, environments)
+
+        injection_actions = [a for a in actions if a.inject_into is not None]
+        for action in injection_actions:
+            assert 'Inject' in action.description
+
+    @staticmethod
+    def test_json_manifest_with_plugins_roundtrip() -> None:
+        """JSON manifest with plugins can be loaded and serialised"""
+        data = {
+            'version': '1',
+            'tools': {
+                'python': [
+                    {'name': 'pdm', 'plugins': ['cppython>=0.5']},
+                ]
+            },
+        }
+        manifest = SetupManifest.model_validate(data)
+        spec = manifest.tools['python'][0]
+        assert spec.plugins[0].name == 'cppython'
+        assert spec.plugins[0].constraint == '>=0.5'
+
+    @staticmethod
+    def test_package_spec_plugins_with_version_constraint() -> None:
+        """Plugin refs support version constraints"""
+        spec = PackageSpec.model_validate({'name': 'pdm', 'plugins': ['cppython>=1.0,<2.0']})
+        assert spec.plugins[0].name == 'cppython'
+        assert spec.plugins[0].constraint is not None
+        assert '>=1.0' in spec.plugins[0].constraint
+        assert '<2.0' in spec.plugins[0].constraint

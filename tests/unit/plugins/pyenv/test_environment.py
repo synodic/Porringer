@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 from packaging.version import Version
 
-from porringer.core.plugin_schema.environment import PackageParameters as PkgParams
 from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Distribution, PackageRef, PluginKind, PluginParameters
 from porringer.plugin.pyenv.plugin import PyenvEnvironment
@@ -93,30 +92,6 @@ class TestPackages:
     def test_packages_pyenv_missing(self, environment: PyenvEnvironment) -> None:
         with patch('subprocess.run', side_effect=FileNotFoundError):
             assert environment.packages() == []
-
-
-class TestInstall:
-    """Tests for install()."""
-
-    def test_install_success(self, environment: PyenvEnvironment) -> None:
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout='', stderr='')
-            params = PkgParams(package=PackageRef(name='3.14.0'))
-            result = environment.install(params)
-            assert result is not None
-            assert result.name == '3.14.0'
-
-    def test_install_dry_run(self, environment: PyenvEnvironment) -> None:
-        params = PkgParams(package=PackageRef(name='3.14.0'), dry=True)
-        result = environment.install(params)
-        assert result is not None
-        assert result.name == '3.14.0'
-
-    def test_install_failure(self, environment: PyenvEnvironment) -> None:
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='error')
-            params = PkgParams(package=PackageRef(name='3.14.0'))
-            assert environment.install(params) is None
 
 
 class TestPyenvEnvironmentUnit(EnvironmentUnitTests[PyenvEnvironment]):

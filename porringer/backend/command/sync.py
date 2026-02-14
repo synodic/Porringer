@@ -9,7 +9,7 @@ import logging
 import shlex
 import subprocess
 import tomllib
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -158,6 +158,7 @@ class SyncCommands:
         SyncCommands._validate_backends(manifest, resolver, _error)
         SyncCommands._validate_package_names(manifest, resolver, _warning)
         SyncCommands._validate_duplicate_packages(manifest, _warning)
+        SyncCommands._validate_injection_support(manifest, resolver, all_plugins, _warning)
 
         return ManifestValidationResult(diagnostics=diagnostics)
 
@@ -219,6 +220,29 @@ class SyncCommands:
                     f"No available installer for ({kind.value}, '{ecosystem}')",
                     ManifestValidationCode.UNKNOWN_PLUGIN,
                 )
+
+    @staticmethod
+    def _validate_injection_support(
+        manifest: SetupManifest,
+        resolver: BackendResolver,
+        all_plugins: dict[str, Plugin],
+        warning_callback: Callable[[str, str, ManifestValidationCode], None],
+    ) -> None:
+        """Warn when a package declares plugins but its installer does not support injection."""
+        for kind, ecosystem, packages in manifest.iter_sections():
+            installer = resolver.resolve(kind, ecosystem)
+            if installer is None:
+                continue
+            for j, spec in enumerate(packages):
+                if not spec.plugins:
+                    continue
+                plugin = all_plugins.get(installer)
+                if plugin is not None and isinstance(plugin, Environment) and not plugin.supports_injection():
+                    warning_callback(
+                        f'{kind.value}.{ecosystem}[{j}].plugins',
+                        f"Package '{spec.name}' declares plugins but installer '{installer}' does not support injection",
+                        ManifestValidationCode.UNKNOWN_PLUGIN,
+                    )
 
     @staticmethod
     def _validate_package_names(
@@ -446,7 +470,9 @@ class SyncCommands:
             case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
                 if action.installer and action.package and action.installer in environments:
                     env = environments[action.installer]
-                    if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
+                    if action.inject_into is not None and env.supports_injection():
+                        cmd = env.inject_command(action.inject_into, action.package)
+                    elif strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
                         cmd = env.upgrade_command(action.package)
                     else:
                         cmd = env.install_command(action.package)
@@ -562,6 +588,24 @@ class SyncCommands:
                     )
                 )
 
+                # Emit injection actions for declared plugins
+                for plugin_ref in package.plugins:
+                    inject_desc = (
+                        f"Inject '{plugin_ref}' into '{package.name}' via {installer}"
+                        if installer
+                        else f"Inject '{plugin_ref}' into '{package.name}' (deferred)"
+                    )
+                    actions.append(
+                        SetupAction(
+                            description=inject_desc,
+                            kind=kind,
+                            ecosystem=ecosystem,
+                            installer=installer,
+                            package=plugin_ref,
+                            inject_into=package.name,
+                        )
+                    )
+
         # Add post-sync command actions (kind=None)
         for command_str in manifest.post_sync:
             command_parts = shlex.split(command_str)
@@ -645,10 +689,7 @@ class SyncCommands:
         match action.kind:
             case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
                 return SyncCommands._dry_run_package_action(action, environments, strategy, project_path=project_path)
-            case PluginKind.PROJECT | PluginKind.SCM:
-                return SetupActionResult(action=action, success=True)
-            case None:
-                # Post-sync commands always "would run" in dry-run mode.
+            case PluginKind.PROJECT | PluginKind.SCM | None:
                 return SetupActionResult(action=action, success=True)
             case _:
                 return SetupActionResult(action=action, success=False, message=f'Unknown action kind: {action.kind}')
@@ -837,6 +878,11 @@ class SyncCommands:
 
         environment = environments[action.installer]
 
+        # --- Injection actions ------------------------------------------------
+        if action.inject_into is not None:
+            return await self._attempt_inject_operation(action, environment, event_queue)
+
+        # --- Normal install / upgrade -----------------------------------------
         # Check if package is already installed
         is_installed = False
         installed_detail: str | None = None
@@ -854,25 +900,21 @@ class SyncCommands:
         except Exception as e:
             logger.debug(f'Could not check installed packages for {action.installer}: {e}')
 
-        if strategy == SyncStrategy.MINIMAL:
-            if is_installed:
-                logger.info(f"Skipping '{action.package}': {installed_detail}")
-                return SetupActionResult(
-                    action=action,
-                    success=True,
-                    skipped=True,
-                    skip_reason=SkipReason.ALREADY_INSTALLED,
-                    message=installed_detail,
-                )
-            logger.info(f"Installing '{action.package}' via {action.installer}")
-            return await self._attempt_package_operation(action, environment, SyncStrategy.MINIMAL, event_queue)
-        else:
-            # UPGRADE or ENSURE
-            if not is_installed:
-                logger.info(f"'{action.package}' not installed via {action.installer}, falling back to install")
-                return await self._attempt_package_operation(action, environment, SyncStrategy.MINIMAL, event_queue)
-            logger.info(f"Upgrading '{action.package}' via {action.installer}")
-            return await self._attempt_package_operation(action, environment, strategy, event_queue)
+        if strategy == SyncStrategy.MINIMAL and is_installed:
+            logger.info(f"Skipping '{action.package}': {installed_detail}")
+            return SetupActionResult(
+                action=action,
+                success=True,
+                skipped=True,
+                skip_reason=SkipReason.ALREADY_INSTALLED,
+                message=installed_detail,
+            )
+
+        # Install if not present, otherwise honour the requested strategy
+        effective = SyncStrategy.MINIMAL if not is_installed else strategy
+        verb = 'Installing' if effective == SyncStrategy.MINIMAL else 'Upgrading'
+        logger.info(f"{verb} '{action.package}' via {action.installer}")
+        return await self._attempt_package_operation(action, environment, effective, event_queue)
 
     @staticmethod
     async def _attempt_package_operation(
@@ -892,10 +934,81 @@ class SyncCommands:
         Returns:
             The result of the attempt.
         """
+        is_install = strategy == SyncStrategy.MINIMAL
+        if is_install:
+            execute: Awaitable[Package | None] = environment.async_install
+            verb, verb_past = 'install', 'Installed'
+        else:
+            execute = environment.async_upgrade
+            verb, verb_past = 'upgrade', 'Upgraded'
+
+        return await SyncCommands._attempt_operation(
+            action, execute=execute, verb=verb, verb_past=verb_past, event_queue=event_queue,
+        )
+
+    @staticmethod
+    async def _attempt_inject_operation(
+        action: SetupAction,
+        environment: Environment,
+        event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    ) -> SetupActionResult:
+        """Attempt to inject a sub-package into a parent package's environment.
+
+        Args:
+            action: The injection action (``inject_into`` must be set).
+            environment: The environment plugin to use.
+            event_queue: Optional queue to emit sub-action events into.
+
+        Returns:
+            The result of the attempt.
+        """
+        assert action.inject_into is not None
+        assert action.package is not None
+
+        if not environment.supports_injection():
+            msg = f"Installer '{action.installer}' does not support injection"
+            return SetupActionResult(action=action, success=False, message=msg)
+
+        inject_target = action.inject_into
+        return await SyncCommands._attempt_operation(
+            action,
+            execute=lambda params: environment.async_inject(inject_target, params),
+            verb='inject',
+            verb_past='Injected',
+            success_suffix=f' into {inject_target.name}',
+            event_queue=event_queue,
+        )
+
+    @staticmethod
+    async def _attempt_operation(
+        action: SetupAction,
+        *,
+        execute: Callable[[PackageParameters], Awaitable[Package | None]],
+        verb: str,
+        verb_past: str,
+        success_suffix: str = '',
+        event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    ) -> SetupActionResult:
+        """Core helper that runs an async package operation with standard error handling.
+
+        Builds the progress callback, constructs ``PackageParameters``,
+        calls *execute*, and catches the standard exception set.
+
+        Args:
+            action: The action being executed.
+            execute: Async callable that performs the operation.
+            verb: Infinitive verb for error messages (e.g. ``"install"``).
+            verb_past: Past-tense verb for success messages (e.g. ``"Installed"``).
+            success_suffix: Extra text appended to the success message
+                (e.g. ``" into pdm"`` for injection).
+            event_queue: Optional queue to emit sub-action events into.
+
+        Returns:
+            The result of the attempt.
+        """
         success = False
         message = ''
 
-        # Build a progress_callback that emits SubActionProgress into the event queue
         sub_action_cb = None
         if event_queue is not None:
             eq = event_queue
@@ -905,10 +1018,6 @@ class SyncCommands:
                     ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=action, sub_action=update)
                 )
 
-        is_install = strategy == SyncStrategy.MINIMAL
-        verb_past = 'Installed' if is_install else 'Upgraded'
-        verb_inf = 'install' if is_install else 'upgrade'
-
         try:
             if action.package is None:
                 return SetupActionResult(action=action, success=False, message='No package specified')
@@ -917,24 +1026,21 @@ class SyncCommands:
                 dry=False,
                 progress_callback=sub_action_cb,
             )
-            if is_install:
-                result = await environment.async_install(params)
-            else:
-                result = await environment.async_upgrade(params)
+            result = await execute(params)
 
             if result is not None:
                 success = True
-                message = f'{verb_past} {result.name}'
+                message = f'{verb_past} {result.name}{success_suffix}'
             else:
-                message = f"Failed to {verb_inf} '{action.package}'"
+                message = f"Failed to {verb} '{action.package}'{success_suffix}"
         except PluginError as e:
-            logger.error(f'Plugin error {verb_inf}ing {action.package}: {e}')
+            logger.error(f'Plugin error {verb}ing {action.package}: {e}')
             message = str(e)
         except asyncio.CancelledError:
-            logger.error(f'{verb_past.rstrip("d")} cancelled for {action.package}')
-            message = f'{verb_past.rstrip("d")} cancelled'
+            logger.error(f'{verb.capitalize()} cancelled for {action.package}')
+            message = f'{verb.capitalize()} cancelled'
         except TimeoutError as e:
-            logger.error(f'Timeout {verb_inf}ing {action.package}: {e}')
+            logger.error(f'Timeout {verb}ing {action.package}: {e}')
             message = str(e)
         except Exception as e:
             message = str(e)

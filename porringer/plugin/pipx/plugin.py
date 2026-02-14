@@ -1,17 +1,11 @@
 """Plugin implementation"""
 
 import json
-import logging
 import os
-import subprocess
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import (
-    Environment,
-    PackageParameters,
-    UninstallParameters,
-)
+from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import Package, PackageRef, PluginKind
 
@@ -83,6 +77,17 @@ class PipxEnvironment(Environment, RuntimeConsumer):
         """Pipx wraps the `pipx` CLI."""
         return 'pipx'
 
+    @staticmethod
+    @override
+    def supports_injection() -> bool:
+        """Pipx supports injection via ``pipx inject``."""
+        return True
+
+    @override
+    def inject_command(self, target: PackageRef, plugin: PackageRef) -> list[str]:
+        """Returns the CLI command to inject a sub-package into a pipx venv."""
+        return ['pipx', 'inject', target.name, plugin.specifier]
+
     @override
     def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via pipx."""
@@ -92,99 +97,6 @@ class PipxEnvironment(Environment, RuntimeConsumer):
     def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via pipx."""
         return ['pipx', 'upgrade', package.specifier]
-
-    @override
-    def install(self, params: PackageParameters) -> Package | None:
-        """Installs the given package identified by its name using pipx."""
-        logger = logging.getLogger('porringer.pipx.install')
-        args = ['pipx', 'install', params.package.specifier]
-        if params.dry:
-            logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=params.package.name, version=None)
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except FileNotFoundError:
-            logger.error('pipx not found. Install it from https://pipx.pypa.io')
-            return None
-        except subprocess.SubprocessError as e:
-            logger.error(f'Failed to install {params.package.name}: {e}')
-            return None
-        except Exception as e:
-            logger.error(f'Failed to install {params.package.name}: {e}')
-            return None
-        return Package(name=params.package.name, version=None)
-
-    @override
-    def search(self, package: PackageRef) -> Package | None:
-        """Searches the environment's sources for a package
-
-        Args:
-            package: The package reference to search for
-
-        Returns:
-            The package, or None if it doesn't exist
-        """
-        raise NotImplementedError
-
-    @override
-    def uninstall(self, params: UninstallParameters) -> list[Package | None]:
-        """Uninstalls the given list of packages using pipx."""
-        logger = logging.getLogger('porringer.pipx.uninstall')
-        results: list[Package | None] = []
-        for pkg in params.packages:
-            args = ['pipx', 'uninstall', pkg.name]
-            if params.dry:
-                logger.info(f'[dry-run] Would run: {" ".join(args)}')
-                results.append(Package(name=pkg.name, version=None))
-                continue
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                logger.info(result.stdout)
-                if result.returncode == 0:
-                    results.append(Package(name=pkg.name, version=None))
-                else:
-                    logger.error(result.stderr)
-                    results.append(None)
-            except FileNotFoundError:
-                logger.error('pipx not found')
-                results.append(None)
-            except subprocess.SubprocessError as e:
-                logger.error(f'Failed to uninstall {pkg.name}: {e}')
-                results.append(None)
-            except Exception as e:
-                logger.error(f'Failed to uninstall {pkg.name}: {e}')
-                results.append(None)
-        return results
-
-    @override
-    def upgrade(self, params: PackageParameters) -> Package | None:
-        """Upgrades the given package using pipx."""
-        logger = logging.getLogger('porringer.pipx.upgrade')
-        pkg = params.package
-        args = ['pipx', 'upgrade', pkg.specifier]
-        if params.dry:
-            logger.info(f'[dry-run] Would run: {" ".join(args)}')
-            return Package(name=pkg.name, version=None)
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except FileNotFoundError:
-            logger.error('pipx not found')
-            return None
-        except subprocess.SubprocessError as e:
-            logger.error(f'Failed to upgrade {pkg.name}: {e}')
-            return None
-        except Exception as e:
-            logger.error(f'Failed to upgrade {pkg.name}: {e}')
-            return None
-        return Package(name=pkg.name, version=None)
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:
@@ -216,6 +128,12 @@ class PipxEnvironment(Environment, RuntimeConsumer):
                     version = main_package.get('package_version')
                     if name:
                         packages.append(Package(name=name, version=version))
+                    # Also report injected packages
+                    for _key, injected in metadata.get('injected_packages', {}).items():
+                        inj_name = injected.get('package')
+                        inj_version = injected.get('package_version')
+                        if inj_name:
+                            packages.append(Package(name=inj_name, version=inj_version))
                 except json.JSONDecodeError, KeyError:
                     continue
 

@@ -107,17 +107,24 @@ class PluginCommands:
         available = [canonicalize_type(type(e)).name for e in environments]
         raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(sorted(available))}")
 
+    _PLUGIN_GROUPS = (
+        'porringer.environment',
+        'porringer.project_environment',
+        'porringer.scm',
+    )
+
     @staticmethod
     def _get_existing_plugin_packages() -> set[str]:
-        """Get the set of package names that provide porringer.environment entry points.
+        """Get the set of package names that provide any porringer plugin entry point.
 
         Returns:
-            Set of distribution names that provide environment plugins.
+            Set of distribution names that provide porringer plugins.
         """
         packages: set[str] = set()
-        for entry_point in metadata.entry_points(group='porringer.environment'):
-            if entry_point.dist is not None:
-                packages.add(entry_point.dist.name)
+        for group in PluginCommands._PLUGIN_GROUPS:
+            for entry_point in metadata.entry_points(group=group):
+                if entry_point.dist is not None:
+                    packages.add(entry_point.dist.name)
         return packages
 
     @staticmethod
@@ -125,7 +132,7 @@ class PluginCommands:
         """Install a plugin package.
 
         Installs the specified PyPI package and validates that it provides
-        a porringer.environment entry point. If validation fails, the package
+        a porringer plugin entry point. If validation fails, the package
         is uninstalled.
 
         Args:
@@ -183,15 +190,15 @@ class PluginCommands:
                 message=f'Subprocess error: {e}',
             )
 
-        # Validate that the package provides a porringer.environment entry point
+        # Validate that the package provides a porringer plugin entry point
         plugins_after = PluginCommands._get_existing_plugin_packages()
         new_plugins = plugins_after - plugins_before
 
         if not new_plugins:
-            logger.warning(f"Package '{name}' does not provide a porringer.environment entry point. Uninstalling.")
+            logger.warning(f"Package '{name}' does not provide a porringer plugin entry point. Uninstalling.")
             PluginCommands._uninstall_package(name)
             raise PluginError(
-                f"Package '{name}' is not a valid Porringer plugin (missing porringer.environment entry point)"
+                f"Package '{name}' is not a valid Porringer plugin (no entry point in {', '.join(PluginCommands._PLUGIN_GROUPS)})"
             )
 
         logger.info(f'Successfully installed plugin: {name}')

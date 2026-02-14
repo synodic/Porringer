@@ -1,11 +1,15 @@
 """Shared base for plugins backed by a command-line tool.
 
-Provides the `tool_name()` / `is_available()` pair so that
-`Environment`, `ProjectEnvironment`, and `ScmEnvironment` share a
-single implementation instead of duplicating the `shutil.which` logic.
+Provides the `tool_name()` / `is_available()` / `tool_version()` triple
+so that `Environment`, `ProjectEnvironment`, and `ScmEnvironment` share
+a single implementation instead of duplicating the `shutil.which` logic.
 """
 
+import re
 import shutil
+import subprocess
+
+from packaging.version import InvalidVersion, Version
 
 from porringer.core.schema import Plugin, PluginParameters
 
@@ -53,3 +57,45 @@ class ToolBasedPlugin(Plugin):
         if name is None:
             return True
         return shutil.which(name) is not None
+
+    @classmethod
+    def tool_version(cls) -> Version | None:
+        """Returns the PEP 440 version of the underlying CLI tool.
+
+        The default implementation runs `<tool_name> --version`, extracts the
+        first version-like pattern from the combined stdout/stderr output, and
+        parses it as a `Version`.
+
+        Returns `None` when `tool_name()` is `None`, the subprocess
+        fails, or the output cannot be parsed as a valid PEP 440 version.
+
+        Subclasses may override this method if their tool's version output
+        requires special parsing.
+
+        Returns:
+            The parsed tool version, or `None`.
+        """
+        name = cls.tool_name()
+        if name is None:
+            return None
+
+        try:
+            result = subprocess.run(
+                [name, '--version'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+        except OSError, subprocess.SubprocessError:
+            return None
+
+        match = re.search(r'v?\d+\.\d+(?:\.\d+)*', output)
+        if match is None:
+            return None
+
+        try:
+            return Version(match.group(0))
+        except InvalidVersion:
+            return None

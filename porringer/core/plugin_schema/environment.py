@@ -1,13 +1,10 @@
 """Plugin utilities for package environments"""
 
 import logging
-import re
-import subprocess
 from abc import abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 
-from packaging.version import InvalidVersion, Version
 from pydantic import Field
 
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
@@ -32,17 +29,6 @@ class PackageParameters(PorringerModel):
         default=None,
         exclude=True,
         description='Optional callback for reporting sub-action progress (download %, install phase, etc.)',
-    )
-
-
-class UninstallParameters(PorringerModel):
-    """The uninstall parameters for an environment plugin"""
-
-    packages: list[PackageRef] = Field(
-        description='The list of packages to uninstall. If empty, all packages are uninstalled'
-    )
-    dry: bool = Field(
-        default=False, description='If True, rehearses an uninstall without modifying what is actually installed'
     )
 
 
@@ -108,48 +94,6 @@ class Environment(ToolBasedPlugin):
         """
         ...
 
-    @classmethod
-    def tool_version(cls) -> Version | None:
-        """Returns the PEP 440 version of the underlying CLI tool.
-
-        The default implementation runs `<tool_name> --version`, extracts the
-        first version-like pattern from the combined stdout/stderr output, and
-        parses it as a `Version`.
-
-        Returns `None` when `tool_name()` is `None`, the subprocess
-        fails, or the output cannot be parsed as a valid PEP 440 version.
-
-        Subclasses may override this method if their tool's version output
-        requires special parsing.
-
-        Returns:
-            The parsed tool version, or `None`.
-        """
-        name = cls.tool_name()
-        if name is None:
-            return None
-
-        try:
-            result = subprocess.run(
-                [name, '--version'],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-            output = result.stdout + result.stderr
-        except OSError, subprocess.SubprocessError:
-            return None
-
-        match = re.search(r'v?\d+\.\d+(?:\.\d+)*', output)
-        if match is None:
-            return None
-
-        try:
-            return Version(match.group(0))
-        except InvalidVersion:
-            return None
-
     @staticmethod
     def supports_parallel() -> bool:
         """Returns whether this plugin supports parallel package installations.
@@ -162,6 +106,64 @@ class Environment(ToolBasedPlugin):
             True if parallel installation is supported, False otherwise.
         """
         return True
+
+    @staticmethod
+    def supports_injection() -> bool:
+        """Returns whether this plugin supports injecting sub-packages.
+
+        Injection inserts additional packages into an already-installed
+        package's isolated environment.  For example, ``pipx inject``
+        injects a library into a tool's venv without creating a new
+        isolated environment.
+
+        Override this to return ``True`` in plugins that support
+        injection (e.g. pipx).
+
+        Returns:
+            True if injection is supported, False otherwise.
+        """
+        return False
+
+    def inject_command(self, target: PackageRef, plugin: PackageRef) -> list[str]:
+        """Returns the CLI command that would inject a sub-package.
+
+        Override this method in plugins that support injection.  The
+        returned command is used for dry-run / preview display.
+
+        Args:
+            target: The parent package to inject into.
+            plugin: The sub-package to inject.
+
+        Returns:
+            A list of command arguments (e.g., ``['pipx', 'inject', 'pdm', 'cppython']``).
+
+        Raises:
+            NotImplementedError: If the plugin does not support injection.
+        """
+        raise NotImplementedError(f'{type(self).__name__} does not support injection')
+
+    async def async_inject(self, target: PackageRef, params: PackageParameters) -> Package | None:
+        """Asynchronously injects a sub-package into a parent package's environment.
+
+        Uses a native async subprocess via ``inject_command()``.  When
+        ``params.progress_callback`` is set, output is streamed
+        line-by-line; otherwise output is collected silently.
+
+        Subclasses only need to override this when the streaming command
+        differs from ``inject_command()`` or when post-inject logic is
+        required.
+
+        Args:
+            target: The parent package whose environment receives the injection.
+            params: The package parameters (``params.package`` is the sub-package).
+
+        Returns:
+            The injected package, or ``None`` if injection failed.
+        """
+        args = list(self.inject_command(target, params.package))
+        if params.progress_callback is not None:
+            return await self._stream_command(args=args, params=params, phase='injecting', verb='inject')
+        return await self._run_command(args=args, params=params, verb='inject')
 
     async def async_install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package identified by its name.
@@ -325,54 +327,6 @@ class Environment(ToolBasedPlugin):
 
         Returns:
             A list of packages
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def search(self, package: PackageRef) -> Package | None:
-        """Searches the environment's sources for a package
-
-        Args:
-            package: The package reference to search for
-
-        Returns:
-            The package, or None if it doesn't exist
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def install(self, params: PackageParameters) -> Package | None:
-        """Installs the given package identified by its name
-
-        Args:
-            params: The package parameters
-
-        Returns:
-            The package, or None if it doesn't exist
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def uninstall(self, params: UninstallParameters) -> list[Package | None]:
-        """Uninstalls the given list of packages
-
-        Args:
-            params: The uninstall parameters
-
-        Returns:
-            A list of packages that were uninstalled. Each item could be None if there was a failure
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def upgrade(self, params: PackageParameters) -> Package | None:
-        """Upgrades the given package.
-
-        Args:
-            params: The package parameters
-
-        Returns:
-            The package, or None if the upgrade failed.
         """
         raise NotImplementedError
 

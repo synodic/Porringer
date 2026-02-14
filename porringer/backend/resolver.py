@@ -1,7 +1,7 @@
 """Resolves"""
 
 from porringer.backend.schema import Configuration, GlobalConfiguration
-from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Plugin, PluginKind
 from porringer.schema import LocalConfiguration, PluginInfo
 from porringer.utility.utility import canonicalize_type
@@ -38,8 +38,8 @@ def build_plugin_info(
     """Build metadata for discovered plugins, optionally filtered by kind.
 
     Accepts any `Plugin` instance (`Environment`, `ProjectEnvironment`,
-    `ScmEnvironment`).  The `tool_version` field is populated only for
-    `Environment` plugins — other plugin types report `None`.
+    `ScmEnvironment`).  The `tool_version` field is populated for any
+    `ToolBasedPlugin` that reports itself as available.
 
     Args:
         plugins: Discovered plugin instances from all groups.
@@ -58,11 +58,11 @@ def build_plugin_info(
             continue
 
         canonicalized = canonicalize_type(plugin_type)
-        installed = plugin.__class__.is_available()
+        installed = plugin_type.is_available()
 
         tool_version = None
-        if installed and isinstance(plugin, Environment):
-            tool_version = type(plugin).tool_version()
+        if installed and isinstance(plugin, ToolBasedPlugin):
+            tool_version = plugin_type.tool_version()
 
         results.append(
             PluginInfo(
