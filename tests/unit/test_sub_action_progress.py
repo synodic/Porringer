@@ -10,7 +10,7 @@ import pytest
 
 from porringer.backend.command.sync import SyncCommands
 from porringer.core.plugin_schema.environment import PackageParameters
-from porringer.core.schema import PackageRef, PluginKind
+from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.plugin.pip.plugin import PipEnvironment
 from porringer.schema import (
     ProgressEvent,
@@ -31,7 +31,7 @@ def _make_action(package: str = 'requests') -> SetupAction:
     return SetupAction(
         description=f'Install {package}',
         kind=PluginKind.PACKAGE,
-        ecosystem='python',
+        ecosystem=Ecosystem('python'),
         installer='pip',
         package=PackageRef(name=package),
     )

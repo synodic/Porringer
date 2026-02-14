@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.schema import Ecosystem
 
 
 class MockScm(ScmEnvironment):
@@ -17,9 +18,9 @@ class MockScm(ScmEnvironment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Mock manages the `git` ecosystem."""
-        return 'git'
+        return Ecosystem('git')
 
     @override
     def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:

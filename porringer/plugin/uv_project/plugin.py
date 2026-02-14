@@ -3,6 +3,7 @@
 from typing import override
 
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.schema import Ecosystem
 
 
 class UvProjectEnvironment(ProjectEnvironment):
@@ -16,15 +17,9 @@ class UvProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """UV project belongs to the `python` ecosystem."""
-        return 'python'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """UV is the preferred Python project manager (priority 10)."""
-        return 10
+        return Ecosystem('python')
 
     @classmethod
     @override

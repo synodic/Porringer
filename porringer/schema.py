@@ -6,13 +6,13 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from importlib.metadata import Distribution
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from packaging.version import Version
 from platformdirs import user_cache_dir
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
-from porringer.core.schema import PackageRef, PlatformScoped, PluginKind
+from porringer.core.schema import Ecosystem, PackageRef, PlatformScoped, PluginKind
 
 # --- Directory Cache Schemas ---
 
@@ -144,7 +144,7 @@ class SetupAction:
 
     description: str
     kind: PluginKind | None = None
-    ecosystem: str | None = None
+    ecosystem: Ecosystem | None = None
     installer: str | None = None
     package: PackageRef | None = None
     inject_into: PackageRef | None = None
@@ -279,7 +279,7 @@ class PackageSpec(PlatformScoped):
     declare ``cppython`` as a plugin so that ``pipx inject pdm cppython``
     is executed automatically::
 
-        {"name": "pdm", "plugins": ["cppython"]}
+        {'name': 'pdm', 'plugins': ['cppython']}
 
     The field is generic — any ecosystem whose installer supports
     injection can use it in the future.
@@ -294,11 +294,11 @@ class PackageSpec(PlatformScoped):
 
     @model_validator(mode='before')
     @classmethod
-    def _coerce_string(cls, data: str | dict) -> dict:  # type: ignore[override]
+    def _coerce_string(cls, data: Any) -> Any:
         """Allow plain strings as shorthand for `{"name": "..."}`."""
         if isinstance(data, str):
             return {'name': data}
-        return data  # type: ignore[return-value]
+        return data
 
 
 class SetupManifest(BaseModel):
@@ -319,23 +319,23 @@ class SetupManifest(BaseModel):
     description: str | None = Field(default=None, description='Short description shown in the install preview header')
     author: str | None = Field(default=None, description='Author or organization name')
     url: HttpUrl | None = Field(default=None, description='Project URL for reference')
-    packages: dict[str, list[PackageSpec]] = Field(
+    packages: dict[Ecosystem, list[PackageSpec]] = Field(
         default_factory=dict, description='Packages to install per ecosystem (e.g. {"python": ["requests"]})'
     )
-    tools: dict[str, list[PackageSpec]] = Field(
+    tools: dict[Ecosystem, list[PackageSpec]] = Field(
         default_factory=dict, description='CLI tools to install per ecosystem (e.g. {"python": ["pdm"]})'
     )
-    projects: dict[str, list[PackageSpec]] = Field(
+    projects: dict[Ecosystem, list[PackageSpec]] = Field(
         default_factory=dict, description='Project sync targets per ecosystem (e.g. {"python": []})'
     )
-    runtimes: dict[str, list[PackageSpec]] = Field(
+    runtimes: dict[Ecosystem, list[PackageSpec]] = Field(
         default_factory=dict, description='Language runtimes to install per ecosystem (e.g. {"python": ["3.12"]})'
     )
-    scm: dict[str, list[PackageSpec]] = Field(
+    scm: dict[Ecosystem, list[PackageSpec]] = Field(
         default_factory=dict,
         description='SCM repositories to clone per ecosystem (e.g. {"git": ["https://github.com/org/repo"]})',
     )
-    preferences: dict[str, str] = Field(
+    preferences: dict[Ecosystem, str] = Field(
         default_factory=dict,
         description='Preferred installer per ecosystem (e.g. {"python": "uv"})',
     )
@@ -345,14 +345,14 @@ class SetupManifest(BaseModel):
     )
     post_sync: list[str] = Field(default_factory=list, description='Commands to run after state synchronisation')
 
-    def iter_sections(self) -> Iterator[tuple[PluginKind, str, list[PackageSpec]]]:
+    def iter_sections(self) -> Iterator[tuple[PluginKind, Ecosystem, list[PackageSpec]]]:
         """Yield `(kind, ecosystem, packages)` for every non-empty section.
 
         Replaces the repeated `for kind in PluginKind: getattr(…)`
         pattern used throughout the sync engine.
         """
         for kind in PluginKind:
-            section: dict[str, list[PackageSpec]] = getattr(self, kind.value, {})
+            section: dict[Ecosystem, list[PackageSpec]] = getattr(self, kind.value, {})
             for ecosystem, packages in section.items():
                 yield kind, ecosystem, packages
 

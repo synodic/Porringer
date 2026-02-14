@@ -16,7 +16,7 @@ from porringer.core.plugin_schema.environment import (
     PackageParameters,
 )
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Package, PackageRef, PluginKind, PluginParameters
+from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind, PluginParameters
 from porringer.schema import SetupAction, SubActionProgress
 from porringer.utility.utility import run_command
 
@@ -68,15 +68,9 @@ class PipEnvironment(Environment, RuntimeConsumer):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Pip belongs to the `python` ecosystem."""
-        return 'python'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """Pip is the fallback Python installer (priority 20)."""
-        return 20
+        return Ecosystem('python')
 
     @staticmethod
     @override

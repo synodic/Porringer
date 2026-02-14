@@ -7,6 +7,7 @@ from porringer.core.plugin_schema.project_environment import (
     ProjectEnvironment,
     ProjectSyncParameters,
 )
+from porringer.core.schema import Ecosystem
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,9 @@ class YarnProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Yarn project belongs to the `node` ecosystem."""
-        return 'node'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """Yarn project is a lower-priority Node project manager (priority 30)."""
-        return 30
+        return Ecosystem('node')
 
     @classmethod
     @override

@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from porringer.api import API
-from porringer.core.schema import PluginKind
+from porringer.core.schema import Ecosystem, PluginKind
 from porringer.schema import (
     BatchSetupResults,
     SetupAction,
@@ -177,7 +177,7 @@ class TestBatchSetupResultsSkips:
         action = SetupAction(
             description='Sync project via uv',
             kind=PluginKind.PROJECT,
-            ecosystem='python',
+            ecosystem=Ecosystem('python'),
             installer='uv',
         )
         result = SetupActionResult(

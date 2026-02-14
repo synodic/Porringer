@@ -7,6 +7,7 @@ from porringer.core.plugin_schema.project_environment import (
     ProjectEnvironment,
     ProjectSyncParameters,
 )
+from porringer.core.schema import Ecosystem
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +28,9 @@ class DenoProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Deno project belongs to the `deno` ecosystem."""
-        return 'deno'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """Deno project is the sole Deno project manager (priority 10)."""
-        return 10
+        return Ecosystem('deno')
 
     @classmethod
     @override

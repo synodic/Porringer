@@ -11,7 +11,7 @@ from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
 )
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
 class BrewEnvironment(Environment):
@@ -36,19 +36,15 @@ class BrewEnvironment(Environment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Homebrew belongs to the `system` ecosystem."""
-        return 'system'
+        return Ecosystem('system')
 
     @staticmethod
     @override
-    def default_priority() -> int:
-        """Preferred on macOS (10), fallback on Linux (20), unavailable on Windows (999)."""
-        if sys.platform == 'darwin':
-            return 10
-        if sys.platform == 'win32':
-            return 999
-        return 20
+    def is_supported() -> bool:
+        """Supported on macOS and Linux, not on Windows."""
+        return sys.platform != 'win32'
 
     @classmethod
     @override

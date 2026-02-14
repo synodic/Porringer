@@ -3,6 +3,7 @@
 from typing import override
 
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.schema import Ecosystem
 
 
 class MockProjectEnvironment(ProjectEnvironment):
@@ -12,9 +13,9 @@ class MockProjectEnvironment(ProjectEnvironment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Mock manages the `python` ecosystem."""
-        return 'python'
+        return Ecosystem('python')
 
     @classmethod
     @override

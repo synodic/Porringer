@@ -9,9 +9,10 @@ on availability and user preferences.
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from collections.abc import Mapping
 
-from porringer.core.schema import Plugin, PluginKind
+from porringer.core.schema import Ecosystem, Plugin, PluginKind
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +32,14 @@ class BackendResolver:
 
     1. If the user gave an explicit **preference** for the ecosystem and
        the named plugin is available, use it.
-    2. Otherwise sort all registered candidates by
-       `Plugin.default_priority()` ascending and pick the first one
-       whose `is_available()` returns `True`.
+    2. Otherwise filter to supported & available candidates, sort
+       alphabetically by name, and pick the first one.
     """
 
     def __init__(
         self,
         plugins: Mapping[str, BackendPlugin],
-        preferences: Mapping[str, str] | None = None,
+        preferences: Mapping[Ecosystem, str] | None = None,
     ) -> None:
         """Initialize the backend resolver with available plugins and preferences.
 
@@ -51,16 +51,14 @@ class BackendResolver:
         self._preferences = preferences or {}
 
         # Index: (kind, ecosystem) -> [plugin_name, ...]
-        self._backend_plugins: dict[tuple[PluginKind, str], list[str]] = {}
+        self._backend_plugins: dict[tuple[PluginKind, Ecosystem], list[str]] = defaultdict(list)
         for name, plugin in self._all_plugins.items():
             ecosystem = type(plugin).ecosystem()
             if ecosystem is not None:
-                kind = type(plugin).plugin_kind()
-                key = (kind, ecosystem)
-                self._backend_plugins.setdefault(key, []).append(name)
+                self._backend_plugins[(type(plugin).plugin_kind(), ecosystem)].append(name)
 
         # Resolve once and cache
-        self._resolved: dict[tuple[PluginKind, str], str | None] = {}
+        self._resolved: dict[tuple[PluginKind, Ecosystem], str | None] = {}
         for key in self._backend_plugins:
             self._resolved[key] = self._resolve(key)
 
@@ -68,7 +66,7 @@ class BackendResolver:
     # Public API
     # ------------------------------------------------------------------
 
-    def resolve(self, kind: PluginKind, ecosystem: str) -> str | None:
+    def resolve(self, kind: PluginKind, ecosystem: Ecosystem) -> str | None:
         """Return the chosen plugin name for *(kind, ecosystem)*, or `None`."""
         key = (kind, ecosystem)
         if key not in self._resolved:
@@ -76,7 +74,7 @@ class BackendResolver:
             return None
         return self._resolved[key]
 
-    def validator_for(self, kind: PluginKind, ecosystem: str) -> str | None:
+    def validator_for(self, kind: PluginKind, ecosystem: Ecosystem) -> str | None:
         """Return the `package_name_validator()` tag for the resolved plugin.
 
         Returns `None` when no plugin is resolved or the plugin
@@ -94,11 +92,11 @@ class BackendResolver:
     # Internal
     # ------------------------------------------------------------------
 
-    def _resolve(self, key: tuple[PluginKind, str]) -> str | None:
+    def _resolve(self, key: tuple[PluginKind, Ecosystem]) -> str | None:
         """Pick the best plugin for *(kind, ecosystem)*.
 
-        1. Explicit preference (if available).
-        2. Sort candidates by `default_priority()` ascending, pick first available.
+        1. Explicit preference (if supported & available).
+        2. Sort supported & available candidates alphabetically, pick first.
         """
         kind, ecosystem = key
         candidates = self._backend_plugins.get(key, [])
@@ -108,7 +106,7 @@ class BackendResolver:
         # 1. Explicit preference
         if ecosystem in self._preferences:
             preferred = self._preferences[ecosystem]
-            if preferred in candidates and self._is_available(preferred):
+            if preferred in candidates and self._is_suitable(preferred):
                 return preferred
             logger.warning(
                 "Preferred plugin '%s' for (%s, '%s') is not available; falling back",
@@ -117,31 +115,33 @@ class BackendResolver:
                 ecosystem,
             )
 
-        # 2. Sort by default_priority ascending
-        def _priority(name: str) -> int:
-            plugin = self._all_plugins.get(name)
-            if plugin is None:
-                return 9999
-            try:
-                return type(plugin).default_priority()
-            except Exception:
-                return 9999
+        # 2. Alphabetical among supported & available candidates
+        suitable = sorted(name for name in candidates if self._is_suitable(name))
+        if not suitable:
+            logger.warning("No available plugin for (%s, '%s')", kind.value, ecosystem)
+            return None
 
-        sorted_candidates = sorted(candidates, key=_priority)
-        for name in sorted_candidates:
-            if self._is_available(name):
-                return name
+        if len(suitable) > 1:
+            logger.info(
+                "Multiple plugins available for (%s, '%s'): %s — selecting '%s'. "
+                'Set a preference to choose explicitly.',
+                kind.value,
+                ecosystem,
+                ', '.join(suitable),
+                suitable[0],
+            )
+        return suitable[0]
 
-        logger.warning("No available plugin for (%s, '%s')", kind.value, ecosystem)
-        return None
-
-    def _is_available(self, plugin_name: str) -> bool:
-        """Check if *plugin_name* reports itself as available."""
+    def _is_suitable(self, plugin_name: str) -> bool:
+        """Check if *plugin_name* is both supported and available."""
         plugin = self._all_plugins.get(plugin_name)
         if plugin is None:
             return False
         try:
+            plugin_type = type(plugin)
+            if not plugin_type.is_supported():
+                return False
             return plugin.is_available()
         except Exception:
-            logger.debug("is_available() failed for plugin '%s'", plugin_name, exc_info=True)
+            logger.warning("Suitability check failed for plugin '%s'", plugin_name, exc_info=True)
             return False

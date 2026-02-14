@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
 class NpmEnvironment(Environment):
@@ -19,15 +19,9 @@ class NpmEnvironment(Environment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Npm belongs to the `node` ecosystem."""
-        return 'node'
-
-    @staticmethod
-    @override
-    def default_priority() -> int:
-        """Npm is a standard Node installer (priority 20)."""
-        return 20
+        return Ecosystem('node')
 
     @classmethod
     @override

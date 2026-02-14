@@ -22,15 +22,15 @@ from pydantic import Field
 
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
-from porringer.core.schema import PluginKind, PluginParameters, PorringerModel
+from porringer.core.schema import Ecosystem, PluginKind, PluginParameters, PorringerModel
 
 logger = logging.getLogger(__name__)
 
 # Default mapping from ecosystem name to the file that marks a project root.
-ECOSYSTEM_MARKERS: dict[str, str] = {
-    'python': 'pyproject.toml',
-    'node': 'package.json',
-    'deno': 'deno.json',
+ECOSYSTEM_MARKERS: dict[Ecosystem, str] = {
+    Ecosystem('python'): 'pyproject.toml',
+    Ecosystem('node'): 'package.json',
+    Ecosystem('deno'): 'deno.json',
 }
 
 
@@ -99,7 +99,7 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
 
     @staticmethod
     @abstractmethod
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Return the ecosystem this project environment belongs to.
 
         Examples: `"python"`, `"node"`, `"deno"`.

@@ -197,9 +197,8 @@ class PluginCommands:
         if not new_plugins:
             logger.warning(f"Package '{name}' does not provide a porringer plugin entry point. Uninstalling.")
             PluginCommands._uninstall_package(name)
-            raise PluginError(
-                f"Package '{name}' is not a valid Porringer plugin (no entry point in {', '.join(PluginCommands._PLUGIN_GROUPS)})"
-            )
+            groups = ', '.join(PluginCommands._PLUGIN_GROUPS)
+            raise PluginError(f"Package '{name}' is not a valid Porringer plugin (no entry point in {groups})")
 
         logger.info(f'Successfully installed plugin: {name}')
         return PluginOperationResult(

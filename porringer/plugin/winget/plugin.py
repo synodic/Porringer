@@ -1,7 +1,6 @@
 """Plugin implementation"""
 
 import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import override
@@ -10,7 +9,7 @@ from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
 )
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
 class WingetEnvironment(Environment):
@@ -22,17 +21,15 @@ class WingetEnvironment(Environment):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Winget belongs to the `system` ecosystem."""
-        return 'system'
+        return Ecosystem('system')
 
     @staticmethod
     @override
-    def default_priority() -> int:
-        """Preferred on Windows (10), unavailable elsewhere (999)."""
-        if sys.platform == 'win32':
-            return 10
-        return 999
+    def is_supported() -> bool:
+        """Supported on Windows only."""
+        return sys.platform == 'win32'
 
     @classmethod
     @override

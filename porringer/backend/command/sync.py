@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import json
 import logging
+import os
 import shlex
 import subprocess
+import sysconfig
 import tomllib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -48,10 +51,18 @@ from porringer.schema import (
     SyncStrategy,
 )
 from porringer.utility.download import download_file
-from porringer.utility.exception import ManifestError, PluginError
+from porringer.utility.exception import ManifestError, ManifestErrorCode, PluginError
 from porringer.utility.utility import canonicalize_type
 
 logger = logging.getLogger(__name__)
+
+# Maps ManifestErrorCode → ManifestValidationCode for structured classification.
+_MANIFEST_ERROR_CODE_MAP: dict[ManifestErrorCode, ManifestValidationCode] = {
+    ManifestErrorCode.NO_MANIFEST: ManifestValidationCode.NO_MANIFEST,
+    ManifestErrorCode.SYNTAX_ERROR: ManifestValidationCode.SYNTAX_ERROR,
+    ManifestErrorCode.LOAD_FAILED: ManifestValidationCode.SCHEMA_INVALID,
+    ManifestErrorCode.SCHEMA_INVALID: ManifestValidationCode.SCHEMA_INVALID,
+}
 
 
 # Execution order for phased setup.  `None` represents post-sync commands.
@@ -152,10 +163,10 @@ class SyncCommands:
         environments = SyncCommands._discover_plugins('environment', Environment, check_dependencies=True)
         project_environments = SyncCommands._discover_plugins('project_environment', ProjectEnvironment)
         scm_environments = SyncCommands._discover_plugins('scm', ScmEnvironment)
-        all_plugins = {**environments, **project_environments, **scm_environments}
+        all_plugins: dict[str, Plugin] = {**environments, **project_environments, **scm_environments}
         resolver = BackendResolver(all_plugins, manifest.preferences)
 
-        SyncCommands._validate_backends(manifest, resolver, _error)
+        SyncCommands._validate_backends(manifest, resolver, _error, _warning)
         SyncCommands._validate_package_names(manifest, resolver, _warning)
         SyncCommands._validate_duplicate_packages(manifest, _warning)
         SyncCommands._validate_injection_support(manifest, resolver, all_plugins, _warning)
@@ -175,16 +186,24 @@ class SyncCommands:
         try:
             _, manifest = SyncCommands._find_manifest(path)
         except ManifestError as exc:
-            msg = str(exc)
-            code = SyncCommands._map_manifest_error_code(msg)
-            error_callback('', msg, code)
+            code = SyncCommands._map_manifest_error_code(exc)
+            error_callback('', str(exc), code)
             return None
 
         return manifest
 
     @staticmethod
-    def _map_manifest_error_code(message: str) -> ManifestValidationCode:
-        """Map manifest loading errors to validation codes."""
+    def _map_manifest_error_code(error: ManifestError) -> ManifestValidationCode:
+        """Map a manifest loading error to a validation code.
+
+        Uses the structured :attr:`ManifestError.code` when available;
+        falls back to substring matching for errors without one.
+        """
+        if error.code is not None:
+            return _MANIFEST_ERROR_CODE_MAP.get(error.code, ManifestValidationCode.SCHEMA_INVALID)
+
+        # Legacy fallback: substring matching for errors without a code.
+        message = str(error)
         if 'No manifest found' in message or 'No [tool.porringer]' in message:
             return ManifestValidationCode.NO_MANIFEST
         if 'Invalid JSON' in message or 'Invalid TOML' in message:
@@ -210,16 +229,34 @@ class SyncCommands:
         manifest: SetupManifest,
         resolver: BackendResolver,
         error_callback: Callable[[str, str, ManifestValidationCode], None],
+        warning_callback: Callable[[str, str, ManifestValidationCode], None] | None = None,
     ) -> None:
-        """Validate that each (kind, ecosystem) in the manifest resolves to a plugin."""
+        """Validate that each (kind, ecosystem) in the manifest resolves to a plugin.
+
+        ``TOOL`` and ``RUNTIME`` kinds are allowed to have no resolver at
+        validation time because the prerequisite tool may be installed by
+        an earlier phase during execution.  For those kinds a *warning* is
+        emitted (via *warning_callback*) instead of an error.
+        """
+        # Kinds whose backends may be deferred to a later phase.
+        _DEFERRABLE_KINDS = {PluginKind.TOOL, PluginKind.RUNTIME}
+
         for kind, ecosystem, _packages in manifest.iter_sections():
             installer = resolver.resolve(kind, ecosystem)
             if installer is None:
-                error_callback(
-                    f'{kind.value}.{ecosystem}',
-                    f"No available installer for ({kind.value}, '{ecosystem}')",
-                    ManifestValidationCode.UNKNOWN_PLUGIN,
-                )
+                if kind in _DEFERRABLE_KINDS and warning_callback is not None:
+                    warning_callback(
+                        f'{kind.value}.{ecosystem}',
+                        f"No installer currently available for ({kind.value}, '{ecosystem}'); "
+                        'may be resolved after an earlier phase installs the prerequisite',
+                        ManifestValidationCode.UNKNOWN_PLUGIN,
+                    )
+                else:
+                    error_callback(
+                        f'{kind.value}.{ecosystem}',
+                        f"No available installer for ({kind.value}, '{ecosystem}')",
+                        ManifestValidationCode.UNKNOWN_PLUGIN,
+                    )
 
     @staticmethod
     def _validate_injection_support(
@@ -238,9 +275,12 @@ class SyncCommands:
                     continue
                 plugin = all_plugins.get(installer)
                 if plugin is not None and isinstance(plugin, Environment) and not plugin.supports_injection():
+                    msg = (
+                        f"Package '{spec.name}' declares plugins but installer '{installer}' does not support injection"
+                    )
                     warning_callback(
                         f'{kind.value}.{ecosystem}[{j}].plugins',
-                        f"Package '{spec.name}' declares plugins but installer '{installer}' does not support injection",
+                        msg,
                         ManifestValidationCode.UNKNOWN_PLUGIN,
                     )
 
@@ -366,10 +406,11 @@ class SyncCommands:
                 return SyncCommands._load_pyproject_manifest(pyproject_file)
 
             raise ManifestError(
-                f"No manifest found in directory: {path}. Expected 'porringer.json' or 'pyproject.toml'"
+                f"No manifest found in directory: {path}. Expected 'porringer.json' or 'pyproject.toml'",
+                code=ManifestErrorCode.NO_MANIFEST,
             )
 
-        raise ManifestError(f'Path does not exist: {path}')
+        raise ManifestError(f'Path does not exist: {path}', code=ManifestErrorCode.NO_MANIFEST)
 
     @staticmethod
     def _load_manifest_file(path: Path) -> tuple[Path, SetupManifest]:
@@ -393,9 +434,9 @@ class SyncCommands:
                 data = json.load(f)
             return path, SetupManifest.model_validate(data)
         except json.JSONDecodeError as e:
-            raise ManifestError(f'Invalid JSON in manifest {path}: {e}') from e
+            raise ManifestError(f'Invalid JSON in manifest {path}: {e}', code=ManifestErrorCode.SYNTAX_ERROR) from e
         except Exception as e:
-            raise ManifestError(f'Failed to load manifest {path}: {e}') from e
+            raise ManifestError(f'Failed to load manifest {path}: {e}', code=ManifestErrorCode.LOAD_FAILED) from e
 
     @staticmethod
     def _load_pyproject_manifest(path: Path) -> tuple[Path, SetupManifest]:
@@ -418,19 +459,29 @@ class SyncCommands:
             porringer_section = tool_section.get('porringer')
 
             if porringer_section is None:
-                raise ManifestError(f'No [tool.porringer] section found in {path}')
+                raise ManifestError(
+                    f'No [tool.porringer] section found in {path}',
+                    code=ManifestErrorCode.NO_MANIFEST,
+                )
 
             return path, SetupManifest.model_validate(porringer_section)
         except tomllib.TOMLDecodeError as e:
-            raise ManifestError(f'Invalid TOML in {path}: {e}') from e
+            raise ManifestError(f'Invalid TOML in {path}: {e}', code=ManifestErrorCode.SYNTAX_ERROR) from e
         except ManifestError:
             raise
         except Exception as e:
-            raise ManifestError(f'Failed to load pyproject.toml manifest {path}: {e}') from e
+            raise ManifestError(
+                f'Failed to load pyproject.toml manifest {path}: {e}', code=ManifestErrorCode.LOAD_FAILED
+            ) from e
 
     @staticmethod
     def _discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> dict[str, T]:
         """Discover and instantiate plugins, returning a name-keyed dict.
+
+        Calls ``importlib.invalidate_caches()`` before discovery so that
+        distributions installed earlier in the same process (e.g. a tool
+        backend installed via pip in Phase 2a) are visible to
+        ``importlib.metadata.entry_points()``.
 
         Args:
             group: Entry-point group suffix (e.g. `'environment'`).
@@ -441,9 +492,46 @@ class SyncCommands:
         Returns:
             Dict mapping canonical plugin name to instantiated plugin.
         """
+        # Ensure newly-installed distributions are visible to the metadata API.
+        importlib.invalidate_caches()
+
         infos = Builder.find_plugins(group, base_class, **kwargs)
         instances = Builder.build_plugins(infos)
         return {canonicalize_type(type(inst)).name: inst for inst in instances}
+
+    @staticmethod
+    def _refresh_path() -> None:
+        """Prepend common script/binary directories to ``PATH``.
+
+        After packages are installed in Phase 2a, executables such as
+        ``pipx`` may have been placed in directories that are not yet
+        on the running process's ``PATH`` (e.g. ``~/.local/bin`` on
+        Unix, or the ``Scripts/`` directory of the active Python
+        environment on Windows).
+
+        This method detects those directories and, if they are not
+        already present, prepends them so that subsequent
+        ``shutil.which()`` calls can find the newly-installed tools.
+        """
+        dirs_to_add: list[str] = []
+
+        # The Python environment's scripts directory (e.g. venv/Scripts, ~/.local/bin)
+        scripts_dir = sysconfig.get_path('scripts')
+        if scripts_dir:
+            dirs_to_add.append(scripts_dir)
+
+        # User-scheme scripts directory (pip install --user)
+        user_scripts = sysconfig.get_path('scripts', 'posix_user' if os.name != 'nt' else 'nt_user')
+        if user_scripts:
+            dirs_to_add.append(user_scripts)
+
+        current_path = os.environ.get('PATH', '')
+        current_entries = set(current_path.split(os.pathsep))
+        new_entries = [d for d in dirs_to_add if d not in current_entries and Path(d).is_dir()]
+
+        if new_entries:
+            os.environ['PATH'] = os.pathsep.join(new_entries) + os.pathsep + current_path
+            logger.debug('PATH updated with: %s', ', '.join(new_entries))
 
     @staticmethod
     def _get_cli_command(
@@ -936,14 +1024,18 @@ class SyncCommands:
         """
         is_install = strategy == SyncStrategy.MINIMAL
         if is_install:
-            execute: Awaitable[Package | None] = environment.async_install
+            execute: Callable[[PackageParameters], Awaitable[Package | None]] = environment.async_install
             verb, verb_past = 'install', 'Installed'
         else:
             execute = environment.async_upgrade
             verb, verb_past = 'upgrade', 'Upgraded'
 
         return await SyncCommands._attempt_operation(
-            action, execute=execute, verb=verb, verb_past=verb_past, event_queue=event_queue,
+            action,
+            execute=execute,
+            verb=verb,
+            verb_past=verb_past,
+            event_queue=event_queue,
         )
 
     @staticmethod
@@ -980,7 +1072,7 @@ class SyncCommands:
         )
 
     @staticmethod
-    async def _attempt_operation(
+    async def _attempt_operation(  # noqa: PLR0913
         action: SetupAction,
         *,
         execute: Callable[[PackageParameters], Awaitable[Package | None]],
@@ -1384,6 +1476,11 @@ class SyncCommands:
         # Re-discover plugins so that tools installed in Phase 2a
         # (e.g. pipx via pip) are now available as backends.
         if phases[PluginKind.TOOL]:
+            # Ensure executables installed in Phase 2a are discoverable by
+            # shutil.which() even when the scripts directory was not already
+            # on PATH (e.g. ~/.local/bin, Scripts/).
+            self._refresh_path()
+
             environments = self._discover_plugins('environment', Environment, check_dependencies=True)
 
             # Resolve deferred tool actions whose installer was None

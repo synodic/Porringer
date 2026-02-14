@@ -8,7 +8,7 @@ from typing import override
 
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeProvider
-from porringer.core.schema import Package, PackageRef, PluginKind
+from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
 
 
 class PyenvEnvironment(Environment, RuntimeProvider):
@@ -27,9 +27,9 @@ class PyenvEnvironment(Environment, RuntimeProvider):
 
     @staticmethod
     @override
-    def ecosystem() -> str:
+    def ecosystem() -> Ecosystem:
         """Pyenv belongs to the `python` ecosystem."""
-        return 'python'
+        return Ecosystem('python')
 
     @staticmethod
     @override
@@ -39,11 +39,9 @@ class PyenvEnvironment(Environment, RuntimeProvider):
 
     @staticmethod
     @override
-    def default_priority() -> int:
-        """Preferred on Unix (10), unavailable on Windows (999)."""
-        if sys.platform == 'win32':
-            return 999
-        return 10
+    def is_supported() -> bool:
+        """Supported on Unix, not on Windows."""
+        return sys.platform != 'win32'
 
     @staticmethod
     @override

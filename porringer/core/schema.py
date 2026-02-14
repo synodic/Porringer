@@ -3,11 +3,18 @@
 import re
 import sys
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, NewType, Protocol
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator
+
+Ecosystem = NewType('Ecosystem', str)
+"""Semantic alias for ecosystem identifiers (e.g. ``"python"``, ``"node"``).
+
+A thin wrapper around `str` that makes ecosystem values self-documenting
+in type signatures without restricting the open set of valid values.
+"""
 
 
 class PluginKind(Enum):
@@ -223,7 +230,7 @@ class Plugin(Protocol):
         self._distribution = parameters.distribution
 
     @staticmethod
-    def ecosystem() -> str | None:
+    def ecosystem() -> Ecosystem | None:
         """Return the ecosystem this plugin belongs to.
 
         A free-form identifier such as `"python"`, `"node"`,
@@ -252,21 +259,21 @@ class Plugin(Protocol):
         return PluginKind.PACKAGE
 
     @staticmethod
-    def default_priority() -> int:
-        """Return the default priority for resolver ordering.
+    def is_supported() -> bool:
+        """Return whether this plugin is supported on the current platform.
 
-        Lower values are preferred.  When multiple plugins share the same
-        `(plugin_kind, ecosystem)` pair the resolver picks the first
-        available one sorted by this value ascending.
+        Platform-specific plugins should override this to return `False`
+        on operating systems they do not target (e.g. a Windows-only
+        plugin returns `False` on Linux/macOS).
 
-        Platform-specific plugins should return a high value (e.g. 999)
-        on platforms they do not target so that they rank below native
-        alternatives.
+        This check is evaluated before `is_available()` during backend
+        resolution so that unsupported plugins are excluded cheaply
+        without probing the filesystem.
 
         Returns:
-            An integer priority (lower = preferred).
+            `True` if the current platform is supported (the default).
         """
-        return 100
+        return True
 
     @classmethod
     def is_available(cls) -> bool:
