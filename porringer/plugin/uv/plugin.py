@@ -7,11 +7,7 @@ import sys
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import (
-    Environment,
-    PackageParameters,
-    UninstallParameters,
-)
+from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import Package, PackageRef, PluginParameters
 
@@ -86,95 +82,6 @@ class UvEnvironment(Environment, RuntimeConsumer):
             *self._python_args(),
             package.specifier,
         ]
-
-    @override
-    def install(self, params: PackageParameters) -> Package | None:
-        """Installs the given package identified by its name using uv."""
-        logger = logging.getLogger('porringer.uv.install')
-        args = list(self.install_command(params.package))
-        if params.dry:
-            args.append('--dry-run')
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except FileNotFoundError:
-            logger.error('uv not found. Install it from https://docs.astral.sh/uv')
-            return None
-        except subprocess.SubprocessError as e:
-            logger.error(f'Failed to install {params.package.name}: {e}')
-            return None
-        except Exception as e:
-            logger.error(f'Failed to install {params.package.name}: {e}')
-            return None
-        return Package(name=params.package.name, version=None)
-
-    @override
-    def search(self, package: PackageRef) -> Package | None:
-        """Searches the environment's sources for a package
-
-        Args:
-            package: The package reference to search for
-
-        Returns:
-            The package, or None if it doesn't exist
-        """
-        raise NotImplementedError
-
-    @override
-    def uninstall(self, params: UninstallParameters) -> list[Package | None]:
-        """Uninstalls the given list of packages using uv."""
-        logger = logging.getLogger('porringer.uv.uninstall')
-        results: list[Package | None] = []
-        for pkg in params.packages:
-            args = ['uv', 'pip', 'uninstall', pkg.name]
-            if params.dry:
-                args.append('--dry-run')
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                logger.info(result.stdout)
-                if result.returncode == 0:
-                    results.append(Package(name=pkg.name, version=None))
-                else:
-                    logger.error(result.stderr)
-                    results.append(None)
-            except FileNotFoundError:
-                logger.error('uv not found')
-                results.append(None)
-            except subprocess.SubprocessError as e:
-                logger.error(f'Failed to uninstall {pkg.name}: {e}')
-                results.append(None)
-            except Exception as e:
-                logger.error(f'Failed to uninstall {pkg.name}: {e}')
-                results.append(None)
-        return results
-
-    @override
-    def upgrade(self, params: PackageParameters) -> Package | None:
-        """Upgrades the given package using uv."""
-        logger = logging.getLogger('porringer.uv.upgrade')
-        pkg = params.package
-        args = list(self.upgrade_command(pkg))
-        if params.dry:
-            args.append('--dry-run')
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except FileNotFoundError:
-            logger.error('uv not found')
-            return None
-        except subprocess.SubprocessError as e:
-            logger.error(f'Failed to upgrade {pkg.name}: {e}')
-            return None
-        except Exception as e:
-            logger.error(f'Failed to upgrade {pkg.name}: {e}')
-            return None
-        return Package(name=pkg.name, version=None)
 
     @staticmethod
     def _discover_venv_python(project_path: Path) -> Path | None:

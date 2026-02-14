@@ -1,15 +1,9 @@
 """Plugin implementation for Deno environment."""
 
-import logging
-import subprocess
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import (
-    Environment,
-    PackageParameters,
-    UninstallParameters,
-)
+from porringer.core.plugin_schema.environment import Environment
 from porringer.core.schema import Package, PackageRef
 
 
@@ -64,85 +58,6 @@ class DenoEnvironment(Environment):
     def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a global script via Deno."""
         return ['deno', 'install', '-g', '--force', self._deno_specifier(package)]
-
-    @override
-    def install(self, params: PackageParameters) -> Package | None:
-        """Installs the given package as a global Deno script."""
-        logger = logging.getLogger('porringer.deno.install')
-        pkg = params.package
-        args = list(self.install_command(pkg))
-        if params.dry:
-            # Deno has no --dry-run; log the command instead
-            logger.info('Dry run: %s', ' '.join(args))
-            return Package(name=pkg.name, version=None)
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except FileNotFoundError:
-            logger.error('deno not found. Install it from https://deno.land')
-            return None
-        except subprocess.SubprocessError as e:
-            logger.error(f'Failed to install {pkg.name}: {e}')
-            return None
-        return Package(name=pkg.name, version=None)
-
-    @override
-    def search(self, package: PackageRef) -> Package | None:
-        """Deno does not provide a search CLI; returns `None`."""
-        return None
-
-    @override
-    def uninstall(self, params: UninstallParameters) -> list[Package | None]:
-        """Uninstalls the given list of global Deno scripts."""
-        logger = logging.getLogger('porringer.deno.uninstall')
-        results: list[Package | None] = []
-        for pkg in params.packages:
-            args = ['deno', 'uninstall', '-g', pkg.name]
-            if params.dry:
-                logger.info('Dry run: %s', ' '.join(args))
-                results.append(Package(name=pkg.name, version=None))
-                continue
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                logger.info(result.stdout)
-                if result.returncode == 0:
-                    results.append(Package(name=pkg.name, version=None))
-                else:
-                    logger.error(result.stderr)
-                    results.append(None)
-            except FileNotFoundError:
-                logger.error('deno not found')
-                results.append(None)
-            except subprocess.SubprocessError as e:
-                logger.error(f'Failed to uninstall {pkg.name}: {e}')
-                results.append(None)
-        return results
-
-    @override
-    def upgrade(self, params: PackageParameters) -> Package | None:
-        """Upgrades the given global Deno script."""
-        logger = logging.getLogger('porringer.deno.upgrade')
-        pkg = params.package
-        args = list(self.upgrade_command(pkg))
-        if params.dry:
-            logger.info('Dry run: %s', ' '.join(args))
-            return Package(name=pkg.name, version=None)
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except FileNotFoundError:
-            logger.error('deno not found')
-            return None
-        except subprocess.SubprocessError as e:
-            logger.error(f'Failed to upgrade {pkg.name}: {e}')
-            return None
-        return Package(name=pkg.name, version=None)
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:

@@ -126,12 +126,17 @@ class SetupAction:
     * `PluginKind.SCM` — clone a repository.
     * `None` — run a post-sync shell command.
 
+    When ``inject_into`` is set the action is an *injection*: the
+    ``package`` is injected into the ``inject_into`` parent's isolated
+    environment (e.g. ``pipx inject pdm cppython``).
+
     Args:
         description: Human-readable description of the action.
         kind: The plugin kind, or `None` for post-sync commands.
         ecosystem: The ecosystem identifier (e.g. `"python"`, `"node"`).
         installer: The plugin name (for PACKAGE/TOOL/RUNTIME/PROJECT/SCM).
         package: The package reference (for PACKAGE/TOOL/RUNTIME/SCM).
+        inject_into: The parent package for injection actions, or `None`.
         command: The command to run (for post-sync commands).
         cli_command: The actual CLI command (for display purposes).
         package_description: Optional per-package description from the manifest.
@@ -142,6 +147,7 @@ class SetupAction:
     ecosystem: str | None = None
     installer: str | None = None
     package: PackageRef | None = None
+    inject_into: PackageRef | None = None
     command: list[str] | None = None
     cli_command: list[str] | None = None
     package_description: str | None = None
@@ -266,10 +272,25 @@ class PackageSpec(PlatformScoped):
 
     Supports both string shorthand (just a package specifier) and object form
     with additional metadata for GUI consumers.
+
+    The optional ``plugins`` list declares sub-packages that should be
+    *injected* into the parent package's isolated environment after it is
+    installed.  For example, a ``pipx``-managed PDM installation can
+    declare ``cppython`` as a plugin so that ``pipx inject pdm cppython``
+    is executed automatically::
+
+        {"name": "pdm", "plugins": ["cppython"]}
+
+    The field is generic — any ecosystem whose installer supports
+    injection can use it in the future.
     """
 
     name: PackageRef = Field(description='The package reference (name with optional version constraint)')
     description: str | None = Field(default=None, description='Human-readable description of this package')
+    plugins: list[PackageRef] = Field(
+        default_factory=list,
+        description="Sub-packages to inject into this package's isolated environment after installation",
+    )
 
     @model_validator(mode='before')
     @classmethod
