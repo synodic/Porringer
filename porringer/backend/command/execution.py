@@ -1102,11 +1102,8 @@ async def _execute_scm_clone(
     scm_env = scm_envs[action.installer]
     url = action.package.name
 
-    # Derive destination from the repo URL (last path segment, minus .git)
-    repo_name = url.rstrip('/').rsplit('/', 1)[-1]
-    if repo_name.endswith('.git'):
-        repo_name = repo_name[:-4]
-    destination = working_dir / repo_name
+    # Clone directly into the working directory, not into a derived subdirectory.
+    destination = working_dir
 
     # Skip if already cloned
     if scm_env.is_cloned(url, destination):
