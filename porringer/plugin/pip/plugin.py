@@ -6,17 +6,15 @@ import logging
 import re
 import shutil
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
-    Environment,
     PackageParameters,
 )
-from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind, PluginParameters
+from porringer.core.plugin_schema.python_environment import PythonEnvironment
+from porringer.core.schema import Package, PackageRef, PluginKind, PluginParameters
 from porringer.schema import SetupAction, SubActionProgress
 from porringer.utility.utility import run_command
 
@@ -35,7 +33,7 @@ _ALREADY_SATISFIED_PATTERN = re.compile(
 )
 
 
-class PipEnvironment(Environment, RuntimeConsumer):
+class PipEnvironment(PythonEnvironment):
     """Represents a Python environment managed by pip.
 
     Provides methods to install, search, uninstall, upgrade, and list Python packages using pip
@@ -54,35 +52,6 @@ class PipEnvironment(Environment, RuntimeConsumer):
         super().__init__(parameters)
         self._cached_packages: list[Package] | None = None
         self._cached_python: str | None = None
-
-    @property
-    def python_command(self) -> str:
-        """The Python interpreter command to use in subprocesses.
-
-        Returns the override path when a runtime provider has resolved one,
-        otherwise falls back to the running interpreter (`sys.executable`).
-        """
-        if self.runtime_executable is not None:
-            return str(self.runtime_executable)
-        return sys.executable
-
-    @staticmethod
-    @override
-    def ecosystem() -> Ecosystem:
-        """Pip belongs to the `python` ecosystem."""
-        return Ecosystem('python')
-
-    @staticmethod
-    @override
-    def package_name_validator() -> str:
-        """Python packages use PEP 440 validation."""
-        return 'pep440'
-
-    @classmethod
-    @override
-    def consumed_runtime_kind(cls) -> str:
-        """Pip consumes a Python runtime."""
-        return 'python'
 
     @classmethod
     @override
@@ -333,42 +302,18 @@ class PipEnvironment(Environment, RuntimeConsumer):
             )
             return
 
-    @staticmethod
-    def _discover_venv_python(project_path: Path) -> Path | None:
-        """Discover the Python interpreter inside a project's virtual environment.
-
-        Looks for a ``.venv`` directory under *project_path* and returns
-        the path to its Python executable if found.
-
-        Args:
-            project_path: Root directory of the project.
-
-        Returns:
-            Path to the venv Python, or ``None`` if no venv is found.
-        """
-        venv_dir = project_path / '.venv'
-        if not venv_dir.is_dir():
-            return None
-
-        if sys.platform == 'win32':
-            python = venv_dir / 'Scripts' / 'python.exe'
-        else:
-            python = venv_dir / 'bin' / 'python'
-
-        return python if python.is_file() else None
-
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages visible to the active Python.
 
         When *project_path* is provided, the method discovers the
-        project's virtual environment (``<project_path>/.venv``) and
+        project's virtual environment (`<project_path>/.venv`) and
         lists packages from that interpreter.  Otherwise it falls back
         to the runtime-override or the system Python on PATH.
 
-        Tries ``python -m pip list --format=json`` first.  If the pip
+        Tries `python -m pip list --format=json` first.  If the pip
         module is not installed (common in uv-created virtual
-        environments), falls back to ``importlib.metadata``.
+        environments), falls back to `importlib.metadata`.
 
         The result is cached per effective interpreter path so that
         multiple calls within a single sync run don't shell out
@@ -376,7 +321,7 @@ class PipEnvironment(Environment, RuntimeConsumer):
 
         Args:
             project_path: Optional project directory.  When set, the
-                listing is scoped to the project's ``.venv``.
+                listing is scoped to the project's `.venv`.
 
         Returns:
             A list of packages

@@ -5,9 +5,8 @@ import os
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
+from porringer.core.plugin_schema.python_environment import PythonEnvironment
+from porringer.core.schema import Package, PackageRef, PluginKind
 
 
 def _get_pipx_venvs_dir() -> Path:
@@ -31,7 +30,7 @@ def _get_pipx_venvs_dir() -> Path:
         return Path.home() / '.local' / 'pipx' / 'venvs'
 
 
-class PipxEnvironment(Environment, RuntimeConsumer):
+class PipxEnvironment(PythonEnvironment):
     """Represents a Python environment managed by pipx.
 
     Provides methods to install, search, uninstall, upgrade, and list Python packages using
@@ -43,27 +42,9 @@ class PipxEnvironment(Environment, RuntimeConsumer):
 
     @staticmethod
     @override
-    def ecosystem() -> Ecosystem:
-        """Pipx belongs to the `python` ecosystem."""
-        return Ecosystem('python')
-
-    @staticmethod
-    @override
     def plugin_kind() -> PluginKind:
         """Pipx installs CLI tools in isolated environments."""
         return PluginKind.TOOL
-
-    @staticmethod
-    @override
-    def package_name_validator() -> str:
-        """Python packages use PEP 440 validation."""
-        return 'pep440'
-
-    @classmethod
-    @override
-    def consumed_runtime_kind(cls) -> str:
-        """Pipx consumes a Python runtime."""
-        return 'python'
 
     @classmethod
     @override
@@ -74,7 +55,7 @@ class PipxEnvironment(Environment, RuntimeConsumer):
     @staticmethod
     @override
     def supports_injection() -> bool:
-        """Pipx supports injection via ``pipx inject``."""
+        """Pipx supports injection via `pipx inject`."""
         return True
 
     @override

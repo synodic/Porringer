@@ -47,7 +47,7 @@ class SetupError(PorringerError):
 
 
 class ManifestErrorCode(Enum):
-    """Machine-readable code carried by :class:`ManifestError`.
+    """Machine-readable code carried by `ManifestError`.
 
     Allows downstream code to classify errors structurally instead of
     relying on substring matching against the human-readable message.
@@ -67,7 +67,7 @@ class ManifestError(SetupError):
     - Missing required fields
     - Invalid package specifications
 
-    Carries an optional :attr:`code` for structured error classification.
+    Carries an optional `code` for structured error classification.
     """
 
     def __init__(self, error: str, *, code: ManifestErrorCode | None = None) -> None:

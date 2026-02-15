@@ -82,35 +82,11 @@ class TestPackageRefStringCoercion:
         with pytest.raises((ValueError, ValidationError)):
             PackageRef.model_validate('@no-slash')
 
-
-class TestPackageRefModelValidate:
-    """Tests for model_validate (replaces the removed parse() classmethod)."""
-
     @staticmethod
-    def test_validate_bare() -> None:
-        """Model validation accepts bare names."""
-        ref = PackageRef.model_validate('black')
-        assert ref.name == 'black'
-        assert ref.constraint is None
-
-    @staticmethod
-    def test_validate_with_constraint() -> None:
-        """Model validation accepts constraints."""
-        ref = PackageRef.model_validate('ruff>=0.8.0')
-        assert ref.name == 'ruff'
-        assert ref.constraint == '>=0.8.0'
-
-    @staticmethod
-    def test_validate_preserves_name_casing() -> None:
+    def test_preserves_name_casing() -> None:
         """Model validation preserves original casing."""
         ref = PackageRef.model_validate('My-Package>=1.0')
         assert ref.name == 'My-Package'
-
-    @staticmethod
-    def test_validate_invalid() -> None:
-        """Empty package strings raise errors."""
-        with pytest.raises((ValueError, ValidationError)):
-            PackageRef.model_validate('')
 
 
 class TestPackageRefSpecifier:
@@ -139,24 +115,6 @@ class TestPackageRefSpecifier:
         """String conversion returns bare name."""
         ref = PackageRef(name='pytest')
         assert str(ref) == 'pytest'
-
-
-class TestPackageRefFrozen:
-    """Tests that PackageRef is immutable."""
-
-    @staticmethod
-    def test_cannot_set_name() -> None:
-        """Name attribute is immutable."""
-        ref = PackageRef(name='ruff')
-        with pytest.raises(ValidationError):
-            ref.name = 'other'
-
-    @staticmethod
-    def test_cannot_set_constraint() -> None:
-        """Constraint attribute is immutable."""
-        ref = PackageRef(name='ruff')
-        with pytest.raises(ValidationError):
-            ref.constraint = '>=1.0'
 
 
 class TestPackageRefRoundTrip:

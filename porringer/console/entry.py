@@ -45,7 +45,7 @@ class TyperHandler(logging.Handler):
 def version_callback(value: bool) -> None:
     """Callback for the version option"""
     if value:
-        print(f'Awesome CLI Version: {__version__}')
+        print(f'Porringer {__version__}')
         raise typer.Exit()
 
 

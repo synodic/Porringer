@@ -25,8 +25,8 @@ class PluginCommands:
     """Plugin commands.
 
     All methods are static — the class acts as a namespace and does
-    not require instantiation.  Use ``PluginCommands.list()`` directly
-    or via an ``API`` instance.
+    not require instantiation.  Use `PluginCommands.list()` directly
+    or via an `API` instance.
     """
 
     @staticmethod
@@ -77,14 +77,14 @@ class PluginCommands:
         initialises it, and returns the packages it reports as installed.
 
         When *project_path* is a directory, it is forwarded to the
-        plugin's ``packages()`` method so that venv-scoped plugins
+        plugin's `packages()` method so that venv-scoped plugins
         (pip, uv) can discover the project's virtual environment and
         list packages from that interpreter.  Globally-scoped plugins
         (pipx, apt, brew) ignore the parameter.
 
         Args:
             plugin_name: The canonical plugin name to query.
-            project_path: Path to the project directory.  ``None`` queries
+            project_path: Path to the project directory.  `None` queries
                 the global / default environment.
 
         Returns:

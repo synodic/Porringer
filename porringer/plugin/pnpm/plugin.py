@@ -1,8 +1,5 @@
 """Plugin implementation for pnpm environment."""
 
-import json
-import logging
-import subprocess
 from pathlib import Path
 from typing import override
 
@@ -47,7 +44,7 @@ class PnpmEnvironment(Environment):
     def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed pnpm packages.
 
-        Uses ``pnpm list -g --json --depth=0`` to list top-level global
+        Uses `pnpm list -g --json --depth=0` to list top-level global
         packages and parses the JSON output.  *project_path* is
         accepted for interface compatibility but ignored for now.
 
@@ -57,27 +54,16 @@ class PnpmEnvironment(Environment):
         Returns:
             A list of installed packages.
         """
-        logger = logging.getLogger('porringer.pnpm.packages')
-        try:
-            result = subprocess.run(
-                ['pnpm', 'list', '-g', '--json', '--depth=0'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            entries = json.loads(result.stdout)
-            # pnpm returns a JSON array; global store is usually the first entry
-            if isinstance(entries, list) and entries:
-                deps = entries[0].get('dependencies', {})
-            elif isinstance(entries, dict):
-                deps = entries.get('dependencies', {})
-            else:
-                return []
-            return [
-                Package(name=name, version=info.get('version')) for name, info in deps.items() if isinstance(info, dict)
-            ]
-        except FileNotFoundError:
-            logger.error('pnpm not found on PATH')
-        except (json.JSONDecodeError, subprocess.SubprocessError) as e:
-            logger.error('Failed to list pnpm packages: %s', e)
-        return []
+        entries = self._run_json_command(['pnpm', 'list', '-g', '--json', '--depth=0'])
+        if entries is None:
+            return []
+        # pnpm returns a JSON array; global store is usually the first entry
+        if isinstance(entries, list) and entries:
+            deps = entries[0].get('dependencies', {})
+        elif isinstance(entries, dict):
+            deps = entries.get('dependencies', {})
+        else:
+            return []
+        return [
+            Package(name=name, version=info.get('version')) for name, info in deps.items() if isinstance(info, dict)
+        ]

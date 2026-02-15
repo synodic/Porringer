@@ -5,9 +5,12 @@ so that `Environment`, `ProjectEnvironment`, and `ScmEnvironment` share
 a single implementation instead of duplicating the `shutil.which` logic.
 """
 
+import json
+import logging
 import re
 import shutil
 import subprocess
+from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
@@ -99,3 +102,48 @@ class ToolBasedPlugin(Plugin):
             return Version(match.group(0))
         except InvalidVersion:
             return None
+
+    @classmethod
+    def _run_json_command(cls, args: list[str], *, check: bool = False) -> Any | None:
+        """Run a CLI command and parse its stdout as JSON.
+
+        Centralises the common pattern of running a subprocess, reading
+        its standard output, and parsing it as JSON while handling the
+        three failure modes every plugin must deal with:
+
+        * `FileNotFoundError` — the tool is not on PATH.
+        * `subprocess.SubprocessError` — the tool failed to run.
+        * `json.JSONDecodeError` — the output was not valid JSON.
+
+        When *check* is `True` the call uses `check=True` so that a
+        non-zero exit code raises `subprocess.CalledProcessError` (which
+        is a `SubprocessError` subclass and therefore caught).
+
+        Args:
+            args: Command and arguments (e.g. `['npm', 'ls', '-g', '--json']`).
+            check: Whether to raise on a non-zero exit code.
+
+        Returns:
+            The parsed JSON value (dict, list, etc.), or `None` when
+            the command cannot be executed or its output is not valid
+            JSON.
+        """
+        logger = logging.getLogger(f'porringer.{cls.tool_name()}.json_command')
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                check=check,
+            )
+            if not check and result.returncode != 0:
+                logger.warning('%s exited with code %d', args[0], result.returncode)
+                return None
+            return json.loads(result.stdout) if result.stdout.strip() else None
+        except FileNotFoundError:
+            logger.error('%s not found on PATH', args[0])
+        except subprocess.SubprocessError as e:
+            logger.error('Failed to run %s: %s', args[0], e)
+        except json.JSONDecodeError as e:
+            logger.warning('Could not parse JSON output from %s: %s', args[0], e)
+        return None
