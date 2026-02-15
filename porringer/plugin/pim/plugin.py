@@ -1,6 +1,5 @@
 """Plugin implementation for Python Install Manager (pymanager)"""
 
-import json
 import logging
 import subprocess
 import sys
@@ -142,47 +141,19 @@ class PimEnvironment(Environment, RuntimeProvider):
         Returns:
             A list of installed Python runtime packages
         """
-        logger = logging.getLogger('porringer.pim.packages')
+        data = self._run_json_command(['py', 'list', '--only-managed', '-f', 'json'])
+        if not isinstance(data, dict):
+            return []
+
         packages: list[Package] = []
-
-        try:
-            # List installed runtimes in JSON format, only those managed by pymanager
-            result = subprocess.run(
-                ['py', 'list', '--only-managed', '-f', 'json'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            if result.returncode != 0:
-                logger.warning('Failed to list installed Python runtimes')
-                return packages
-
-            # Parse JSON output - format is {"versions": [...]}
-            data = json.loads(result.stdout) if result.stdout.strip() else {}
-            runtimes = data.get('versions', []) if isinstance(data, dict) else []
-            for runtime in runtimes:
-                tag = runtime.get('tag', 'unknown')
-                version = runtime.get('sort-version') or tag
-                # Use tag as the package name since that's how users identify runtimes
-                packages.append(
-                    Package(
-                        name=tag,
-                        version=version,
-                    )
-                )
-
-        except FileNotFoundError:
-            logger.error('Python Install Manager (py) not found')
-        except json.JSONDecodeError:
-            logger.warning('Could not parse installed runtimes list')
-        except Exception as e:
-            logger.error(f'Failed to list Python runtimes: {e}')
-
+        for runtime in data.get('versions', []):
+            tag = runtime.get('tag', 'unknown')
+            version = runtime.get('sort-version') or tag
+            packages.append(Package(name=tag, version=version))
         return packages
 
-    @staticmethod
-    def _get_runtime_version(tag: str) -> str | None:
+    @classmethod
+    def _get_runtime_version(cls, tag: str) -> str | None:
         """Gets the actual version string for an installed runtime.
 
         Args:
@@ -191,20 +162,10 @@ class PimEnvironment(Environment, RuntimeProvider):
         Returns:
             The version string, or None if not found
         """
-        try:
-            result = subprocess.run(
-                ['py', 'list', '--only-managed', '-f', 'json', tag],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            if result.returncode == 0 and result.stdout.strip():
-                data = json.loads(result.stdout)
-                runtimes = data.get('versions', []) if isinstance(data, dict) else []
-                if runtimes:
-                    return runtimes[0].get('sort-version') or runtimes[0].get('tag')
-        except Exception:
-            pass
-
+        data = cls._run_json_command(['py', 'list', '--only-managed', '-f', 'json', tag])
+        if not isinstance(data, dict):
+            return None
+        runtimes = data.get('versions', [])
+        if runtimes:
+            return runtimes[0].get('sort-version') or runtimes[0].get('tag')
         return None

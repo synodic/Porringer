@@ -1,8 +1,5 @@
 """Plugin implementation for Homebrew (brew) package manager."""
 
-import json
-import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import override
@@ -105,48 +102,20 @@ class BrewEnvironment(Environment):
         Returns:
             A list of installed packages
         """
-        logger = logging.getLogger('porringer.brew.packages')
+        formulas = self._run_json_command(['brew', 'list', '--formula', '--json'])
+        if not isinstance(formulas, list):
+            return []
+
         packages: list[Package] = []
-
-        try:
-            # List installed formulas in JSON format
-            result = subprocess.run(
-                ['brew', 'list', '--formula', '--json'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            if result.returncode != 0:
-                logger.warning('Failed to list installed formulas')
-                return packages
-
-            # The JSON output is a list of formula objects
-            # Each has 'name' and 'installed' (list with version info)
-            formulas = json.loads(result.stdout) if result.stdout.strip() else []
-            for formula in formulas:
-                name = formula.get('name', 'unknown')
-                # Get the first installed version
-                installed = formula.get('installed', [])
-                version = installed[0].get('version', 'unknown') if installed else 'unknown'
-                packages.append(
-                    Package(
-                        name=name,
-                        version=version,
-                    )
-                )
-
-        except FileNotFoundError:
-            logger.error('Homebrew (brew) not found')
-        except json.JSONDecodeError:
-            logger.warning('Could not parse installed formulas list')
-        except Exception as e:
-            logger.error(f'Failed to list formulas: {e}')
-
+        for formula in formulas:
+            name = formula.get('name', 'unknown')
+            installed = formula.get('installed', [])
+            version = installed[0].get('version', 'unknown') if installed else 'unknown'
+            packages.append(Package(name=name, version=version))
         return packages
 
-    @staticmethod
-    def _get_formula_version(formula: str) -> str | None:
+    @classmethod
+    def _get_formula_version(cls, formula: str) -> str | None:
         """Gets the installed version for a formula.
 
         Args:
@@ -155,22 +124,12 @@ class BrewEnvironment(Environment):
         Returns:
             The version string, or None if not found
         """
-        try:
-            result = subprocess.run(
-                ['brew', 'info', formula, '--json=v2'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            if result.returncode == 0 and result.stdout.strip():
-                info = json.loads(result.stdout)
-                formulas = info.get('formulae', [])
-                if formulas:
-                    installed = formulas[0].get('installed', [])
-                    if installed:
-                        return installed[0].get('version')
-        except Exception:
-            pass
-
+        info = cls._run_json_command(['brew', 'info', formula, '--json=v2'])
+        if not isinstance(info, dict):
+            return None
+        formulas = info.get('formulae', [])
+        if formulas:
+            installed = formulas[0].get('installed', [])
+            if installed:
+                return installed[0].get('version')
         return None

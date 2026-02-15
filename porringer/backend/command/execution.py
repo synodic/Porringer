@@ -1,0 +1,1130 @@
+"""Phased execution engine.
+
+Orchestrates the multi-phase setup flow: runtime → packages → tools →
+project-sync → SCM → post-sync commands.  Each phase ensures its
+prerequisites are met before proceeding.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import subprocess
+import sysconfig
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
+
+from porringer.backend.backend import BackendResolver
+from porringer.core.plugin_schema.environment import Environment, PackageParameters
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectSyncParameters
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
+from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.schema import Package, PluginKind
+from porringer.schema import (
+    ProgressEvent,
+    ProgressEventKind,
+    SetupAction,
+    SetupActionResult,
+    SetupParameters,
+    SetupResults,
+    SkipReason,
+    SubActionProgress,
+    SyncStrategy,
+)
+from porringer.utility.exception import PluginError
+
+from .action_builder import PHASE_ORDER, STRATEGY_VERB, get_cli_command
+from .discovery import discover_plugins
+from .presence import dry_run_action, is_package_installed
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ExecutionPhaseContext:
+    """Shared context for execution phase operations.
+
+    Used by post-sync commands and as a grab-bag for phases that
+    need access to discovered plugins, parameters, and the event
+    queue.  Project-sync and SCM phases receive their directory
+    arguments directly rather than through this context.
+    """
+
+    environments: dict[str, Environment]
+    project_environments: dict[str, ProjectEnvironment] | None
+    parameters: SetupParameters
+    skip_project: bool
+    working_dir: Path
+    event_queue: asyncio.Queue[ProgressEvent | None] | None
+
+
+# ---------------------------------------------------------------------------
+# PATH refresh
+# ---------------------------------------------------------------------------
+
+
+def refresh_path() -> None:
+    """Prepend common script/binary directories to `PATH`.
+
+    After packages are installed in Phase 2a, executables such as
+    `pipx` may have been placed in directories that are not yet
+    on the running process's `PATH` (e.g. `~/.local/bin` on
+    Unix, or the `Scripts/` directory of the active Python
+    environment on Windows).
+
+    This method detects those directories and, if they are not
+    already present, prepends them so that subsequent
+    `shutil.which()` calls can find the newly-installed tools.
+    """
+    dirs_to_add: list[str] = []
+
+    # The Python environment's scripts directory (e.g. venv/Scripts, ~/.local/bin)
+    scripts_dir = sysconfig.get_path('scripts')
+    if scripts_dir:
+        dirs_to_add.append(scripts_dir)
+
+    # User-scheme scripts directory (pip install --user)
+    user_scripts = sysconfig.get_path('scripts', 'posix_user' if os.name != 'nt' else 'nt_user')
+    if user_scripts:
+        dirs_to_add.append(user_scripts)
+
+    current_path = os.environ.get('PATH', '')
+    current_entries = set(current_path.split(os.pathsep))
+    new_entries = [d for d in dirs_to_add if d not in current_entries and Path(d).is_dir()]
+
+    if new_entries:
+        os.environ['PATH'] = os.pathsep.join(new_entries) + os.pathsep + current_path
+        logger.debug('PATH updated with: %s', ', '.join(new_entries))
+
+
+# ---------------------------------------------------------------------------
+# Post-sync command execution
+# ---------------------------------------------------------------------------
+
+
+def execute_run_command(action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
+    """Executes a post-install command.
+
+    Args:
+        action: The command action.
+        working_dir: Working directory for the command.
+        timeout: Timeout in seconds.
+
+    Returns:
+        The result of the command execution.
+    """
+    if action.command is None or len(action.command) == 0:
+        return SetupActionResult(action=action, success=False, message='No command specified')
+
+    logger.info(f'Running command: {" ".join(action.command)}')
+
+    try:
+        result = subprocess.run(
+            action.command,
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+
+        if result.returncode == 0:
+            return SetupActionResult(action=action, success=True)
+        else:
+            stderr = result.stderr.strip() if result.stderr else 'Unknown error'
+            return SetupActionResult(action=action, success=False, message=f'Exit code {result.returncode}: {stderr}')
+    except subprocess.TimeoutExpired:
+        message = f'Command timed out after {timeout} seconds'
+        logger.error(message)
+        return SetupActionResult(action=action, success=False, message=message)
+    except FileNotFoundError:
+        message = f'Command not found: {action.command[0]}'
+        return SetupActionResult(action=action, success=False, message=message)
+    except Exception as e:
+        return SetupActionResult(action=action, success=False, message=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Package execution helpers
+# ---------------------------------------------------------------------------
+
+
+async def execute_package(
+    action: SetupAction,
+    environments: dict[str, Environment],
+    strategy: SyncStrategy,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    *,
+    project_path: Path | None = None,
+) -> SetupActionResult:
+    """Execute a package install or upgrade based on the strategy.
+
+    In MINIMAL strategy, skips already-installed packages.
+    In LATEST/EXACT strategy, upgrades installed packages and falls back to
+    install for packages that are not yet present.
+
+    Args:
+        action: The package action.
+        environments: Dict of instantiated environment plugins.
+        strategy: The sync strategy.
+        event_queue: Optional queue to emit sub-action events into.
+        project_path: Optional project directory for scoped package queries.
+
+    Returns:
+        The result of the operation.
+    """
+    if action.installer is None or action.package is None:
+        return SetupActionResult(action=action, success=False, message='Installer or package not specified')
+
+    if action.installer not in environments:
+        msg = f"Installer '{action.installer}' is not available"
+        return SetupActionResult(action=action, success=False, message=msg)
+
+    environment = environments[action.installer]
+
+    # --- Injection actions ------------------------------------------------
+    if action.inject_into is not None:
+        return await _attempt_inject_operation(action, environment, event_queue)
+
+    # --- Normal install / upgrade -----------------------------------------
+    # Check if package is already installed
+    is_installed = False
+    installed_detail: str | None = None
+    validator = type(environment).package_name_validator()
+    try:
+        loop = asyncio.get_running_loop()
+        installed_packages = await loop.run_in_executor(None, lambda: environment.packages(project_path=project_path))
+        is_installed, installed_detail = is_package_installed(
+            action.package, installed_packages, validator, action.kind
+        )
+    except PluginError as e:
+        logger.debug(f'Plugin error checking packages for {action.installer}: {e}')
+    except Exception as e:
+        logger.debug(f'Could not check installed packages for {action.installer}: {e}')
+
+    if strategy == SyncStrategy.MINIMAL and is_installed:
+        logger.info(f"Skipping '{action.package}': {installed_detail}")
+        return SetupActionResult(
+            action=action,
+            success=True,
+            skipped=True,
+            skip_reason=SkipReason.ALREADY_INSTALLED,
+            message=installed_detail,
+        )
+
+    # Install if not present, otherwise honour the requested strategy
+    effective = SyncStrategy.MINIMAL if not is_installed else strategy
+    verb = 'Installing' if effective == SyncStrategy.MINIMAL else 'Upgrading'
+    logger.info(f"{verb} '{action.package}' via {action.installer}")
+    return await _attempt_package_operation(action, environment, effective, event_queue)
+
+
+async def _attempt_package_operation(
+    action: SetupAction,
+    environment: Environment,
+    strategy: SyncStrategy,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+) -> SetupActionResult:
+    """Attempt to install or upgrade a package via the given environment plugin.
+
+    Args:
+        action: The package action.
+        environment: The environment plugin to use.
+        strategy: Whether to install or upgrade.
+        event_queue: Optional queue to emit sub-action events into.
+
+    Returns:
+        The result of the attempt.
+    """
+    is_install = strategy == SyncStrategy.MINIMAL
+    if is_install:
+        execute: Callable[[PackageParameters], Awaitable[Package | None]] = environment.async_install
+        verb, verb_past = 'install', 'Installed'
+    else:
+        execute = environment.async_upgrade
+        verb, verb_past = 'upgrade', 'Upgraded'
+
+    return await _attempt_operation(
+        action,
+        execute=execute,
+        verb=verb,
+        verb_past=verb_past,
+        event_queue=event_queue,
+    )
+
+
+async def _attempt_inject_operation(
+    action: SetupAction,
+    environment: Environment,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+) -> SetupActionResult:
+    """Attempt to inject a sub-package into a parent package's environment.
+
+    Args:
+        action: The injection action (`inject_into` must be set).
+        environment: The environment plugin to use.
+        event_queue: Optional queue to emit sub-action events into.
+
+    Returns:
+        The result of the attempt.
+    """
+    assert action.inject_into is not None
+    assert action.package is not None
+
+    if not environment.supports_injection():
+        msg = f"Installer '{action.installer}' does not support injection"
+        return SetupActionResult(action=action, success=False, message=msg)
+
+    inject_target = action.inject_into
+    return await _attempt_operation(
+        action,
+        execute=lambda params: environment.async_inject(inject_target, params),
+        verb='inject',
+        verb_past='Injected',
+        success_suffix=f' into {inject_target.name}',
+        event_queue=event_queue,
+    )
+
+
+async def _attempt_operation(  # noqa: PLR0913
+    action: SetupAction,
+    *,
+    execute: Callable[[PackageParameters], Awaitable[Package | None]],
+    verb: str,
+    verb_past: str,
+    success_suffix: str = '',
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+) -> SetupActionResult:
+    """Core helper that runs an async package operation with standard error handling.
+
+    Builds the progress callback, constructs `PackageParameters`,
+    calls *execute*, and catches the standard exception set.
+
+    Args:
+        action: The action being executed.
+        execute: Async callable that performs the operation.
+        verb: Infinitive verb for error messages (e.g. `"install"`).
+        verb_past: Past-tense verb for success messages (e.g. `"Installed"`).
+        success_suffix: Extra text appended to the success message
+            (e.g. `" into pdm"` for injection).
+        event_queue: Optional queue to emit sub-action events into.
+
+    Returns:
+        The result of the attempt.
+    """
+    success = False
+    message = ''
+
+    sub_action_cb = None
+    if event_queue is not None:
+        eq = event_queue
+
+        def sub_action_cb(update: SubActionProgress) -> None:
+            eq.put_nowait(ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=action, sub_action=update))
+
+    try:
+        if action.package is None:
+            return SetupActionResult(action=action, success=False, message='No package specified')
+        params = PackageParameters(
+            package=action.package,
+            dry=False,
+            progress_callback=sub_action_cb,
+        )
+        result = await execute(params)
+
+        if result is not None:
+            success = True
+            message = f'{verb_past} {result.name}{success_suffix}'
+        else:
+            message = f"Failed to {verb} '{action.package}'{success_suffix}"
+    except PluginError as e:
+        logger.error(f'Plugin error {verb}ing {action.package}: {e}')
+        message = str(e)
+    except asyncio.CancelledError:
+        logger.error(f'{verb.capitalize()} cancelled for {action.package}')
+        message = f'{verb.capitalize()} cancelled'
+    except TimeoutError as e:
+        logger.error(f'Timeout {verb}ing {action.package}: {e}')
+        message = str(e)
+    except Exception as e:
+        message = str(e)
+
+    return SetupActionResult(action=action, success=success, message=message)
+
+
+# ---------------------------------------------------------------------------
+# Parallel / sequential orchestration
+# ---------------------------------------------------------------------------
+
+
+async def execute_package_actions(
+    package_actions: list[SetupAction],
+    environments: dict[str, Environment],
+    parameters: SetupParameters,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None,
+    *,
+    project_path: Path | None = None,
+) -> tuple[list[SetupActionResult], bool]:
+    """Execute PACKAGE actions with parallel support.
+
+    Returns:
+        Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
+    """
+    if parameters.dry_run:
+        return (
+            _dry_run_package_actions(
+                package_actions, environments, parameters.strategy, event_queue, project_path=project_path
+            ),
+            True,
+        )
+
+    parallel_actions, sequential_actions = _group_actions_by_parallelism(package_actions, environments)
+
+    results: list[SetupActionResult] = []
+
+    # Execute parallel actions concurrently
+    if parallel_actions:
+        parallel_results, should_continue = await _run_parallel_packages(
+            parallel_actions, environments, parameters, event_queue, project_path=project_path
+        )
+        results.extend(parallel_results)
+        if not should_continue:
+            return results, False
+
+    # Execute sequential actions one at a time
+    sequential_results, should_continue = await _run_sequential_packages(
+        sequential_actions, environments, parameters, event_queue, project_path=project_path
+    )
+    results.extend(sequential_results)
+
+    return results, should_continue
+
+
+def _dry_run_package_actions(
+    package_actions: list[SetupAction],
+    environments: dict[str, Environment],
+    strategy: SyncStrategy,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None,
+    *,
+    project_path: Path | None = None,
+) -> list[SetupActionResult]:
+    """Execute dry-run for package actions."""
+    results: list[SetupActionResult] = []
+    for action in package_actions:
+        result = dry_run_action(action, environments, strategy, project_path=project_path)
+        results.append(result)
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+    return results
+
+
+def _group_actions_by_parallelism(
+    install_actions: list[SetupAction],
+    environments: dict[str, Environment],
+) -> tuple[list[SetupAction], list[SetupAction]]:
+    """Group actions into parallel and sequential based on plugin support."""
+    parallel_actions: list[SetupAction] = []
+    sequential_actions: list[SetupAction] = []
+
+    for action in install_actions:
+        supports = (
+            action.installer and action.installer in environments and environments[action.installer].supports_parallel()
+        )
+        if supports:
+            parallel_actions.append(action)
+        else:
+            sequential_actions.append(action)
+
+    return parallel_actions, sequential_actions
+
+
+async def _run_sequential_packages(
+    sequential_actions: list[SetupAction],
+    environments: dict[str, Environment],
+    parameters: SetupParameters,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None,
+    *,
+    project_path: Path | None = None,
+) -> tuple[list[SetupActionResult], bool]:
+    """Run package actions sequentially."""
+    results: list[SetupActionResult] = []
+    for action in sequential_actions:
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+        result = await execute_package(
+            action, environments, parameters.strategy, event_queue, project_path=project_path
+        )
+        results.append(result)
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+        if not result.success and not result.skipped and parameters.fail_fast:
+            logger.error(f'Action failed: {action.description} - {result.message}')
+            return results, False
+    return results, True
+
+
+async def _run_parallel_packages(
+    parallel_actions: list[SetupAction],
+    environments: dict[str, Environment],
+    parameters: SetupParameters,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None,
+    *,
+    project_path: Path | None = None,
+) -> tuple[list[SetupActionResult], bool]:
+    """Run package actions in parallel using TaskGroup.
+
+    Uses asyncio.TaskGroup (Python 3.11+) for structured concurrency.
+    All tasks are automatically cancelled if any raises an unhandled exception.
+
+    Returns:
+        Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
+    """
+    results: dict[int, SetupActionResult] = {}
+    action_indices = {id(action): i for i, action in enumerate(parallel_actions)}
+
+    async def package_with_event(action: SetupAction) -> None:
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+        try:
+            result = await execute_package(
+                action, environments, parameters.strategy, event_queue, project_path=project_path
+            )
+        except Exception as e:
+            result = SetupActionResult(action=action, success=False, message=str(e))
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+        results[action_indices[id(action)]] = result
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            for action in parallel_actions:
+                tg.create_task(package_with_event(action))
+    except ExceptionGroup as eg:
+        # TaskGroup raises ExceptionGroup if any task fails with unhandled exception
+        # Our package_with_event catches exceptions, so this shouldn't happen normally
+        logger.error(f'Parallel package operation failed with exceptions: {eg.exceptions}')
+
+    # Convert dict to ordered list
+    result_list = [results.get(i) for i in range(len(parallel_actions))]
+    final_results: list[SetupActionResult] = []
+
+    for action, maybe_result in zip(parallel_actions, result_list, strict=False):
+        action_result: SetupActionResult
+        if maybe_result is None:
+            # Task was cancelled before completing
+            action_result = SetupActionResult(action=action, success=False, message='Task cancelled')
+        else:
+            action_result = maybe_result
+        final_results.append(action_result)
+        if not action_result.success and not action_result.skipped and parameters.fail_fast:
+            logger.error(f'Action failed: {action.description} - {action_result.message}')
+            return final_results, False
+
+    return final_results, True
+
+
+# ---------------------------------------------------------------------------
+# Command / project / SCM action execution
+# ---------------------------------------------------------------------------
+
+
+async def execute_command_actions(
+    command_actions: list[SetupAction],
+    context: ExecutionPhaseContext,
+) -> list[SetupActionResult]:
+    """Execute RUN_COMMAND actions sequentially."""
+    results: list[SetupActionResult] = []
+    for action in command_actions:
+        if context.parameters.dry_run:
+            result = dry_run_action(
+                action,
+                context.environments,
+                context.parameters.strategy,
+            )
+        else:
+            result = execute_run_command(action, context.working_dir, context.parameters.timeout)
+        results.append(result)
+        if context.event_queue is not None:
+            context.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            context.event_queue.put_nowait(
+                ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+            )
+        if not result.success and not result.skipped:
+            logger.error(f'Action failed: {action.description} - {result.message}')
+            if context.parameters.fail_fast:
+                break
+    return results
+
+
+def determine_fallback_dir(parameters: SetupParameters, path: Path) -> Path:
+    """Determine the fallback working directory for SCM and post-sync commands.
+
+    Project-sync actions use per-plugin auto-discovery instead of
+    this method.  This fallback is used by SCM clone and post-sync
+    command phases only.
+
+    Args:
+        parameters: Setup parameters that may specify a project directory.
+        path: The path being processed.
+
+    Returns:
+        The working directory to use.
+    """
+    if isinstance(parameters.project_directory, Path):
+        return parameters.project_directory
+    return path if path.is_dir() else path.parent
+
+
+async def handle_project_phase(
+    project_actions: list[SetupAction],
+    context: ExecutionPhaseContext,
+    manifest_directory: Path,
+) -> list[SetupActionResult]:
+    """Execute or skip project sync actions depending on context.
+
+    Args:
+        project_actions: The project-kind actions to process.
+        context: Execution phase context with parameters and flags.
+        manifest_directory: Directory containing the manifest file,
+            used as the starting point for per-plugin project root
+            auto-discovery.
+
+    Returns:
+        Results for each project action.
+    """
+    if not context.skip_project:
+        return await _execute_project_sync_actions(
+            project_actions,
+            context.project_environments,
+            manifest_directory,
+            context.parameters,
+            context.event_queue,
+        )
+    return skip_actions(
+        project_actions,
+        SkipReason.NO_PROJECT_DIRECTORY,
+        'No project directory provided',
+        context.event_queue,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phased execution core
+# ---------------------------------------------------------------------------
+
+
+async def execute_single(
+    actions: list[SetupAction],
+    path: Path,
+    parameters: SetupParameters,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+) -> SetupResults:
+    """Execute setup actions for a single path with parallel support.
+
+    Execution is **phased** so that each layer's prerequisite tools
+    are available before they are needed:
+
+    1. **Runtime** — install/resolve language runtimes (pim, pyenv).
+    2. **Package** — install packages into the current environment
+       (pip, uv).  This may install tool prerequisites such as pipx.
+    3. **Tool** — install isolated CLI tools (pipx).  Plugins are
+       re-discovered after Phase 2 so that newly-installed backends
+       are available.  Deferred actions whose `installer` was
+       `None` at preview time are resolved here.
+    4. **Project sync** — run `pdm install` / `uv sync` in the
+       manifest directory.
+    5. **SCM clone** — clone source-control repositories.
+    6. **Post-sync commands** — run arbitrary shell commands.
+
+    Args:
+        actions: The list of actions to execute (from preview).
+        path: The path this execution is for (used for working directory).
+        parameters: The setup parameters.
+        event_queue: Optional queue to emit `ProgressEvent` items into.
+
+    Returns:
+        SetupResults containing the results of each action.
+    """
+    logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
+
+    results: list[SetupActionResult] = []
+    environments = discover_plugins('environment', Environment, check_dependencies=True)
+    project_environments = discover_plugins('project_environment', ProjectEnvironment)
+    scm_environments = discover_plugins('scm', ScmEnvironment)
+
+    skip_project = parameters.project_directory is False
+    fallback_dir = determine_fallback_dir(parameters, path)
+    manifest_directory = path if path.is_dir() else path.parent
+
+    # Populate CLI commands for all resolved actions
+    for action in actions:
+        action.cli_command = get_cli_command(
+            action, environments, parameters.strategy, project_environments, scm_environments
+        )
+
+    phases = group_actions_by_phase(actions)
+
+    # --- Phase 1: runtime-provider actions (pim / pyenv) ---------------
+    if phases[PluginKind.RUNTIME]:
+        runtime_results, should_continue = await execute_package_actions(
+            phases[PluginKind.RUNTIME],
+            environments,
+            parameters,
+            event_queue,
+        )
+        results.extend(runtime_results)
+        if not should_continue:
+            return SetupResults(actions=actions, results=results)
+        _propagate_runtime(phases[PluginKind.RUNTIME], environments, project_environments)
+
+    # --- Phase 2a: package-kind actions (pip, uv, etc.) ---------------
+    if phases[PluginKind.PACKAGE]:
+        package_results, should_continue = await execute_package_actions(
+            phases[PluginKind.PACKAGE],
+            environments,
+            parameters,
+            event_queue,
+            project_path=manifest_directory,
+        )
+        results.extend(package_results)
+        if not should_continue:
+            return SetupResults(actions=actions, results=results)
+
+    # --- Phase 2b: tool-kind actions (pipx, etc.) ---------------------
+    # Re-discover plugins so that tools installed in Phase 2a
+    # (e.g. pipx via pip) are now available as backends.
+    if phases[PluginKind.TOOL]:
+        # Ensure executables installed in Phase 2a are discoverable by
+        # shutil.which() even when the scripts directory was not already
+        # on PATH (e.g. ~/.local/bin, Scripts/).
+        refresh_path()
+
+        environments = discover_plugins('environment', Environment, check_dependencies=True)
+
+        # Resolve deferred tool actions whose installer was None
+        _resolve_deferred_actions(phases[PluginKind.TOOL], environments, parameters.strategy)
+
+        # Update CLI commands for newly-resolved tool actions
+        for action in phases[PluginKind.TOOL]:
+            action.cli_command = get_cli_command(
+                action, environments, parameters.strategy, project_environments, scm_environments
+            )
+
+        tool_results, should_continue = await execute_package_actions(
+            phases[PluginKind.TOOL],
+            environments,
+            parameters,
+            event_queue,
+            project_path=manifest_directory,
+        )
+        results.extend(tool_results)
+        if not should_continue:
+            return SetupResults(actions=actions, results=results)
+
+    # --- Phase 3: project sync ----------------------------------------
+    if phases[PluginKind.PROJECT]:
+        # Re-discover project environments in case tools installed in
+        # earlier phases provide new project-environment backends.
+        project_environments = discover_plugins('project_environment', ProjectEnvironment)
+
+        results.extend(
+            await handle_project_phase(
+                phases[PluginKind.PROJECT],
+                ExecutionPhaseContext(
+                    environments=environments,
+                    project_environments=project_environments,
+                    parameters=parameters,
+                    skip_project=skip_project,
+                    working_dir=fallback_dir,
+                    event_queue=event_queue,
+                ),
+                manifest_directory,
+            )
+        )
+
+    # --- Phase 4: SCM clone -------------------------------------------
+    if phases[PluginKind.SCM]:
+        results.extend(
+            await _execute_scm_actions(
+                phases[PluginKind.SCM],
+                scm_environments,
+                fallback_dir,
+                parameters,
+                event_queue,
+            )
+        )
+
+    # --- Phase 5: post-sync commands ----------------------------------
+    if phases[None]:
+        context = ExecutionPhaseContext(
+            environments=environments,
+            project_environments=project_environments,
+            parameters=parameters,
+            skip_project=skip_project,
+            working_dir=fallback_dir,
+            event_queue=event_queue,
+        )
+        results.extend(await execute_command_actions(phases[None], context))
+
+    return SetupResults(actions=actions, results=results)
+
+
+# ---------------------------------------------------------------------------
+# Phase grouping and helpers
+# ---------------------------------------------------------------------------
+
+
+def group_actions_by_phase(
+    actions: list[SetupAction],
+) -> dict[PluginKind | None, list[SetupAction]]:
+    """Group actions into phase buckets keyed by `PluginKind`.
+
+    Post-sync commands (`kind is None`) are stored under the
+    `None` key.
+
+    Returns:
+        Dict mapping each phase to its action list.
+    """
+    phases: dict[PluginKind | None, list[SetupAction]] = {k: [] for k in PHASE_ORDER}
+    for action in actions:
+        phases[action.kind].append(action)
+    return phases
+
+
+def _propagate_runtime(
+    runtime_actions: list[SetupAction],
+    environments: dict[str, Environment],
+    project_environments: dict[str, ProjectEnvironment] | None = None,
+) -> None:
+    """Resolve the interpreter path and propagate to downstream consumers.
+
+    After runtime-provider actions complete, finds the first
+    `RuntimeProvider` that can resolve an executable and sets
+    `runtime_executable` on all `RuntimeConsumer` plugins
+    whose `consumed_runtime_kind` matches the provider's
+    `provided_runtime_kind`.
+    """
+    proj_envs = project_environments or {}
+
+    # Find a RuntimeProvider among the runtime action installers
+    for action in runtime_actions:
+        if action.installer is None or action.package is None:
+            continue
+        env = environments.get(action.installer)
+        if env is None or not isinstance(env, RuntimeProvider):
+            continue
+
+        kind = cast(type[RuntimeProvider], type(env)).provided_runtime_kind()
+        tag = action.package.name
+        executable = env.resolve_executable(tag)
+        if executable is None:
+            logger.debug('RuntimeProvider %s could not resolve executable for tag %s', action.installer, tag)
+            continue
+
+        logger.info('Runtime resolved: %s -> %s', tag, executable)
+
+        # Propagate to all plugins (environment + project-environment) that consume this runtime kind
+        all_plugins: dict[str, Environment | ProjectEnvironment] = {**environments, **proj_envs}
+        for name, downstream in all_plugins.items():
+            if isinstance(downstream, RuntimeConsumer):
+                downstream_type = cast(type[RuntimeConsumer], type(downstream))
+                if downstream_type.consumed_runtime_kind() == kind:
+                    downstream.runtime_executable = executable
+                    logger.debug('Set runtime_executable on %s to %s', name, executable)
+
+        # Use only the first successfully resolved runtime
+        break
+
+
+def _resolve_deferred_actions(
+    actions: list[SetupAction],
+    environments: dict[str, Environment],
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
+) -> None:
+    """Resolve deferred actions whose `installer` is `None`.
+
+    After a preceding phase installs new tools (e.g. pip installs pipx),
+    plugins are re-discovered and a fresh `BackendResolver` determines
+    the correct backend for each deferred action.  Actions that still
+    cannot be resolved are left with `installer = None` so that the
+    normal execution path reports them as unavailable.
+
+    Args:
+        actions: Mutable list of actions to resolve in-place.
+        environments: Freshly-discovered environment plugins.
+        strategy: Sync strategy (for description verb).
+    """
+    deferred = [a for a in actions if a.installer is None and a.ecosystem is not None]
+    if not deferred:
+        return
+
+    resolver = BackendResolver(environments)
+    verb = STRATEGY_VERB[strategy]
+
+    for action in deferred:
+        assert action.kind is not None
+        assert action.ecosystem is not None
+        installer = resolver.resolve(action.kind, action.ecosystem)
+        if installer is not None:
+            action.installer = installer
+            if action.package is not None:
+                action.description = f"{verb} '{action.package}' via {installer}"
+            logger.info('Deferred action resolved: %s -> %s', action.description, installer)
+        else:
+            logger.warning('Deferred action still unresolved: %s', action.description)
+
+
+def skip_actions(
+    actions: list[SetupAction],
+    skip_reason: SkipReason,
+    message: str,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None,
+) -> list[SetupActionResult]:
+    """Skip a list of actions, emitting progress events and a warning for each.
+
+    Args:
+        actions: The actions to skip.
+        skip_reason: Machine-readable skip code.
+        message: Human-readable skip detail.
+        event_queue: Optional queue for progress events.
+
+    Returns:
+        List of skipped action results.
+    """
+    results: list[SetupActionResult] = []
+    for action in actions:
+        logger.warning("Skipping '%s': %s", action.description, message)
+        result = SetupActionResult(action=action, success=True, skipped=True, skip_reason=skip_reason, message=message)
+        results.append(result)
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Project sync execution
+# ---------------------------------------------------------------------------
+
+
+async def _execute_project_sync_actions(
+    project_sync_actions: list[SetupAction],
+    project_environments: dict[str, ProjectEnvironment] | None,
+    manifest_directory: Path,
+    parameters: SetupParameters,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None,
+) -> list[SetupActionResult]:
+    """Execute PROJECT_SYNC actions sequentially.
+
+    Each action invokes the resolved project-environment plugin's
+    `ProjectEnvironment.sync()` method.  When
+    `parameters.project_directory` is an explicit `Path` it is
+    used as the working directory for every plugin.  Otherwise each
+    plugin auto-discovers its project root by walking ancestor
+    directories of *manifest_directory* looking for its ecosystem's
+    marker file (e.g. `package.json`, `pyproject.toml`).
+
+    Args:
+        project_sync_actions: The project sync actions.
+        project_environments: Dict of project-environment plugins.
+        manifest_directory: Directory containing the manifest file.
+        parameters: Setup parameters (dry-run, etc.).
+        event_queue: Optional queue for progress events.
+
+    Returns:
+        List of action results.
+    """
+    results: list[SetupActionResult] = []
+
+    for action in project_sync_actions:
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+
+        result = await _execute_project_sync(action, project_environments, manifest_directory, parameters)
+
+        results.append(result)
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+        if not result.success and parameters.fail_fast:
+            logger.error(f'Project sync failed: {action.description} - {result.message}')
+            break
+
+    return results
+
+
+async def _execute_project_sync(
+    action: SetupAction,
+    project_environments: dict[str, ProjectEnvironment] | None,
+    manifest_directory: Path,
+    parameters: SetupParameters,
+) -> SetupActionResult:
+    """Execute a single PROJECT_SYNC action.
+
+    When `parameters.project_directory` is an explicit `Path`
+    it is used unconditionally.  Otherwise the plugin's
+    `resolve_project_root()` is called to auto-discover the
+    project root from *manifest_directory*.  If discovery fails
+    (no marker found), *manifest_directory* is used as fallback
+    and a warning is logged.
+
+    Args:
+        action: The project sync action.
+        project_environments: Dict of project-environment plugins.
+        manifest_directory: Directory containing the manifest file.
+        parameters: Setup parameters.
+
+    Returns:
+        The result of the sync operation.
+    """
+    proj_envs = project_environments or {}
+    if action.installer is None or action.installer not in proj_envs:
+        return SetupActionResult(
+            action=action, success=False, message=f"Project environment '{action.installer}' is not available"
+        )
+
+    proj_env = proj_envs[action.installer]
+
+    # Determine the effective directory for this plugin
+    effective_dir: Path
+    if isinstance(parameters.project_directory, Path):
+        # Explicit override — use as-is
+        effective_dir = parameters.project_directory
+    else:
+        # Auto-discover per-plugin project root
+        discovered = type(proj_env).resolve_project_root(manifest_directory)
+        if discovered is not None:
+            effective_dir = discovered
+            if discovered != manifest_directory:
+                logger.info(
+                    "Auto-discovered %s project root for '%s': %s",
+                    proj_env.ecosystem(),
+                    action.installer,
+                    discovered,
+                )
+        else:
+            effective_dir = manifest_directory
+            marker = type(proj_env).project_marker()
+            if marker is not None:
+                logger.warning(
+                    "No '%s' found in ancestors of %s; falling back to manifest directory for %s project sync",
+                    marker,
+                    manifest_directory,
+                    proj_env.ecosystem(),
+                )
+
+    params = ProjectSyncParameters(directory=effective_dir, dry=parameters.dry_run)
+
+    try:
+        loop = asyncio.get_running_loop()
+        success = await loop.run_in_executor(None, proj_env.sync, params)
+        if success:
+            return SetupActionResult(action=action, success=True, message=f'Synced project via {action.installer}')
+        return SetupActionResult(action=action, success=False, message=f'Project sync failed via {action.installer}')
+    except Exception as e:
+        return SetupActionResult(action=action, success=False, message=str(e))
+
+
+# ---------------------------------------------------------------------------
+# SCM execution
+# ---------------------------------------------------------------------------
+
+
+async def _execute_scm_actions(
+    scm_actions: list[SetupAction],
+    scm_environments: dict[str, ScmEnvironment] | None,
+    working_dir: Path,
+    parameters: SetupParameters,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None,
+) -> list[SetupActionResult]:
+    """Execute SCM_CLONE actions sequentially.
+
+    Each action invokes the resolved SCM-environment plugin's
+    `ScmEnvironment.clone()` method.
+
+    Args:
+        scm_actions: The SCM clone actions.
+        scm_environments: Dict of SCM-environment plugins.
+        working_dir: Working directory (manifest location).
+        parameters: Setup parameters (dry-run, etc.).
+        event_queue: Optional queue for progress events.
+
+    Returns:
+        List of action results.
+    """
+    results: list[SetupActionResult] = []
+
+    for action in scm_actions:
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+
+        result = await _execute_scm_clone(action, scm_environments, working_dir, parameters)
+
+        results.append(result)
+        if event_queue is not None:
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+        if not result.success and not result.skipped and parameters.fail_fast:
+            logger.error(f'SCM clone failed: {action.description} - {result.message}')
+            break
+
+    return results
+
+
+async def _execute_scm_clone(
+    action: SetupAction,
+    scm_environments: dict[str, ScmEnvironment] | None,
+    working_dir: Path,
+    parameters: SetupParameters,
+) -> SetupActionResult:
+    """Execute a single SCM_CLONE action.
+
+    Args:
+        action: The SCM clone action.
+        scm_environments: Dict of SCM-environment plugins.
+        working_dir: Working directory (manifest location).
+        parameters: Setup parameters.
+
+    Returns:
+        The result of the clone operation.
+    """
+    scm_envs = scm_environments or {}
+    if action.installer is None or action.installer not in scm_envs:
+        return SetupActionResult(
+            action=action, success=False, message=f"SCM environment '{action.installer}' is not available"
+        )
+
+    if action.package is None:
+        return SetupActionResult(action=action, success=False, message='No repository URL specified')
+
+    scm_env = scm_envs[action.installer]
+    url = action.package.name
+
+    # Derive destination from the repo URL (last path segment, minus .git)
+    repo_name = url.rstrip('/').rsplit('/', 1)[-1]
+    if repo_name.endswith('.git'):
+        repo_name = repo_name[:-4]
+    destination = working_dir / repo_name
+
+    # Skip if already cloned
+    if scm_env.is_cloned(url, destination):
+        return SetupActionResult(
+            action=action,
+            success=True,
+            skipped=True,
+            skip_reason=SkipReason.ALREADY_INSTALLED,
+            message=f"Repository already cloned at '{destination}'",
+        )
+
+    try:
+        loop = asyncio.get_running_loop()
+        success = await loop.run_in_executor(None, lambda: scm_env.clone(url, destination, dry=parameters.dry_run))
+        if success:
+            return SetupActionResult(action=action, success=True, message=f"Cloned '{url}' via {action.installer}")
+        return SetupActionResult(
+            action=action, success=False, message=f"Clone failed for '{url}' via {action.installer}"
+        )
+    except Exception as e:
+        return SetupActionResult(action=action, success=False, message=str(e))

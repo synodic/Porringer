@@ -10,7 +10,7 @@ from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator
 
 Ecosystem = NewType('Ecosystem', str)
-"""Semantic alias for ecosystem identifiers (e.g. ``"python"``, ``"node"``).
+"""Semantic alias for ecosystem identifiers (e.g. `"python"`, `"node"`).
 
 A thin wrapper around `str` that makes ecosystem values self-documenting
 in type signatures without restricting the open set of valid values.

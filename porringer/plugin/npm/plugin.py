@@ -1,8 +1,5 @@
 """Plugin implementation"""
 
-import json
-import logging
-import subprocess
 from pathlib import Path
 from typing import override
 
@@ -48,7 +45,7 @@ class NpmEnvironment(Environment):
     def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed npm packages.
 
-        Uses ``npm ls -g --json --depth=0`` to list top-level global
+        Uses `npm ls -g --json --depth=0` to list top-level global
         packages and parses the JSON output.  *project_path* is
         accepted for interface compatibility but ignored for now.
 
@@ -58,21 +55,10 @@ class NpmEnvironment(Environment):
         Returns:
             A list of installed packages.
         """
-        logger = logging.getLogger('porringer.npm.packages')
-        try:
-            result = subprocess.run(
-                ['npm', 'ls', '-g', '--json', '--depth=0'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            data = json.loads(result.stdout)
-            deps = data.get('dependencies', {})
-            return [
-                Package(name=name, version=info.get('version')) for name, info in deps.items() if isinstance(info, dict)
-            ]
-        except FileNotFoundError:
-            logger.error('npm not found on PATH')
-        except (json.JSONDecodeError, subprocess.SubprocessError) as e:
-            logger.error('Failed to list npm packages: %s', e)
-        return []
+        data = self._run_json_command(['npm', 'ls', '-g', '--json', '--depth=0'])
+        if data is None or not isinstance(data, dict):
+            return []
+        deps = data.get('dependencies', {})
+        return [
+            Package(name=name, version=info.get('version')) for name, info in deps.items() if isinstance(info, dict)
+        ]

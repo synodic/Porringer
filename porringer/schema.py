@@ -126,9 +126,9 @@ class SetupAction:
     * `PluginKind.SCM` — clone a repository.
     * `None` — run a post-sync shell command.
 
-    When ``inject_into`` is set the action is an *injection*: the
-    ``package`` is injected into the ``inject_into`` parent's isolated
-    environment (e.g. ``pipx inject pdm cppython``).
+    When `inject_into` is set the action is an *injection*: the
+    `package` is injected into the `inject_into` parent's isolated
+    environment (e.g. `pipx inject pdm cppython`).
 
     Args:
         description: Human-readable description of the action.
@@ -273,10 +273,10 @@ class PackageSpec(PlatformScoped):
     Supports both string shorthand (just a package specifier) and object form
     with additional metadata for GUI consumers.
 
-    The optional ``plugins`` list declares sub-packages that should be
+    The optional `plugins` list declares sub-packages that should be
     *injected* into the parent package's isolated environment after it is
-    installed.  For example, a ``pipx``-managed PDM installation can
-    declare ``cppython`` as a plugin so that ``pipx inject pdm cppython``
+    installed.  For example, a `pipx`-managed PDM installation can
+    declare `cppython` as a plugin so that `pipx inject pdm cppython`
     is executed automatically::
 
         {'name': 'pdm', 'plugins': ['cppython']}

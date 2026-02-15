@@ -112,11 +112,11 @@ class Environment(ToolBasedPlugin):
         """Returns whether this plugin supports injecting sub-packages.
 
         Injection inserts additional packages into an already-installed
-        package's isolated environment.  For example, ``pipx inject``
+        package's isolated environment.  For example, `pipx inject`
         injects a library into a tool's venv without creating a new
         isolated environment.
 
-        Override this to return ``True`` in plugins that support
+        Override this to return `True` in plugins that support
         injection (e.g. pipx).
 
         Returns:
@@ -135,7 +135,7 @@ class Environment(ToolBasedPlugin):
             plugin: The sub-package to inject.
 
         Returns:
-            A list of command arguments (e.g., ``['pipx', 'inject', 'pdm', 'cppython']``).
+            A list of command arguments (e.g., `['pipx', 'inject', 'pdm', 'cppython']`).
 
         Raises:
             NotImplementedError: If the plugin does not support injection.
@@ -145,20 +145,20 @@ class Environment(ToolBasedPlugin):
     async def async_inject(self, target: PackageRef, params: PackageParameters) -> Package | None:
         """Asynchronously injects a sub-package into a parent package's environment.
 
-        Uses a native async subprocess via ``inject_command()``.  When
-        ``params.progress_callback`` is set, output is streamed
+        Uses a native async subprocess via `inject_command()`.  When
+        `params.progress_callback` is set, output is streamed
         line-by-line; otherwise output is collected silently.
 
         Subclasses only need to override this when the streaming command
-        differs from ``inject_command()`` or when post-inject logic is
+        differs from `inject_command()` or when post-inject logic is
         required.
 
         Args:
             target: The parent package whose environment receives the injection.
-            params: The package parameters (``params.package`` is the sub-package).
+            params: The package parameters (`params.package` is the sub-package).
 
         Returns:
-            The injected package, or ``None`` if injection failed.
+            The injected package, or `None` if injection failed.
         """
         args = list(self.inject_command(target, params.package))
         if params.progress_callback is not None:
@@ -315,7 +315,7 @@ class Environment(ToolBasedPlugin):
 
         When *project_path* is provided, plugins that manage
         project-scoped virtual environments (pip, uv) should discover
-        the project's venv (e.g. ``<project_path>/.venv``) and list
+        the project's venv (e.g. `<project_path>/.venv`) and list
         packages from that interpreter instead of the global/PATH one.
         Plugins that are inherently global (pipx, apt, brew, winget)
         may ignore this parameter.
@@ -330,12 +330,15 @@ class Environment(ToolBasedPlugin):
         """
         raise NotImplementedError
 
-    @staticmethod
-    def check_updates(params: CheckUpdatesParameters) -> list[Package]:
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:  # noqa: PLR6301
         """Checks for available updates using the plugin's native tooling.
 
         This method is optional. Plugins that don't support update checking
         can use the default implementation which returns an empty list.
+
+        Implementations can access instance state (e.g. `tool_name()`,
+        `runtime_executable`) which was not possible when this was a
+        static method.
 
         Args:
             params: The check parameters including which packages to check.

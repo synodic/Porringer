@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from porringer.api import API
+from porringer.backend.command.action_builder import build_actions
 from porringer.backend.command.sync import SyncCommands
 from porringer.console.entry import app
 from porringer.core.plugin_schema.environment import Environment
@@ -938,7 +939,7 @@ class TestPackageSpecPlugins:
         """Injection actions should have 'Inject' in their description"""
         manifest = SetupManifest(tools={_PY: [{'name': 'pdm', 'plugins': ['cppython']}]})
         environments: dict[str, Environment] = {}
-        actions = SyncCommands._build_actions(manifest, environments)
+        actions = build_actions(manifest, environments)
 
         injection_actions = [a for a in actions if a.inject_into is not None]
         for action in injection_actions:
