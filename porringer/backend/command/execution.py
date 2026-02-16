@@ -67,6 +67,11 @@ class ExecutionState:
     manifest_path: Path | None = None
     metadata: ManifestMetadata | None = None
     results: list[SetupActionResult] = field(default_factory=list)
+    _resolved_runtime: tuple[str, Path] | None = field(default=None, repr=False)
+    """Cached ``(kind, executable)`` pair from the first successful
+    runtime resolution.  Set by :meth:`propagate_runtime` and
+    re-applied automatically after every plugin re-discovery so that
+    newly-created consumer instances inherit the resolved path."""
 
     # -- convenience properties ----------------------------------------
 
@@ -82,9 +87,12 @@ class ExecutionState:
 
         Mutates ``self.environments`` in place and updates
         descriptions / CLI commands on any newly-resolved actions.
+        The cached runtime executable (if any) is automatically
+        re-propagated to newly-created consumer instances.
         """
         refresh_path()
         self.environments = discover_plugins('environment', Environment, check_dependencies=True)
+        self._apply_resolved_runtime()
 
         for phase_actions in self.phases.values():
             if phase_actions:
@@ -107,13 +115,46 @@ class ExecutionState:
         Finds the first ``RuntimeProvider`` among the RUNTIME-phase
         actions, resolves its executable, injects the directory onto
         ``PATH``, and sets ``runtime_executable`` on every matching
-        ``RuntimeConsumer``.
+        ``RuntimeConsumer``.  The result is cached so that subsequent
+        calls to :meth:`phase_transition` or
+        :meth:`refresh_project_environments` can re-apply it to
+        newly-created plugin instances.
         """
-        _propagate_runtime(
+        result = _propagate_runtime(
             self.phases[PluginKind.RUNTIME],
             self.environments,
             self.project_environments,
         )
+        if result is not None:
+            self._resolved_runtime = result
+
+    def refresh_project_environments(self) -> None:
+        """Re-discover project-environment plugins and re-propagate the runtime.
+
+        Replaces ``self.project_environments`` with freshly-discovered
+        instances and re-applies the cached runtime executable so that
+        new ``RuntimeConsumer`` project environments inherit the
+        resolved interpreter path.
+        """
+        self.project_environments = discover_plugins('project_environment', ProjectEnvironment)
+        self._apply_resolved_runtime()
+
+    def _apply_resolved_runtime(self) -> None:
+        """Re-apply the cached runtime executable to all current consumers.
+
+        No-op when no runtime has been resolved yet.
+        """
+        if self._resolved_runtime is None:
+            return
+        kind, executable = self._resolved_runtime
+        proj_envs: dict[str, ProjectEnvironment] = self.project_environments or {}
+        all_plugins: dict[str, Environment | ProjectEnvironment] = {**self.environments, **proj_envs}
+        for name, plugin in all_plugins.items():
+            if isinstance(plugin, RuntimeConsumer):
+                consumer_type = cast(type[RuntimeConsumer], type(plugin))
+                if consumer_type.consumed_runtime_kind() == kind:
+                    plugin.runtime_executable = executable
+                    logger.debug('Re-applied runtime_executable on %s to %s', name, executable)
 
     # -- result helpers ------------------------------------------------
 
@@ -819,7 +860,7 @@ async def execute_single(
     if state.phases[PluginKind.PROJECT]:
         # Re-discover project environments in case tools installed in
         # earlier phases provide new project-environment backends.
-        state.project_environments = discover_plugins('project_environment', ProjectEnvironment)
+        state.refresh_project_environments()
 
         state.results.extend(await handle_project_phase(state.phases[PluginKind.PROJECT], state))
 
@@ -874,7 +915,7 @@ def _propagate_runtime(
     runtime_actions: list[SetupAction],
     environments: dict[str, Environment],
     project_environments: dict[str, ProjectEnvironment] | None = None,
-) -> None:
+) -> tuple[str, Path] | None:
     """Resolve the interpreter path and propagate to downstream consumers.
 
     After runtime-provider actions complete, finds the first
@@ -882,6 +923,10 @@ def _propagate_runtime(
     `runtime_executable` on all `RuntimeConsumer` plugins
     whose `consumed_runtime_kind` matches the provider's
     `provided_runtime_kind`.
+
+    Returns:
+        A ``(kind, executable)`` tuple on success, or ``None`` if no
+        runtime could be resolved.
     """
     proj_envs = project_environments or {}
 
@@ -918,7 +963,9 @@ def _propagate_runtime(
                     logger.debug('Set runtime_executable on %s to %s', name, executable)
 
         # Use only the first successfully resolved runtime
-        break
+        return (kind, executable)
+
+    return None
 
 
 def _resolve_deferred_actions(
