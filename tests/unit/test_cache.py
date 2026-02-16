@@ -138,7 +138,7 @@ class TestDirectoryCacheValidation:
 
     @staticmethod
     def test_validate_directories(cache_manager, temp_cache_dir) -> None:
-        """Test validation of directories"""
+        """Test validation returns all directories with correct status"""
         tmp_path, _ = temp_cache_dir
         existing_dir = tmp_path / 'existing'
         existing_dir.mkdir()
@@ -153,12 +153,16 @@ class TestDirectoryCacheValidation:
         # Delete it
         to_delete.rmdir()
 
-        # Validate
-        invalid = cache_manager.validate_directories()
+        # Validate — returns ALL directories, not just invalid ones
+        results = cache_manager.validate_directories()
 
-        assert len(invalid) == 1
-        assert invalid[0][0].path == to_delete.resolve()
-        assert 'does not exist' in invalid[0][1]
+        assert len(results) == 2
+        existing_result = next(r for r in results if r.directory.path == existing_dir.resolve())
+        deleted_result = next(r for r in results if r.directory.path == to_delete.resolve())
+
+        assert existing_result.exists is True
+        assert deleted_result.exists is False
+        assert deleted_result.has_manifest is None
 
     @staticmethod
     def test_update_directory(cache_manager, temp_cache_dir) -> None:

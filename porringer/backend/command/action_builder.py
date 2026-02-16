@@ -288,16 +288,21 @@ def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) ->
     """
     logger.info(f'Parsing manifest from: {path}')
 
-    manifest_path, manifest = find_manifest(path)
+    result = find_manifest(path)
     environments = discover_plugins('environment', Environment, check_dependencies=True)
     project_environments = discover_plugins('project_environment', ProjectEnvironment)
     scm_environments = discover_plugins('scm', ScmEnvironment)
-    actions = build_actions(manifest, environments, strategy, project_environments, scm_environments)
+    actions = build_actions(result.manifest, environments, strategy, project_environments, scm_environments)
     metadata = ManifestMetadata(
-        name=manifest.name,
-        description=manifest.description,
-        author=manifest.author,
-        url=str(manifest.url) if manifest.url else None,
+        name=result.manifest.name,
+        description=result.manifest.description,
+        author=result.manifest.author,
+        url=str(result.manifest.url) if result.manifest.url else None,
     )
 
-    return SetupResults(actions=actions, manifest_path=manifest_path, metadata=metadata)
+    return SetupResults(
+        actions=actions,
+        manifest_path=result.manifest_path,
+        root_directory=result.root_directory,
+        metadata=metadata,
+    )

@@ -448,9 +448,13 @@ def _execute_with_progress(
 
     for preview, action_ids in zip(state.manifests, manifest_action_sets, strict=False):
         mr_results = [r for r in state.collected_results if id(r.action) in action_ids]
-        sr = SetupResults(actions=preview.actions, results=mr_results)
-        sr.manifest_path = preview.manifest_path
-        sr.metadata = preview.metadata
+        sr = SetupResults(
+            actions=preview.actions,
+            results=mr_results,
+            manifest_path=preview.manifest_path,
+            root_directory=preview.root_directory,
+            metadata=preview.metadata,
+        )
         manifest_results.append(sr)
 
     return BatchSetupResults(manifest_results=manifest_results, failed_paths=state.failed_paths)

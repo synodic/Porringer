@@ -20,9 +20,10 @@ from pathlib import Path
 
 from pydantic import Field
 
+from porringer.core.plugin_schema.manifest import ManifestContributor
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
-from porringer.core.schema import Ecosystem, PluginKind, PluginParameters, PorringerModel
+from porringer.core.schema import Ecosystem, ManifestContribution, PluginKind, PluginParameters, PorringerModel
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,15 @@ ECOSYSTEM_MARKERS: dict[Ecosystem, str] = {
     Ecosystem('deno'): 'deno.json',
 }
 
+# Default mapping from ecosystem name to the manifest contribution.
+ECOSYSTEM_CONTRIBUTIONS: dict[Ecosystem, ManifestContribution] = {
+    Ecosystem('python'): ManifestContribution(
+        filename='pyproject.toml', config_path=('tool', 'porringer'), file_format='toml'
+    ),
+    Ecosystem('node'): ManifestContribution(filename='package.json', config_path=('porringer',), file_format='json'),
+    Ecosystem('deno'): ManifestContribution(filename='deno.json', config_path=('porringer',), file_format='json'),
+}
+
 
 class ProjectSyncParameters(PorringerModel):
     """Parameters for a project-level sync operation."""
@@ -41,7 +51,7 @@ class ProjectSyncParameters(PorringerModel):
     dry: bool = Field(default=False, description='If True, preview the sync without modifying the environment')
 
 
-class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
+class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     """Plugin definition for project-scoped dependency managers.
 
     Unlike `Environment`,
@@ -119,6 +129,20 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer):
         Examples: `"python"`, `"node"`, `"deno"`.
         """
         ...
+
+    @classmethod
+    def manifest_contribution(cls) -> ManifestContribution | None:
+        """Return the manifest contribution for this ecosystem.
+
+        The default implementation looks up ``ecosystem()`` in
+        ``ECOSYSTEM_CONTRIBUTIONS``.  Override this method for
+        plugins that use a non-standard hosted config layout.
+
+        Returns:
+            A ``ManifestContribution`` describing the hosted config, or
+            ``None`` if this ecosystem does not embed porringer config.
+        """
+        return ECOSYSTEM_CONTRIBUTIONS.get(cls.ecosystem())
 
     @classmethod
     def project_marker(cls) -> str | None:
