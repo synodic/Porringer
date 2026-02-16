@@ -15,7 +15,7 @@ from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
-from porringer.core.schema import PluginKind
+from porringer.core.schema import PackageRef, PluginKind
 from porringer.schema import (
     ManifestMetadata,
     SetupAction,
@@ -47,6 +47,46 @@ STRATEGY_VERB: dict[SyncStrategy, str] = {
     SyncStrategy.LATEST: 'Upgrade',
     SyncStrategy.EXACT: 'Ensure',
 }
+
+
+def action_description(
+    kind: PluginKind,
+    verb: str,
+    installer: str | None,
+    package: PackageRef | None = None,
+    inject_into: PackageRef | None = None,
+) -> str:
+    """Build a human-readable action description.
+
+    Centralises the ``via <installer>`` / ``(deferred)`` pattern used
+    in both `build_actions` (preview time) and `_resolve_deferred_actions`
+    (execution time).
+
+    Args:
+        kind: The plugin kind.
+        verb: Action verb (e.g. ``"Install"``, ``"Upgrade"``).
+        installer: Resolved installer name, or ``None`` for deferred.
+        package: The target package (may be ``None`` for PROJECT).
+        inject_into: Parent package for injection actions.
+
+    Returns:
+        Formatted description string.
+    """
+    suffix = f'via {installer}' if installer else '(deferred)'
+
+    if kind == PluginKind.PROJECT:
+        return f'Sync project {suffix}'
+
+    if kind == PluginKind.SCM:
+        return f"Clone '{package}' {suffix}" if package else f'Clone {suffix}'
+
+    if inject_into is not None and package is not None:
+        return f"Inject '{package}' into '{inject_into}' {suffix}"
+
+    if package is not None:
+        return f"{verb} '{package}' {suffix}"
+
+    return f'{verb} {suffix}'
 
 
 def get_cli_command(
@@ -132,24 +172,25 @@ def build_actions(
     for kind, ecosystem, packages in manifest.iter_sections():
         installer = resolver.resolve(kind, ecosystem)
 
-        # TOOL and RUNTIME actions are deferred when no backend is
+        # Actions of any kind are deferred when no backend is
         # available at preview time — the prerequisite may be installed
-        # in an earlier phase (e.g. pipx installed via pip, or pyenv
-        # installed via brew).  Other kinds still generate actions with
-        # installer=None so the preview always reflects the full manifest.
-        if installer is None and kind not in {PluginKind.TOOL, PluginKind.RUNTIME}:
-            logger.warning(
-                "No installer available for (%s, '%s'); skipping its entries",
+        # in an earlier phase (e.g. pip becomes available after pim
+        # installs a Python runtime, pipx becomes available after pip
+        # installs it, pyenv is installed via brew, etc.).  The
+        # execution engine re-discovers plugins and resolves deferred
+        # actions at each phase boundary.
+        if installer is None:
+            logger.info(
+                "No installer available yet for (%s, '%s'); deferring its entries",
                 kind.value,
                 ecosystem,
             )
-            continue
 
         # Project kind produces a single sync action
         if kind == PluginKind.PROJECT:
             actions.append(
                 SetupAction(
-                    description=f'Sync project via {installer}',
+                    description=action_description(kind, verb, installer),
                     kind=kind,
                     ecosystem=ecosystem,
                     installer=installer,
@@ -164,7 +205,7 @@ def build_actions(
                     continue
                 actions.append(
                     SetupAction(
-                        description=f"Clone '{package.name}' via {installer}",
+                        description=action_description(kind, verb, installer, package=package.name),
                         kind=kind,
                         ecosystem=ecosystem,
                         installer=installer,
@@ -177,10 +218,9 @@ def build_actions(
         for package in packages:
             if not package.is_applicable():
                 continue
-            desc = f"{verb} '{package.name}' via {installer}" if installer else f"{verb} '{package.name}' (deferred)"
             actions.append(
                 SetupAction(
-                    description=desc,
+                    description=action_description(kind, verb, installer, package=package.name),
                     kind=kind,
                     ecosystem=ecosystem,
                     installer=installer,
@@ -191,14 +231,15 @@ def build_actions(
 
             # Emit injection actions for declared plugins
             for plugin_ref in package.plugins:
-                inject_desc = (
-                    f"Inject '{plugin_ref}' into '{package.name}' via {installer}"
-                    if installer
-                    else f"Inject '{plugin_ref}' into '{package.name}' (deferred)"
-                )
                 actions.append(
                     SetupAction(
-                        description=inject_desc,
+                        description=action_description(
+                            kind,
+                            verb,
+                            installer,
+                            package=plugin_ref,
+                            inject_into=package.name,
+                        ),
                         kind=kind,
                         ecosystem=ecosystem,
                         installer=installer,
