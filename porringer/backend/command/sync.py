@@ -37,6 +37,8 @@ from porringer.utility.exception import ManifestError
 
 from .action_builder import parse_manifest
 from .execution import execute_single
+from .manifest import has_manifest as _has_manifest
+from .manifest import manifest_filenames as _manifest_filenames
 from .manifest import manifest_schema, validate_manifest
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,37 @@ class SyncCommands:
         Delegates to `manifest.manifest_schema`.
         """
         return manifest_schema()
+
+    @staticmethod
+    def manifest_filenames() -> tuple[str, ...]:
+        """Return all recognised manifest filenames, native first.
+
+        The first element is always ``'porringer.json'``.  Subsequent
+        entries are contributed dynamically by installed project plugins
+        via the ``ManifestContributor`` protocol.
+
+        GUI clients use this to build file-dialog filters without
+        hardcoding filenames.
+
+        Returns:
+            Ordered tuple of filenames the discovery engine will probe.
+        """
+        return _manifest_filenames()
+
+    @staticmethod
+    def has_manifest(path: Path) -> bool:
+        """Check whether a path resolves to a valid porringer manifest.
+
+        A lightweight existence + parsability check without deep
+        validation (no plugin resolution, no PEP 440 checks).
+
+        Args:
+            path: Path to a manifest file or directory containing one.
+
+        Returns:
+            ``True`` if a manifest can be found and loaded.
+        """
+        return _has_manifest(path)
 
     @staticmethod
     def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
@@ -188,12 +221,8 @@ class SyncCommands:
                         )
                     )
 
-                    if preview.manifest_path is None:
-                        continue
-
                     await execute_single(
-                        preview.actions,
-                        preview.manifest_path,
+                        preview,
                         parameters,
                         event_queue=queue,
                     )
@@ -255,11 +284,10 @@ class SyncCommands:
 
             async def _execute_all() -> None:
                 for preview in previews:
-                    if preview.manifest_path is None:
-                        continue
-                    sr = await execute_single(preview.actions, preview.manifest_path, parameters)
-                    sr.manifest_path = preview.manifest_path
-                    sr.metadata = preview.metadata
+                    sr = await execute_single(
+                        preview,
+                        parameters,
+                    )
                     manifest_results.append(sr)
 
             asyncio.run(_execute_all())

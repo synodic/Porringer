@@ -106,15 +106,17 @@ def cache_list(
     table.add_column('Name', style='white')
     if validate:
         table.add_column('Status', style='white')
+        table.add_column('Manifest', style='white')
 
-    for directory in directories:
-        name = directory.name or ''
-
-        if validate:
-            exists = directory.path.exists()
-            status = '[green]OK[/green]' if exists else '[red]Missing[/red]'
-            table.add_row(str(directory.path), name, status)
-        else:
+        validations = api.cache.validate_directories(check_manifest=True)
+        for v in validations:
+            name = v.directory.name or ''
+            status = '[green]OK[/green]' if v.exists else '[red]Missing[/red]'
+            manifest = '[green]Found[/green]' if v.has_manifest else '[red]Missing[/red]' if v.exists else '-'
+            table.add_row(str(v.directory.path), name, status, manifest)
+    else:
+        for directory in directories:
+            name = directory.name or ''
             table.add_row(str(directory.path), name)
 
     configuration.console.print(table)

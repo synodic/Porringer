@@ -1,8 +1,18 @@
 """Manifest loading, parsing, and validation.
 
-Handles finding, loading, and validating `porringer.json` and
-`pyproject.toml` manifests.  Extracted from the monolithic
-`sync` module for clarity.
+Handles finding, loading, and validating porringer manifests.
+Supports three modes:
+
+1. **Native** — a standalone ``porringer.json`` file.
+2. **Inline embed** — a ``[tool.porringer]`` (or equivalent) section
+   inside a host config file (``pyproject.toml``, ``package.json``,
+   ``deno.json``), contributed by project plugins via the
+   ``ManifestContributor`` protocol.
+3. **Reference** — a host config section containing only a
+   ``manifest = "relative/path.json"`` key that redirects to an
+   external manifest file.
+
+Extracted from the monolithic ``sync`` module for clarity.
 """
 
 from __future__ import annotations
@@ -11,19 +21,23 @@ import json
 import logging
 import tomllib
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 from porringer.backend.backend import BackendResolver
+from porringer.backend.builder import Builder
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.manifest import ManifestContributor
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
-from porringer.core.schema import Plugin, PluginKind
+from porringer.core.schema import ManifestContribution, Plugin, PluginKind
 from porringer.schema import (
     ManifestDiagnostic,
     ManifestDiagnosticSeverity,
+    ManifestResult,
     ManifestValidationCode,
     ManifestValidationResult,
     SetupManifest,
@@ -34,6 +48,10 @@ from .discovery import discover_plugins
 
 logger = logging.getLogger(__name__)
 
+# The native manifest filename — always probed first before any
+# plugin-contributed files.
+NATIVE_MANIFEST = 'porringer.json'
+
 # Maps ManifestErrorCode → ManifestValidationCode for structured classification.
 _MANIFEST_ERROR_CODE_MAP: dict[ManifestErrorCode, ManifestValidationCode] = {
     ManifestErrorCode.NO_MANIFEST: ManifestValidationCode.NO_MANIFEST,
@@ -43,99 +61,322 @@ _MANIFEST_ERROR_CODE_MAP: dict[ManifestErrorCode, ManifestValidationCode] = {
 }
 
 
-def find_manifest(path: Path) -> tuple[Path, SetupManifest]:
-    """Finds and loads the setup manifest from the given path.
-
-    Args:
-        path: Path to a manifest file or directory containing one.
-
-    Returns:
-        Tuple of (manifest_path, parsed_manifest).
-
-    Raises:
-        ManifestError: If no valid manifest is found.
-    """
-    if path.is_file():
-        return _load_manifest_file(path)
-
-    if path.is_dir():
-        # Try porringer.json first, then pyproject.toml
-        porringer_file = path / 'porringer.json'
-        if porringer_file.exists():
-            return _load_manifest_file(porringer_file)
-
-        pyproject_file = path / 'pyproject.toml'
-        if pyproject_file.exists():
-            return _load_pyproject_manifest(pyproject_file)
-
-        raise ManifestError(
-            f"No manifest found in directory: {path}. Expected 'porringer.json' or 'pyproject.toml'",
-            code=ManifestErrorCode.NO_MANIFEST,
-        )
-
-    raise ManifestError(f'Path does not exist: {path}', code=ManifestErrorCode.NO_MANIFEST)
+# ---------------------------------------------------------------------------
+# Plugin-contributed manifest sources
+# ---------------------------------------------------------------------------
 
 
-def _load_manifest_file(path: Path) -> tuple[Path, SetupManifest]:
-    """Loads a manifest from a porringer.json JSON file or pyproject.toml.
+@lru_cache(maxsize=1)
+def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
+    """Discover manifest contributions from all installed project plugins.
 
-    Args:
-        path: Path to the manifest file.
+    Scans ``porringer.project_environment`` entry points, calls
+    ``manifest_contribution()`` on each class that implements
+    ``ManifestContributor``, and returns a deduplicated tuple of
+    contributions ordered by first occurrence.
+
+    The result is cached for the lifetime of the process.
 
     Returns:
-        Tuple of (path, parsed_manifest).
+        Unique ``ManifestContribution`` instances contributed by plugins.
+    """
+    seen_filenames: set[str] = set()
+    contributions: list[ManifestContribution] = []
+
+    infos = Builder.find_plugins('project_environment', ProjectEnvironment)
+    for info in infos:
+        cls = info.type
+        if isinstance(cls, type) and issubclass(cls, ManifestContributor):
+            contrib = cls.manifest_contribution()
+            if contrib is not None and contrib.filename not in seen_filenames:
+                seen_filenames.add(contrib.filename)
+                contributions.append(contrib)
+
+    return tuple(contributions)
+
+
+def manifest_filenames() -> tuple[str, ...]:
+    """Return all recognised manifest filenames, native first.
+
+    The first element is always ``'porringer.json'``.  Subsequent
+    entries are contributed by installed project plugins.
+
+    Returns:
+        Ordered tuple of filenames the discovery engine will probe.
+    """
+    return (NATIVE_MANIFEST,) + tuple(c.filename for c in collect_manifest_contributions())
+
+
+# ---------------------------------------------------------------------------
+# File loaders
+# ---------------------------------------------------------------------------
+
+
+def _load_native_manifest(path: Path) -> SetupManifest:
+    """Load a native ``porringer.json`` file.
+
+    Args:
+        path: Path to the JSON manifest file.
+
+    Returns:
+        The parsed manifest.
 
     Raises:
-        ManifestError: If the file cannot be parsed.
+        ManifestError: On JSON syntax errors or schema violations.
     """
-    if path.suffix == '.toml' or path.name == 'pyproject.toml':
-        return _load_pyproject_manifest(path)
-
-    # Assume JSON for porringer.json or other files
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
-        return path, SetupManifest.model_validate(data)
+        return SetupManifest.model_validate(data)
     except json.JSONDecodeError as e:
         raise ManifestError(f'Invalid JSON in manifest {path}: {e}', code=ManifestErrorCode.SYNTAX_ERROR) from e
     except Exception as e:
         raise ManifestError(f'Failed to load manifest {path}: {e}', code=ManifestErrorCode.LOAD_FAILED) from e
 
 
-def _load_pyproject_manifest(path: Path) -> tuple[Path, SetupManifest]:
-    """Loads a manifest from pyproject.toml [tool.porringer] section.
+def _read_file(path: Path, file_format: str) -> dict:
+    """Read and parse a file as TOML or JSON.
 
     Args:
-        path: Path to pyproject.toml.
+        path: Path to the file.
+        file_format: ``'toml'`` or ``'json'``.
 
     Returns:
-        Tuple of (path, parsed_manifest).
+        Parsed data as a dict.
 
     Raises:
-        ManifestError: If the file cannot be parsed or section is missing.
+        ManifestError: On parse errors.
     """
     try:
-        with open(path, 'rb') as f:
-            data = tomllib.load(f)
+        if file_format == 'toml':
+            with open(path, 'rb') as f:
+                return tomllib.load(f)
+        else:
+            with open(path, encoding='utf-8') as f:
+                return json.load(f)
+    except (json.JSONDecodeError, tomllib.TOMLDecodeError) as e:
+        raise ManifestError(f'Invalid {file_format.upper()} in {path}: {e}', code=ManifestErrorCode.SYNTAX_ERROR) from e
+    except Exception as e:
+        raise ManifestError(f'Failed to read {path}: {e}', code=ManifestErrorCode.LOAD_FAILED) from e
 
-        tool_section = data.get('tool', {})
-        porringer_section = tool_section.get('porringer')
 
-        if porringer_section is None:
+def _extract_section(data: dict, config_path: tuple[str, ...], source_path: Path) -> dict:
+    """Navigate a nested dict by key path to extract the porringer section.
+
+    Args:
+        data: Parsed file data.
+        config_path: Key path (e.g. ``('tool', 'porringer')``).
+        source_path: Original file path (for error messages).
+
+    Returns:
+        The extracted section dict.
+
+    Raises:
+        ManifestError: If the key path does not exist.
+    """
+    current = data
+    for key in config_path:
+        if not isinstance(current, dict) or key not in current:
+            dotted = '.'.join(config_path)
             raise ManifestError(
-                f'No [tool.porringer] section found in {path}',
+                f'No [{dotted}] section found in {source_path}',
                 code=ManifestErrorCode.NO_MANIFEST,
             )
+        current = current[key]
 
-        return path, SetupManifest.model_validate(porringer_section)
-    except tomllib.TOMLDecodeError as e:
-        raise ManifestError(f'Invalid TOML in {path}: {e}', code=ManifestErrorCode.SYNTAX_ERROR) from e
-    except ManifestError:
-        raise
+    if not isinstance(current, dict):
+        dotted = '.'.join(config_path)
+        raise ManifestError(
+            f'[{dotted}] in {source_path} is not a table/object',
+            code=ManifestErrorCode.SCHEMA_INVALID,
+        )
+
+    return current
+
+
+def _load_embedded_manifest(
+    path: Path,
+    contribution: ManifestContribution,
+) -> ManifestResult:
+    """Load a porringer manifest from a host config file.
+
+    Supports two modes:
+
+    * **Inline** — the extracted section is a full manifest and is
+      validated directly as ``SetupManifest``.
+    * **Reference** — the section contains a ``manifest`` key whose
+      string value is a relative path to an external manifest file.
+      The referenced file is loaded as native JSON.
+
+    In both cases the ``root_directory`` is the host file's parent.
+
+    Args:
+        path: Path to the host config file (e.g. ``pyproject.toml``).
+        contribution: The ``ManifestContribution`` describing where
+            to find the porringer section.
+
+    Returns:
+        A ``ManifestResult`` with the parsed manifest and root.
+
+    Raises:
+        ManifestError: On any loading or validation error.
+    """
+    data = _read_file(path, contribution.file_format)
+    section = _extract_section(data, contribution.config_path, path)
+    root_directory = path.parent
+
+    # Reference mode: section has a sole "manifest" key pointing elsewhere
+    if 'manifest' in section and isinstance(section['manifest'], str):
+        ref_path = root_directory / section['manifest']
+        if not ref_path.exists():
+            raise ManifestError(
+                f'Referenced manifest does not exist: {ref_path} (from {path})',
+                code=ManifestErrorCode.NO_MANIFEST,
+            )
+        manifest = _load_native_manifest(ref_path)
+        return ManifestResult(
+            manifest_path=ref_path.resolve(),
+            root_directory=root_directory.resolve(),
+            manifest=manifest,
+        )
+
+    # Inline mode: the section *is* the manifest
+    try:
+        manifest = SetupManifest.model_validate(section)
     except Exception as e:
         raise ManifestError(
-            f'Failed to load pyproject.toml manifest {path}: {e}', code=ManifestErrorCode.LOAD_FAILED
+            f'Invalid manifest in {path}: {e}',
+            code=ManifestErrorCode.SCHEMA_INVALID,
         ) from e
+
+    return ManifestResult(
+        manifest_path=path.resolve(),
+        root_directory=root_directory.resolve(),
+        manifest=manifest,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public discovery API
+# ---------------------------------------------------------------------------
+
+
+def find_manifest(path: Path) -> ManifestResult:
+    """Find and load the porringer manifest from the given path.
+
+    Discovery order:
+
+    1. If *path* is a **file**:
+
+       * If the filename is ``porringer.json`` → load as native JSON.
+       * Otherwise, match against plugin-contributed filenames and use
+         the corresponding ``ManifestContribution`` to extract the section.
+       * Fall back to native JSON loading for unrecognised filenames.
+
+    2. If *path* is a **directory**:
+
+       * Try ``porringer.json`` first (native format, always).
+       * Then try each plugin-contributed filename in order.
+       * Raise ``ManifestError`` if nothing is found.
+
+    Args:
+        path: Path to a manifest file or directory containing one.
+
+    Returns:
+        A ``ManifestResult`` carrying the parsed manifest, the actual
+        manifest file path, and the logical project root directory.
+
+    Raises:
+        ManifestError: If no valid manifest can be found.
+    """
+    if path.is_file():
+        return _find_manifest_from_file(path)
+
+    if path.is_dir():
+        return _find_manifest_from_directory(path)
+
+    raise ManifestError(f'Path does not exist: {path}', code=ManifestErrorCode.NO_MANIFEST)
+
+
+def _find_manifest_from_file(path: Path) -> ManifestResult:
+    """Load a manifest from an explicit file path."""
+    # Native porringer.json
+    if path.name == NATIVE_MANIFEST:
+        manifest = _load_native_manifest(path)
+        resolved = path.resolve()
+        return ManifestResult(
+            manifest_path=resolved,
+            root_directory=resolved.parent,
+            manifest=manifest,
+        )
+
+    # Check plugin-contributed filenames
+    for contrib in collect_manifest_contributions():
+        if path.name == contrib.filename:
+            return _load_embedded_manifest(path, contrib)
+
+    # Unknown file — attempt native JSON as a fallback
+    manifest = _load_native_manifest(path)
+    resolved = path.resolve()
+    return ManifestResult(
+        manifest_path=resolved,
+        root_directory=resolved.parent,
+        manifest=manifest,
+    )
+
+
+def _find_manifest_from_directory(path: Path) -> ManifestResult:
+    """Probe a directory for a manifest, trying native first then contributed."""
+    # 1. Native porringer.json
+    native = path / NATIVE_MANIFEST
+    if native.exists():
+        manifest = _load_native_manifest(native)
+        resolved = native.resolve()
+        return ManifestResult(
+            manifest_path=resolved,
+            root_directory=resolved.parent,
+            manifest=manifest,
+        )
+
+    # 2. Plugin-contributed files
+    contributions = collect_manifest_contributions()
+    for contrib in contributions:
+        candidate = path / contrib.filename
+        if candidate.exists():
+            try:
+                return _load_embedded_manifest(candidate, contrib)
+            except ManifestError as exc:
+                # File exists but has no porringer section — skip to next.
+                # Re-raise syntax / load errors so the caller sees them.
+                if exc.code != ManifestErrorCode.NO_MANIFEST:
+                    raise
+                continue
+
+    # Nothing found
+    tried = ', '.join(f"'{f}'" for f in manifest_filenames())
+    raise ManifestError(
+        f'No manifest found in directory: {path}. Tried: {tried}',
+        code=ManifestErrorCode.NO_MANIFEST,
+    )
+
+
+def has_manifest(path: Path) -> bool:
+    """Check whether a path resolves to a valid porringer manifest.
+
+    A lightweight existence + parsability check without deep validation
+    (no plugin resolution, no PEP 440 checks).
+
+    Args:
+        path: Path to a manifest file or directory containing one.
+
+    Returns:
+        ``True`` if a manifest can be found and loaded, ``False`` otherwise.
+    """
+    try:
+        find_manifest(path)
+    except ManifestError:
+        return False
+    return True
 
 
 def validate_manifest(path: Path) -> ManifestValidationResult:
@@ -188,13 +429,13 @@ def _load_manifest_for_validation(
         return None
 
     try:
-        _, manifest = find_manifest(path)
+        result = find_manifest(path)
     except ManifestError as exc:
         code = _map_manifest_error_code(exc)
         error_callback('', str(exc), code)
         return None
 
-    return manifest
+    return result.manifest
 
 
 def _map_manifest_error_code(error: ManifestError) -> ManifestValidationCode:

@@ -6,7 +6,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from porringer.schema import DirectoryCache, ManifestDirectory
+from porringer.backend.command.manifest import has_manifest
+from porringer.schema import DirectoryCache, DirectoryValidationResult, ManifestDirectory
 
 logger = logging.getLogger(__name__)
 
@@ -202,17 +203,30 @@ class DirectoryCacheManager:
 
     # --- Validation ---
 
-    def validate_directories(self) -> list[tuple[ManifestDirectory, str]]:
-        """Validate all directory entries exist.
+    def validate_directories(self, check_manifest: bool = False) -> list[DirectoryValidationResult]:
+        """Validate all directory entries.
+
+        Returns a result for **every** registered directory, not just
+        invalid ones.
+
+        Args:
+            check_manifest: When ``True`` and the path exists, also
+                check whether a valid manifest can be found at the path
+                using ``has_manifest()``.
 
         Returns:
-            List of (directory, error_message) for invalid entries.
+            List of ``DirectoryValidationResult`` for each registered entry.
         """
-        invalid: list[tuple[ManifestDirectory, str]] = []
+        results: list[DirectoryValidationResult] = []
         for directory in self.list_directories():
-            if not directory.path.exists():
-                invalid.append((directory, f'Path does not exist: {directory.path}'))
-        return invalid
+            exists = directory.path.exists()
+            manifest_present: bool | None = None
+            if exists and check_manifest:
+                manifest_present = has_manifest(directory.path)
+            elif not exists:
+                manifest_present = None
+            results.append(DirectoryValidationResult(directory=directory, exists=exists, has_manifest=manifest_present))
+        return results
 
     def clear(self) -> None:
         """Clear all directories from the cache."""

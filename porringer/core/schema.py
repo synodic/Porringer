@@ -194,6 +194,29 @@ class PackageRef(PorringerModel):
         return self.specifier
 
 
+class ManifestContribution(PorringerModel):
+    """Declares that a plugin can host porringer configuration inside one of its own files.
+
+    For example, a Python project plugin contributes
+    ``ManifestContribution('pyproject.toml', ('tool', 'porringer'), 'toml')``
+    to indicate that ``pyproject.toml`` may contain a ``[tool.porringer]``
+    section with either inline manifest data or a ``manifest = "path"``
+    reference to an external ``porringer.json`` file.
+
+    Attributes:
+        filename: The filename to look for (e.g. ``'pyproject.toml'``).
+        config_path: Key path within the parsed file where porringer
+            configuration lives (e.g. ``('tool', 'porringer')``).
+        file_format: Parser to use — ``'toml'`` or ``'json'``.
+    """
+
+    model_config = {'frozen': True}
+
+    filename: str = Field(description='Filename to probe (e.g. "pyproject.toml")')
+    config_path: tuple[str, ...] = Field(description='Key path to the porringer section within the file')
+    file_format: str = Field(description='File format: "toml" or "json"')
+
+
 class PluginDependency(PorringerModel, PlatformScoped):
     """Defines a dependency on another plugin"""
 

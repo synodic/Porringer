@@ -1,5 +1,7 @@
 """Schema"""
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
@@ -20,8 +22,8 @@ from porringer.core.schema import Ecosystem, PackageRef, PlatformScoped, PluginK
 class ManifestDirectory(BaseModel):
     """A directory or file path referencing a manifest.
 
-    The path may point to a directory containing a manifest file
-    (`porringer.json` or `pyproject.toml`), or directly to a
+    The path may point to a directory containing any recognised
+    manifest file (see ``manifest_filenames()``), or directly to a
     manifest file.  When the path is a file, the sync engine uses
     the file's parent directory as the starting point for
     project-root discovery.
@@ -36,6 +38,49 @@ class DirectoryCache(BaseModel):
 
     version: str = Field(default='1', description='Cache schema version')
     directories: list[ManifestDirectory] = Field(default_factory=list, description='Registered directories')
+
+
+@dataclass
+class ManifestResult:
+    """Result of locating and loading a manifest.
+
+    Separates the physical manifest file from the logical project root.
+    For a native ``porringer.json`` the root is the file's parent.
+    For a reference from ``pyproject.toml`` (via ``manifest = "path"``) the
+    root is the referencing file's parent while ``manifest_path`` points to
+    the resolved target.
+
+    Args:
+        manifest_path: Absolute path to the file that was actually parsed
+            as a ``SetupManifest``.
+        root_directory: Logical project root — the directory that downstream
+            phases use as the working directory.
+        manifest: The parsed manifest data.
+    """
+
+    manifest_path: Path
+    root_directory: Path
+    manifest: SetupManifest
+
+
+@dataclass
+class DirectoryValidationResult:
+    """Result of validating a single cached directory entry.
+
+    Returned by ``DirectoryCacheManager.validate_directories()`` for
+    **every** registered directory, not just invalid ones.
+
+    Args:
+        directory: The cached directory entry.
+        exists: Whether the path exists on disk.
+        has_manifest: Whether a valid manifest was found at the path.
+            ``None`` when ``exists`` is ``False`` or when manifest
+            checking was not requested.
+    """
+
+    directory: ManifestDirectory
+    exists: bool
+    has_manifest: bool | None = None
 
 
 # --- Setup Schemas ---
@@ -432,12 +477,14 @@ class SetupResults:
     Args:
         actions: The list of actions (for preview) or action results (for execute).
         manifest_path: The path to the manifest that was used.
+        root_directory: The logical project root directory.
         metadata: Optional display metadata from the manifest.
     """
 
     actions: list[SetupAction] = field(default_factory=list)
     results: list[SetupActionResult] = field(default_factory=list)
     manifest_path: Path | None = None
+    root_directory: Path | None = None
     metadata: ManifestMetadata | None = None
 
 

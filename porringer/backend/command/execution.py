@@ -24,6 +24,7 @@ from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvide
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Package, PluginKind
 from porringer.schema import (
+    ManifestMetadata,
     ProgressEvent,
     ProgressEventKind,
     SetupAction,
@@ -63,6 +64,8 @@ class ExecutionState:
     manifest_directory: Path
     fallback_dir: Path
     skip_project: bool
+    manifest_path: Path | None = None
+    metadata: ManifestMetadata | None = None
     results: list[SetupActionResult] = field(default_factory=list)
 
     # -- convenience properties ----------------------------------------
@@ -116,7 +119,13 @@ class ExecutionState:
 
     def early_return(self) -> SetupResults:
         """Create a ``SetupResults`` from the results accumulated so far."""
-        return SetupResults(actions=self.actions, results=self.results)
+        return SetupResults(
+            actions=self.actions,
+            results=self.results,
+            manifest_path=self.manifest_path,
+            root_directory=self.manifest_directory,
+            metadata=self.metadata,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +648,7 @@ async def execute_command_actions(
     return results
 
 
-def determine_fallback_dir(parameters: SetupParameters, path: Path) -> Path:
+def determine_fallback_dir(parameters: SetupParameters, root_directory: Path) -> Path:
     """Determine the fallback working directory for SCM and post-sync commands.
 
     Project-sync actions use per-plugin auto-discovery instead of
@@ -648,14 +657,14 @@ def determine_fallback_dir(parameters: SetupParameters, path: Path) -> Path:
 
     Args:
         parameters: Setup parameters that may specify a project directory.
-        path: The path being processed.
+        root_directory: The logical root directory for this manifest.
 
     Returns:
         The working directory to use.
     """
     if isinstance(parameters.project_directory, Path):
         return parameters.project_directory
-    return path if path.is_dir() else path.parent
+    return root_directory
 
 
 async def handle_project_phase(
@@ -693,8 +702,7 @@ async def handle_project_phase(
 
 
 async def execute_single(
-    actions: list[SetupAction],
-    path: Path,
+    preview: SetupResults,
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
 ) -> SetupResults:
@@ -708,28 +716,31 @@ async def execute_single(
        (pip, uv).  This may install tool prerequisites such as pipx.
     3. **Tool** — install isolated CLI tools (pipx).  Plugins are
        re-discovered after Phase 2 so that newly-installed backends
-       are available.  Deferred actions whose `installer` was
-       `None` at preview time are resolved here.
-    4. **Project sync** — run `pdm install` / `uv sync` in the
+       are available.  Deferred actions whose ``installer`` was
+       ``None`` at preview time are resolved here.
+    4. **Project sync** — run ``pdm install`` / ``uv sync`` in the
        manifest directory.
     5. **SCM clone** — clone source-control repositories.
     6. **Post-sync commands** — run arbitrary shell commands.
 
     Args:
-        actions: The list of actions to execute (from preview).
-        path: The path this execution is for (used for working directory).
+        preview: The parsed manifest preview containing actions,
+            ``root_directory``, ``manifest_path``, and ``metadata``.
         parameters: The setup parameters.
-        event_queue: Optional queue to emit `ProgressEvent` items into.
+        event_queue: Optional queue to emit ``ProgressEvent`` items into.
 
     Returns:
         SetupResults containing the results of each action.
     """
+    actions = preview.actions
+    assert preview.root_directory is not None  # guaranteed by parse_manifest
+    root_directory = preview.root_directory
+
     logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
     environments = discover_plugins('environment', Environment, check_dependencies=True)
     project_environments = discover_plugins('project_environment', ProjectEnvironment)
     scm_environments = discover_plugins('scm', ScmEnvironment)
-    manifest_directory = path if path.is_dir() else path.parent
 
     state = ExecutionState(
         actions=actions,
@@ -739,9 +750,11 @@ async def execute_single(
         scm_environments=scm_environments,
         parameters=parameters,
         event_queue=event_queue,
-        manifest_directory=manifest_directory,
-        fallback_dir=determine_fallback_dir(parameters, path),
+        manifest_directory=root_directory,
+        fallback_dir=determine_fallback_dir(parameters, root_directory),
         skip_project=parameters.project_directory is False,
+        manifest_path=preview.manifest_path,
+        metadata=preview.metadata,
     )
 
     # Populate CLI commands for all resolved actions
@@ -826,7 +839,13 @@ async def execute_single(
     if state.phases[None]:
         state.results.extend(await execute_command_actions(state.phases[None], state))
 
-    return SetupResults(actions=actions, results=state.results)
+    return SetupResults(
+        actions=actions,
+        results=state.results,
+        manifest_path=state.manifest_path,
+        root_directory=state.manifest_directory,
+        metadata=state.metadata,
+    )
 
 
 # ---------------------------------------------------------------------------
