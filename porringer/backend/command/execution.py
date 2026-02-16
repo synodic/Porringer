@@ -13,7 +13,7 @@ import os
 import subprocess
 import sysconfig
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
@@ -36,29 +36,87 @@ from porringer.schema import (
 )
 from porringer.utility.exception import PluginError
 
-from .action_builder import PHASE_ORDER, STRATEGY_VERB, get_cli_command
+from .action_builder import PHASE_ORDER, STRATEGY_VERB, action_description, get_cli_command
 from .discovery import discover_plugins
 from .presence import dry_run_action, is_package_installed
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class ExecutionPhaseContext:
-    """Shared context for execution phase operations.
+@dataclass
+class ExecutionState:
+    """Mutable state for a single phased execution run.
 
-    Used by post-sync commands and as a grab-bag for phases that
-    need access to discovered plugins, parameters, and the event
-    queue.  Project-sync and SCM phases receive their directory
-    arguments directly rather than through this context.
+    Owns the discovered plugin dicts, grouped phase actions, and
+    common parameters that every phase needs.  Provides
+    ``phase_transition()`` and ``propagate_runtime()`` as methods
+    so callers don't need to pass a half-dozen arguments.
     """
 
+    actions: list[SetupAction]
+    phases: dict[PluginKind | None, list[SetupAction]]
     environments: dict[str, Environment]
     project_environments: dict[str, ProjectEnvironment] | None
+    scm_environments: dict[str, ScmEnvironment] | None
     parameters: SetupParameters
-    skip_project: bool
-    working_dir: Path
     event_queue: asyncio.Queue[ProgressEvent | None] | None
+    manifest_directory: Path
+    fallback_dir: Path
+    skip_project: bool
+    results: list[SetupActionResult] = field(default_factory=list)
+
+    # -- convenience properties ----------------------------------------
+
+    @property
+    def strategy(self) -> SyncStrategy:
+        """The sync strategy from the current parameters."""
+        return self.parameters.strategy
+
+    # -- phase-transition machinery ------------------------------------
+
+    def phase_transition(self) -> None:
+        """Refresh PATH, re-discover environment plugins, and resolve deferred actions.
+
+        Mutates ``self.environments`` in place and updates
+        descriptions / CLI commands on any newly-resolved actions.
+        """
+        refresh_path()
+        self.environments = discover_plugins('environment', Environment, check_dependencies=True)
+
+        for phase_actions in self.phases.values():
+            if phase_actions:
+                _resolve_deferred_actions(phase_actions, self.environments, self.strategy)
+
+        for phase_actions in self.phases.values():
+            for action in phase_actions:
+                if action.cli_command is None or action.installer is not None:
+                    action.cli_command = get_cli_command(
+                        action,
+                        self.environments,
+                        self.strategy,
+                        self.project_environments,
+                        self.scm_environments,
+                    )
+
+    def propagate_runtime(self) -> None:
+        """Resolve interpreter paths from completed runtime actions and propagate downstream.
+
+        Finds the first ``RuntimeProvider`` among the RUNTIME-phase
+        actions, resolves its executable, injects the directory onto
+        ``PATH``, and sets ``runtime_executable`` on every matching
+        ``RuntimeConsumer``.
+        """
+        _propagate_runtime(
+            self.phases[PluginKind.RUNTIME],
+            self.environments,
+            self.project_environments,
+        )
+
+    # -- result helpers ------------------------------------------------
+
+    def early_return(self) -> SetupResults:
+        """Create a ``SetupResults`` from the results accumulated so far."""
+        return SetupResults(actions=self.actions, results=self.results)
 
 
 # ---------------------------------------------------------------------------
@@ -66,38 +124,59 @@ class ExecutionPhaseContext:
 # ---------------------------------------------------------------------------
 
 
-def refresh_path() -> None:
-    """Prepend common script/binary directories to `PATH`.
+def _prepend_to_path(dirs: list[str], *, require_exists: bool = False) -> None:
+    """Prepend directories to ``os.environ['PATH']`` if not already present.
 
-    After packages are installed in Phase 2a, executables such as
-    `pipx` may have been placed in directories that are not yet
-    on the running process's `PATH` (e.g. `~/.local/bin` on
-    Unix, or the `Scripts/` directory of the active Python
-    environment on Windows).
-
-    This method detects those directories and, if they are not
-    already present, prepends them so that subsequent
-    `shutil.which()` calls can find the newly-installed tools.
+    Args:
+        dirs: Directory paths to prepend (in order).
+        require_exists: When ``True``, skip directories that do not
+            exist on disk.  Useful for ``sysconfig`` directories that
+            may not have been created yet.
     """
-    dirs_to_add: list[str] = []
-
-    # The Python environment's scripts directory (e.g. venv/Scripts, ~/.local/bin)
-    scripts_dir = sysconfig.get_path('scripts')
-    if scripts_dir:
-        dirs_to_add.append(scripts_dir)
-
-    # User-scheme scripts directory (pip install --user)
-    user_scripts = sysconfig.get_path('scripts', 'posix_user' if os.name != 'nt' else 'nt_user')
-    if user_scripts:
-        dirs_to_add.append(user_scripts)
-
     current_path = os.environ.get('PATH', '')
     current_entries = set(current_path.split(os.pathsep))
-    new_entries = [d for d in dirs_to_add if d not in current_entries and Path(d).is_dir()]
-
+    new_entries = [d for d in dirs if d not in current_entries and (not require_exists or Path(d).is_dir())]
     if new_entries:
         os.environ['PATH'] = os.pathsep.join(new_entries) + os.pathsep + current_path
         logger.debug('PATH updated with: %s', ', '.join(new_entries))
+
+
+def refresh_path() -> None:
+    """Prepend common script/binary directories to ``PATH``.
+
+    After packages are installed, executables such as ``pipx`` may
+    have been placed in directories not yet on the running process's
+    ``PATH`` (e.g. ``~/.local/bin`` on Unix, or ``Scripts/`` on
+    Windows).  This function detects those directories and prepends
+    them so that subsequent ``shutil.which()`` calls succeed.
+    """
+    dirs: list[str] = []
+
+    scripts_dir = sysconfig.get_path('scripts')
+    if scripts_dir:
+        dirs.append(scripts_dir)
+
+    user_scripts = sysconfig.get_path('scripts', 'posix_user' if os.name != 'nt' else 'nt_user')
+    if user_scripts:
+        dirs.append(user_scripts)
+
+    _prepend_to_path(dirs, require_exists=True)
+
+
+def inject_runtime_path(executable: Path) -> None:
+    """Prepend a resolved runtime's directories to ``PATH``.
+
+    Makes the interpreter's directory and its platform-appropriate
+    scripts sibling (``Scripts/`` on Windows, ``bin/`` on Unix)
+    available to ``shutil.which()`` so that ``python`` and ``pip``
+    are discoverable during the next plugin re-discovery.
+
+    Args:
+        executable: Absolute path to the interpreter.
+    """
+    parent = str(executable.parent)
+    scripts = str(executable.parent / ('Scripts' if os.name == 'nt' else 'bin'))
+    _prepend_to_path([parent, scripts])
 
 
 # ---------------------------------------------------------------------------
@@ -534,28 +613,28 @@ async def _run_parallel_packages(
 
 async def execute_command_actions(
     command_actions: list[SetupAction],
-    context: ExecutionPhaseContext,
+    state: ExecutionState,
 ) -> list[SetupActionResult]:
     """Execute RUN_COMMAND actions sequentially."""
     results: list[SetupActionResult] = []
     for action in command_actions:
-        if context.parameters.dry_run:
+        if state.parameters.dry_run:
             result = dry_run_action(
                 action,
-                context.environments,
-                context.parameters.strategy,
+                state.environments,
+                state.strategy,
             )
         else:
-            result = execute_run_command(action, context.working_dir, context.parameters.timeout)
+            result = execute_run_command(action, state.fallback_dir, state.parameters.timeout)
         results.append(result)
-        if context.event_queue is not None:
-            context.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
-            context.event_queue.put_nowait(
+        if state.event_queue is not None:
+            state.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            state.event_queue.put_nowait(
                 ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
             )
         if not result.success and not result.skipped:
             logger.error(f'Action failed: {action.description} - {result.message}')
-            if context.parameters.fail_fast:
+            if state.parameters.fail_fast:
                 break
     return results
 
@@ -581,34 +660,30 @@ def determine_fallback_dir(parameters: SetupParameters, path: Path) -> Path:
 
 async def handle_project_phase(
     project_actions: list[SetupAction],
-    context: ExecutionPhaseContext,
-    manifest_directory: Path,
+    state: ExecutionState,
 ) -> list[SetupActionResult]:
     """Execute or skip project sync actions depending on context.
 
     Args:
         project_actions: The project-kind actions to process.
-        context: Execution phase context with parameters and flags.
-        manifest_directory: Directory containing the manifest file,
-            used as the starting point for per-plugin project root
-            auto-discovery.
+        state: Execution state with parameters, flags, and directories.
 
     Returns:
         Results for each project action.
     """
-    if not context.skip_project:
+    if not state.skip_project:
         return await _execute_project_sync_actions(
             project_actions,
-            context.project_environments,
-            manifest_directory,
-            context.parameters,
-            context.event_queue,
+            state.project_environments,
+            state.manifest_directory,
+            state.parameters,
+            state.event_queue,
         )
     return skip_actions(
         project_actions,
         SkipReason.NO_PROJECT_DIRECTORY,
         'No project directory provided',
-        context.event_queue,
+        state.event_queue,
     )
 
 
@@ -651,126 +726,107 @@ async def execute_single(
     """
     logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
-    results: list[SetupActionResult] = []
     environments = discover_plugins('environment', Environment, check_dependencies=True)
     project_environments = discover_plugins('project_environment', ProjectEnvironment)
     scm_environments = discover_plugins('scm', ScmEnvironment)
-
-    skip_project = parameters.project_directory is False
-    fallback_dir = determine_fallback_dir(parameters, path)
     manifest_directory = path if path.is_dir() else path.parent
+
+    state = ExecutionState(
+        actions=actions,
+        phases=group_actions_by_phase(actions),
+        environments=environments,
+        project_environments=project_environments,
+        scm_environments=scm_environments,
+        parameters=parameters,
+        event_queue=event_queue,
+        manifest_directory=manifest_directory,
+        fallback_dir=determine_fallback_dir(parameters, path),
+        skip_project=parameters.project_directory is False,
+    )
 
     # Populate CLI commands for all resolved actions
     for action in actions:
         action.cli_command = get_cli_command(
-            action, environments, parameters.strategy, project_environments, scm_environments
+            action,
+            state.environments,
+            state.strategy,
+            state.project_environments,
+            state.scm_environments,
         )
-
-    phases = group_actions_by_phase(actions)
 
     # --- Phase 1: runtime-provider actions (pim / pyenv) ---------------
-    if phases[PluginKind.RUNTIME]:
+    if state.phases[PluginKind.RUNTIME]:
         runtime_results, should_continue = await execute_package_actions(
-            phases[PluginKind.RUNTIME],
-            environments,
-            parameters,
-            event_queue,
+            state.phases[PluginKind.RUNTIME],
+            state.environments,
+            state.parameters,
+            state.event_queue,
         )
-        results.extend(runtime_results)
+        state.results.extend(runtime_results)
         if not should_continue:
-            return SetupResults(actions=actions, results=results)
-        _propagate_runtime(phases[PluginKind.RUNTIME], environments, project_environments)
+            return state.early_return()
+        state.propagate_runtime()
+
+        # Phase transition: re-discover plugins now that the runtime
+        # is installed and its directories are on PATH, so that
+        # downstream consumers (pip, uv, etc.) become available.
+        state.phase_transition()
 
     # --- Phase 2a: package-kind actions (pip, uv, etc.) ---------------
-    if phases[PluginKind.PACKAGE]:
+    if state.phases[PluginKind.PACKAGE]:
         package_results, should_continue = await execute_package_actions(
-            phases[PluginKind.PACKAGE],
-            environments,
-            parameters,
-            event_queue,
-            project_path=manifest_directory,
+            state.phases[PluginKind.PACKAGE],
+            state.environments,
+            state.parameters,
+            state.event_queue,
+            project_path=state.manifest_directory,
         )
-        results.extend(package_results)
+        state.results.extend(package_results)
         if not should_continue:
-            return SetupResults(actions=actions, results=results)
+            return state.early_return()
 
     # --- Phase 2b: tool-kind actions (pipx, etc.) ---------------------
-    # Re-discover plugins so that tools installed in Phase 2a
-    # (e.g. pipx via pip) are now available as backends.
-    if phases[PluginKind.TOOL]:
-        # Ensure executables installed in Phase 2a are discoverable by
-        # shutil.which() even when the scripts directory was not already
-        # on PATH (e.g. ~/.local/bin, Scripts/).
-        refresh_path()
-
-        environments = discover_plugins('environment', Environment, check_dependencies=True)
-
-        # Resolve deferred tool actions whose installer was None
-        _resolve_deferred_actions(phases[PluginKind.TOOL], environments, parameters.strategy)
-
-        # Update CLI commands for newly-resolved tool actions
-        for action in phases[PluginKind.TOOL]:
-            action.cli_command = get_cli_command(
-                action, environments, parameters.strategy, project_environments, scm_environments
-            )
+    if state.phases[PluginKind.TOOL]:
+        # Phase transition: re-discover plugins so that tools installed
+        # in Phase 2a (e.g. pipx via pip) are now available as backends.
+        state.phase_transition()
 
         tool_results, should_continue = await execute_package_actions(
-            phases[PluginKind.TOOL],
-            environments,
-            parameters,
-            event_queue,
-            project_path=manifest_directory,
+            state.phases[PluginKind.TOOL],
+            state.environments,
+            state.parameters,
+            state.event_queue,
+            project_path=state.manifest_directory,
         )
-        results.extend(tool_results)
+        state.results.extend(tool_results)
         if not should_continue:
-            return SetupResults(actions=actions, results=results)
+            return state.early_return()
 
     # --- Phase 3: project sync ----------------------------------------
-    if phases[PluginKind.PROJECT]:
+    if state.phases[PluginKind.PROJECT]:
         # Re-discover project environments in case tools installed in
         # earlier phases provide new project-environment backends.
-        project_environments = discover_plugins('project_environment', ProjectEnvironment)
+        state.project_environments = discover_plugins('project_environment', ProjectEnvironment)
 
-        results.extend(
-            await handle_project_phase(
-                phases[PluginKind.PROJECT],
-                ExecutionPhaseContext(
-                    environments=environments,
-                    project_environments=project_environments,
-                    parameters=parameters,
-                    skip_project=skip_project,
-                    working_dir=fallback_dir,
-                    event_queue=event_queue,
-                ),
-                manifest_directory,
-            )
-        )
+        state.results.extend(await handle_project_phase(state.phases[PluginKind.PROJECT], state))
 
     # --- Phase 4: SCM clone -------------------------------------------
-    if phases[PluginKind.SCM]:
-        results.extend(
+    if state.phases[PluginKind.SCM]:
+        state.results.extend(
             await _execute_scm_actions(
-                phases[PluginKind.SCM],
-                scm_environments,
-                fallback_dir,
-                parameters,
-                event_queue,
+                state.phases[PluginKind.SCM],
+                state.scm_environments,
+                state.fallback_dir,
+                state.parameters,
+                state.event_queue,
             )
         )
 
     # --- Phase 5: post-sync commands ----------------------------------
-    if phases[None]:
-        context = ExecutionPhaseContext(
-            environments=environments,
-            project_environments=project_environments,
-            parameters=parameters,
-            skip_project=skip_project,
-            working_dir=fallback_dir,
-            event_queue=event_queue,
-        )
-        results.extend(await execute_command_actions(phases[None], context))
+    if state.phases[None]:
+        state.results.extend(await execute_command_actions(state.phases[None], state))
 
-    return SetupResults(actions=actions, results=results)
+    return SetupResults(actions=actions, results=state.results)
 
 
 # ---------------------------------------------------------------------------
@@ -827,6 +883,12 @@ def _propagate_runtime(
 
         logger.info('Runtime resolved: %s -> %s', tag, executable)
 
+        # Make the runtime's directory (and its Scripts/bin sibling)
+        # visible on PATH so that downstream tools like pip and python
+        # are discoverable via shutil.which() during plugin
+        # re-discovery at the next phase transition.
+        inject_runtime_path(executable)
+
         # Propagate to all plugins (environment + project-environment) that consume this runtime kind
         all_plugins: dict[str, Environment | ProjectEnvironment] = {**environments, **proj_envs}
         for name, downstream in all_plugins.items():
@@ -871,8 +933,13 @@ def _resolve_deferred_actions(
         installer = resolver.resolve(action.kind, action.ecosystem)
         if installer is not None:
             action.installer = installer
-            if action.package is not None:
-                action.description = f"{verb} '{action.package}' via {installer}"
+            action.description = action_description(
+                action.kind,
+                verb,
+                installer,
+                package=action.package,
+                inject_into=action.inject_into,
+            )
             logger.info('Deferred action resolved: %s -> %s', action.description, installer)
         else:
             logger.warning('Deferred action still unresolved: %s', action.description)
@@ -1102,11 +1169,8 @@ async def _execute_scm_clone(
     scm_env = scm_envs[action.installer]
     url = action.package.name
 
-    # Derive destination from the repo URL (last path segment, minus .git)
-    repo_name = url.rstrip('/').rsplit('/', 1)[-1]
-    if repo_name.endswith('.git'):
-        repo_name = repo_name[:-4]
-    destination = working_dir / repo_name
+    # Clone directly into the working directory, not into a derived subdirectory.
+    destination = working_dir
 
     # Skip if already cloned
     if scm_env.is_cloned(url, destination):
