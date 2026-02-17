@@ -14,6 +14,8 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.schema import (
     SetupAction,
@@ -31,6 +33,7 @@ def dry_run_action(
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
     *,
     project_path: Path | None = None,
+    project_environments: dict[str, ProjectEnvironment] | None = None,
 ) -> SetupActionResult:
     """Simulates executing an action in dry-run mode.
 
@@ -46,13 +49,18 @@ def dry_run_action(
         environments: Dict of instantiated environment plugins.
         strategy: The sync strategy (affects skip logic for packages).
         project_path: Optional project directory for scoped package queries.
+        project_environments: Optional dict of project-environment
+            plugins, used to look up ``PluginManager`` instances for
+            plugin-target presence checks.
 
     Returns:
         The simulated result.
     """
     match action.kind:
         case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
-            return _dry_run_package_action(action, environments, strategy, project_path=project_path)
+            return _dry_run_package_action(
+                action, environments, strategy, project_path=project_path, project_environments=project_environments
+            )
         case PluginKind.PROJECT | PluginKind.SCM | None:
             return SetupActionResult(action=action, success=True)
         case _:
@@ -65,10 +73,15 @@ def _dry_run_package_action(
     strategy: SyncStrategy,
     *,
     project_path: Path | None = None,
+    project_environments: dict[str, ProjectEnvironment] | None = None,
 ) -> SetupActionResult:
     """Simulate a package action in dry-run mode."""
     if action.installer is None or action.package is None or action.installer not in environments:
         return SetupActionResult(action=action, success=True)
+
+    # --- Plugin-target actions: query the PluginManager, not the installer ---
+    if action.plugin_target is not None:
+        return _dry_run_plugin_action(action, strategy, project_environments=project_environments)
 
     # Determine name validator from the plugin
     env = environments[action.installer]
@@ -99,6 +112,47 @@ def _dry_run_package_action(
             success=True,
             message='not installed, will install instead',
         )
+
+    return SetupActionResult(action=action, success=True)
+
+
+def _dry_run_plugin_action(
+    action: SetupAction,
+    strategy: SyncStrategy,
+    *,
+    project_environments: dict[str, ProjectEnvironment] | None = None,
+) -> SetupActionResult:
+    """Simulate a plugin-management action in dry-run mode.
+
+    Locates the ``PluginManager`` for the target tool and queries
+    its installed plugins to determine whether the action would be
+    skipped.
+    """
+    assert action.plugin_target is not None
+    assert action.package is not None
+
+    manager = find_plugin_manager(action.plugin_target.name, project_environments)
+    if manager is None:
+        return SetupActionResult(action=action, success=True, message='PluginManager not available for query')
+
+    try:
+        installed = manager.installed_plugins()
+        is_installed, detail = is_package_installed(action.package, installed)
+    except Exception as e:
+        logger.debug('Dry-run: could not check installed plugins for %s: %s', action.plugin_target.name, e)
+        return SetupActionResult(action=action, success=True)
+
+    if strategy == SyncStrategy.MINIMAL and is_installed:
+        logger.info("Dry-run: skipping plugin '%s': %s", action.package, detail)
+        return SetupActionResult(
+            action=action,
+            success=True,
+            skipped=True,
+            skip_reason=SkipReason.ALREADY_INSTALLED,
+            message=detail,
+        )
+    if strategy != SyncStrategy.MINIMAL and not is_installed:
+        return SetupActionResult(action=action, success=True, message='not installed, will install instead')
 
     return SetupActionResult(action=action, success=True)
 

@@ -21,13 +21,13 @@ from porringer.schema.manifest import (
     ManifestDiagnostic,
     ManifestDiagnosticSeverity,
     ManifestMetadata,
-    ManifestValidationCode,
     ManifestValidationResult,
     PackageSpec,
     SetupManifest,
 )
 from porringer.schema.plugin import PluginInfo, PluginOperationResult
 from porringer.schema.progress import CancellationToken, ProgressEvent, ProgressEventKind, SubActionProgress
+from porringer.utility.exception import ManifestValidationCode
 
 __all__ = [
     'BatchSetupResults',

@@ -9,6 +9,7 @@ from packaging.version import Version
 
 from porringer.backend.command.core.action_builder import get_cli_command
 from porringer.backend.command.core.execution import PluginContext, execute_package
+from porringer.backend.command.core.presence import dry_run_action
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
@@ -17,6 +18,7 @@ from porringer.plugin.pdm.plugin import PdmProjectEnvironment
 from porringer.plugin.poetry.plugin import PoetryProjectEnvironment
 from porringer.schema import (
     SetupAction,
+    SkipReason,
     SyncStrategy,
 )
 
@@ -270,6 +272,7 @@ class TestPluginAddRouting:
         async def _run():
             with (
                 patch.object(type(pdm_env), 'is_available', return_value=True),
+                patch.object(pdm_env, 'installed_plugins', return_value=[]),
                 patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd,
             ):
                 mock_cmd.return_value = mock_result
@@ -299,3 +302,254 @@ class TestPluginAddRouting:
         assert result.success is False
         assert result.message is not None
         assert 'No PluginManager found' in result.message
+
+
+# ---------------------------------------------------------------------------
+# Plugin list / query
+# ---------------------------------------------------------------------------
+
+
+class TestPluginListCommand:
+    """Test the plugin_list_command implementations."""
+
+    @staticmethod
+    def test_pdm_plugin_list_command() -> None:
+        """PDM plugin_list_command returns 'pdm self list --plugins'."""
+        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        assert plugin.plugin_list_command() == ['pdm', 'self', 'list', '--plugins']
+
+    @staticmethod
+    def test_poetry_plugin_list_command() -> None:
+        """Poetry plugin_list_command returns 'poetry self show plugins'."""
+        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        assert plugin.plugin_list_command() == ['poetry', 'self', 'show', 'plugins']
+
+
+class TestParsePluginList:
+    """Test plugin list output parsing."""
+
+    @staticmethod
+    def test_pdm_parse_with_version_and_description() -> None:
+        """PDM parser extracts name and version from tabular output."""
+        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        stdout = 'cppython  0.9.14  A Python management solution for C++\n'
+        result = plugin.parse_plugin_list(stdout)
+        assert len(result) == 1
+        assert result[0].name == 'cppython'
+        assert result[0].version == '0.9.14'
+
+    @staticmethod
+    def test_pdm_parse_multiple_plugins() -> None:
+        """PDM parser handles multiple lines."""
+        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        stdout = 'cppython 0.9.14 desc\npoetry-plugin 1.0.0 other\n'
+        result = plugin.parse_plugin_list(stdout)
+        assert len(result) == 2
+        assert result[0].name == 'cppython'
+        assert result[1].name == 'poetry-plugin'
+
+    @staticmethod
+    def test_pdm_parse_empty_output() -> None:
+        """PDM parser returns empty list for empty output."""
+        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        assert plugin.parse_plugin_list('') == []
+        assert plugin.parse_plugin_list('\n') == []
+
+    @staticmethod
+    def test_poetry_parse_plugin_line() -> None:
+        """Poetry parser extracts name and version from indented lines."""
+        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        stdout = '  - poetry-plugin-export (1.6.0) Poetry plugin\n'
+        result = plugin.parse_plugin_list(stdout)
+        assert len(result) == 1
+        assert result[0].name == 'poetry-plugin-export'
+        assert result[0].version == '1.6.0'
+
+    @staticmethod
+    def test_poetry_parse_ignores_non_plugin_lines() -> None:
+        """Poetry parser skips header/dependency lines."""
+        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        stdout = (
+            'Installed plugins:\n'
+            '  - poetry-plugin-export (1.6.0) Poetry plugin\n'
+            '\n'
+            '    Dependencies:\n'
+            '      - foo (>=1.0)\n'
+        )
+        result = plugin.parse_plugin_list(stdout)
+        assert len(result) == 1
+        assert result[0].name == 'poetry-plugin-export'
+
+
+class TestInstalledPlugins:
+    """Test the installed_plugins default implementation."""
+
+    @staticmethod
+    def test_installed_plugins_success() -> None:
+        """installed_plugins parses subprocess output on success."""
+        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = 'cppython 0.9.14 desc\n'
+        mock_result.stderr = ''
+
+        with patch('porringer.core.plugin_schema.plugin_manager.subprocess.run', return_value=mock_result):
+            result = plugin.installed_plugins()
+
+        assert len(result) == 1
+        assert result[0].name == 'cppython'
+
+    @staticmethod
+    def test_installed_plugins_failure_returns_empty() -> None:
+        """installed_plugins returns empty list on non-zero exit."""
+        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ''
+        mock_result.stderr = 'error'
+
+        with patch('porringer.core.plugin_schema.plugin_manager.subprocess.run', return_value=mock_result):
+            result = plugin.installed_plugins()
+
+        assert result == []
+
+    @staticmethod
+    def test_installed_plugins_file_not_found() -> None:
+        """installed_plugins returns empty list when tool is missing."""
+        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+
+        with patch(
+            'porringer.core.plugin_schema.plugin_manager.subprocess.run',
+            side_effect=FileNotFoundError,
+        ):
+            result = plugin.installed_plugins()
+
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Plugin presence in dry-run
+# ---------------------------------------------------------------------------
+
+_PLUGIN_ACTION = SetupAction(
+    description="Add 'cppython' to 'pdm'",
+    kind=PluginKind.TOOL,
+    ecosystem=_PY,
+    installer='pipx',
+    package=PackageRef.model_validate('cppython'),
+    plugin_target=PackageRef.model_validate('pdm'),
+)
+
+
+class TestDryRunPluginPresence:
+    """Test that dry_run_action correctly queries PluginManager for plugin-target actions."""
+
+    @staticmethod
+    def _make_envs() -> tuple[PdmProjectEnvironment, dict[str, Environment], dict[str, ProjectEnvironment]]:
+        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
+        mock_pipx = MagicMock(spec=Environment)
+        mock_pipx.packages.return_value = []
+        environments: dict[str, Environment] = {'pipx': mock_pipx}
+        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        return pdm_env, environments, project_environments
+
+    def test_skips_when_plugin_installed(self) -> None:
+        """dry_run_action skips plugin-target action when plugin is already installed."""
+        pdm_env, environments, project_environments = self._make_envs()
+
+        with (
+            patch.object(type(pdm_env), 'is_available', return_value=True),
+            patch.object(pdm_env, 'installed_plugins', return_value=[Package(name='cppython', version='0.9.14')]),
+        ):
+            result = dry_run_action(
+                _PLUGIN_ACTION,
+                environments,
+                SyncStrategy.MINIMAL,
+                project_environments=project_environments,
+            )
+
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_INSTALLED
+
+    def test_not_skipped_when_plugin_missing(self) -> None:
+        """dry_run_action does not skip when plugin is not installed."""
+        pdm_env, environments, project_environments = self._make_envs()
+
+        with (
+            patch.object(type(pdm_env), 'is_available', return_value=True),
+            patch.object(pdm_env, 'installed_plugins', return_value=[]),
+        ):
+            result = dry_run_action(
+                _PLUGIN_ACTION,
+                environments,
+                SyncStrategy.MINIMAL,
+                project_environments=project_environments,
+            )
+
+        assert result.skipped is not True
+
+    def test_not_skipped_when_no_plugin_manager(self) -> None:
+        """dry_run_action does not skip when no PluginManager is available."""
+        _, environments, _ = self._make_envs()
+
+        result = dry_run_action(
+            _PLUGIN_ACTION,
+            environments,
+            SyncStrategy.MINIMAL,
+            project_environments=None,
+        )
+
+        assert result.skipped is not True
+
+
+# ---------------------------------------------------------------------------
+# Plugin presence in execution
+# ---------------------------------------------------------------------------
+
+
+class TestExecutePackagePluginPresence:
+    """Test that execute_package skips already-installed plugins."""
+
+    @staticmethod
+    def test_skips_installed_plugin_on_minimal() -> None:
+        """execute_package skips plugin-target action when already installed."""
+        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
+        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        context = PluginContext(project_environments=project_environments)
+
+        async def _run():
+            with (
+                patch.object(type(pdm_env), 'is_available', return_value=True),
+                patch.object(pdm_env, 'installed_plugins', return_value=[Package(name='cppython', version='0.9.14')]),
+            ):
+                return await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+
+        result = asyncio.run(_run())
+        assert result.success is True
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_INSTALLED
+
+    @staticmethod
+    def test_installs_missing_plugin_on_minimal() -> None:
+        """execute_package installs plugin when not already installed."""
+        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
+        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        context = PluginContext(project_environments=project_environments)
+
+        mock_cmd_result = MagicMock()
+        mock_cmd_result.returncode = 0
+        mock_cmd_result.stdout = 'Added cppython'
+        mock_cmd_result.stderr = ''
+
+        async def _run():
+            with (
+                patch.object(type(pdm_env), 'is_available', return_value=True),
+                patch.object(pdm_env, 'installed_plugins', return_value=[]),
+                patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd,
+            ):
+                mock_cmd.return_value = mock_cmd_result
+                return await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+
+        result = asyncio.run(_run())
+        assert result.success is True
+        assert result.skipped is not True

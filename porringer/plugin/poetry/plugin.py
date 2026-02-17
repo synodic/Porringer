@@ -1,5 +1,6 @@
 """Plugin implementation for Poetry project environment."""
 
+import re
 from typing import override
 
 from porringer.core.plugin_schema.plugin_manager import PluginManager
@@ -7,7 +8,7 @@ from porringer.core.plugin_schema.project_environment import (
     ProjectEnvironment,
     ProjectSyncParameters,
 )
-from porringer.core.schema import Ecosystem, PackageRef
+from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
 class PoetryProjectEnvironment(ProjectEnvironment, PluginManager):
@@ -46,6 +47,26 @@ class PoetryProjectEnvironment(ProjectEnvironment, PluginManager):
     def plugin_add_command(self, plugin: PackageRef) -> list[str]:
         """Return ``poetry self add <plugin>``."""
         return ['poetry', 'self', 'add', plugin.specifier]
+
+    @override
+    def plugin_list_command(self) -> list[str]:
+        """Return ``poetry self show plugins``."""
+        return ['poetry', 'self', 'show', 'plugins']
+
+    @staticmethod
+    @override
+    def parse_plugin_list(stdout: str) -> list[Package]:
+        """Parse ``poetry self show plugins`` output.
+
+        Poetry outputs plugin blocks starting with a line like
+        ``  - <name> (<version>) <description>``.
+        """
+        plugins: list[Package] = []
+        for line in stdout.splitlines():
+            match = re.match(r'  - (\S+)\s+\((\S+)\)', line)
+            if match:
+                plugins.append(Package(name=match.group(1), version=match.group(2)))
+        return plugins
 
     @override
     def sync_command(self) -> list[str]:
