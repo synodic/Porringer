@@ -414,7 +414,6 @@ def validate_manifest(path: Path) -> ManifestValidationResult:
     _validate_backends(manifest, resolver, _error, _warning)
     _validate_package_names(manifest, resolver, _warning)
     _validate_duplicate_packages(manifest, _warning)
-    _validate_injection_support(manifest, resolver, all_plugins, _warning)
 
     return ManifestValidationResult(diagnostics=diagnostics)
 
@@ -500,30 +499,6 @@ def _validate_backends(
                 error_callback(
                     f'{kind.value}.{ecosystem}',
                     f"No available installer for ({kind.value}, '{ecosystem}')",
-                    ManifestValidationCode.UNKNOWN_PLUGIN,
-                )
-
-
-def _validate_injection_support(
-    manifest: SetupManifest,
-    resolver: BackendResolver,
-    all_plugins: dict[str, Plugin],
-    warning_callback: Callable[[str, str, ManifestValidationCode], None],
-) -> None:
-    """Warn when a package declares plugins but its installer does not support injection."""
-    for kind, ecosystem, packages in manifest.iter_sections():
-        installer = resolver.resolve(kind, ecosystem)
-        if installer is None:
-            continue
-        for j, spec in enumerate(packages):
-            if not spec.plugins:
-                continue
-            plugin = all_plugins.get(installer)
-            if plugin is not None and isinstance(plugin, Environment) and not plugin.supports_injection():
-                msg = f"Package '{spec.name}' declares plugins but installer '{installer}' does not support injection"
-                warning_callback(
-                    f'{kind.value}.{ecosystem}[{j}].plugins',
-                    msg,
                     ManifestValidationCode.UNKNOWN_PLUGIN,
                 )
 

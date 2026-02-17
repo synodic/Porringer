@@ -107,64 +107,6 @@ class Environment(ToolBasedPlugin):
         """
         return True
 
-    @staticmethod
-    def supports_injection() -> bool:
-        """Returns whether this plugin supports injecting sub-packages.
-
-        Injection inserts additional packages into an already-installed
-        package's isolated environment.  For example, `pipx inject`
-        injects a library into a tool's venv without creating a new
-        isolated environment.
-
-        Override this to return `True` in plugins that support
-        injection (e.g. pipx).
-
-        Returns:
-            True if injection is supported, False otherwise.
-        """
-        return False
-
-    def inject_command(self, target: PackageRef, plugin: PackageRef) -> list[str]:
-        """Returns the CLI command that would inject a sub-package.
-
-        Override this method in plugins that support injection.  The
-        returned command is used for dry-run / preview display.
-
-        Args:
-            target: The parent package to inject into.
-            plugin: The sub-package to inject.
-
-        Returns:
-            A list of command arguments (e.g., `['pipx', 'inject', 'pdm', 'cppython']`).
-
-        Raises:
-            NotImplementedError: If the plugin does not support injection.
-        """
-        raise NotImplementedError(f'{type(self).__name__} does not support injection')
-
-    async def async_inject(self, target: PackageRef, params: PackageParameters) -> Package | None:
-        """Asynchronously injects a sub-package into a parent package's environment.
-
-        Uses a native async subprocess via `inject_command()`.  When
-        `params.progress_callback` is set, output is streamed
-        line-by-line; otherwise output is collected silently.
-
-        Subclasses only need to override this when the streaming command
-        differs from `inject_command()` or when post-inject logic is
-        required.
-
-        Args:
-            target: The parent package whose environment receives the injection.
-            params: The package parameters (`params.package` is the sub-package).
-
-        Returns:
-            The injected package, or `None` if injection failed.
-        """
-        args = list(self.inject_command(target, params.package))
-        if params.progress_callback is not None:
-            return await self._stream_command(args=args, params=params, phase='injecting', verb='inject')
-        return await self._run_command(args=args, params=params, verb='inject')
-
     async def async_install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package identified by its name.
 
@@ -330,7 +272,7 @@ class Environment(ToolBasedPlugin):
         """
         raise NotImplementedError
 
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:  # noqa: PLR6301
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates using the plugin's native tooling.
 
         This method is optional. Plugins that don't support update checking
@@ -347,4 +289,5 @@ class Environment(ToolBasedPlugin):
             A list of packages that have updates available. Each Package should
             have its 'version' field set to the latest available version.
         """
+        del self, params  # Base no-op; subclasses override with real checks.
         return []

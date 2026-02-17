@@ -13,6 +13,7 @@ from pathlib import Path
 
 from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import PackageRef, PluginKind
@@ -54,7 +55,7 @@ def action_description(
     verb: str,
     installer: str | None,
     package: PackageRef | None = None,
-    inject_into: PackageRef | None = None,
+    plugin_target: PackageRef | None = None,
 ) -> str:
     """Build a human-readable action description.
 
@@ -67,7 +68,7 @@ def action_description(
         verb: Action verb (e.g. ``"Install"``, ``"Upgrade"``).
         installer: Resolved installer name, or ``None`` for deferred.
         package: The target package (may be ``None`` for PROJECT).
-        inject_into: Parent package for injection actions.
+        plugin_target: Parent tool for plugin-management actions.
 
     Returns:
         Formatted description string.
@@ -80,8 +81,8 @@ def action_description(
     if kind == PluginKind.SCM:
         return f"Clone '{package}' {suffix}" if package else f'Clone {suffix}'
 
-    if inject_into is not None and package is not None:
-        return f"Inject '{package}' into '{inject_into}' {suffix}"
+    if plugin_target is not None and package is not None:
+        return f"Add plugin '{package}' to '{plugin_target}' {suffix}"
 
     if package is not None:
         return f"{verb} '{package}' {suffix}"
@@ -113,8 +114,10 @@ def get_cli_command(
         case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
             if action.installer and action.package and action.installer in environments:
                 env = environments[action.installer]
-                if action.inject_into is not None and env.supports_injection():
-                    cmd = env.inject_command(action.inject_into, action.package)
+                if action.plugin_target is not None:
+                    manager = find_plugin_manager(action.plugin_target.name, project_environments)
+                    if manager is not None:
+                        cmd = manager.plugin_add_command(action.package)
                 elif strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
                     cmd = env.upgrade_command(action.package)
                 else:
@@ -229,7 +232,7 @@ def build_actions(
                 )
             )
 
-            # Emit injection actions for declared plugins
+            # Emit plugin-management actions for declared plugins
             for plugin_ref in package.plugins:
                 actions.append(
                     SetupAction(
@@ -238,13 +241,13 @@ def build_actions(
                             verb,
                             installer,
                             package=plugin_ref,
-                            inject_into=package.name,
+                            plugin_target=package.name,
                         ),
                         kind=kind,
                         ecosystem=ecosystem,
                         installer=installer,
                         package=plugin_ref,
-                        inject_into=package.name,
+                        plugin_target=package.name,
                     )
                 )
 

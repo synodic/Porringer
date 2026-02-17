@@ -171,9 +171,10 @@ class SetupAction:
     * `PluginKind.SCM` — clone a repository.
     * `None` — run a post-sync shell command.
 
-    When `inject_into` is set the action is an *injection*: the
-    `package` is injected into the `inject_into` parent's isolated
-    environment (e.g. `pipx inject pdm cppython`).
+    When `plugin_target` is set the action is a *plugin-management*
+    action: the `package` is added to the `plugin_target` parent
+    tool via its native ``PluginManager`` (e.g.
+    ``pdm self add cppython``).
 
     Args:
         description: Human-readable description of the action.
@@ -181,7 +182,7 @@ class SetupAction:
         ecosystem: The ecosystem identifier (e.g. `"python"`, `"node"`).
         installer: The plugin name (for PACKAGE/TOOL/RUNTIME/PROJECT/SCM).
         package: The package reference (for PACKAGE/TOOL/RUNTIME/SCM).
-        inject_into: The parent package for injection actions, or `None`.
+        plugin_target: The parent tool for plugin actions, or `None`.
         command: The command to run (for post-sync commands).
         cli_command: The actual CLI command (for display purposes).
         package_description: Optional per-package description from the manifest.
@@ -192,7 +193,7 @@ class SetupAction:
     ecosystem: Ecosystem | None = None
     installer: str | None = None
     package: PackageRef | None = None
-    inject_into: PackageRef | None = None
+    plugin_target: PackageRef | None = None
     command: list[str] | None = None
     cli_command: list[str] | None = None
     package_description: str | None = None
@@ -319,22 +320,22 @@ class PackageSpec(PlatformScoped):
     with additional metadata for GUI consumers.
 
     The optional `plugins` list declares sub-packages that should be
-    *injected* into the parent package's isolated environment after it is
-    installed.  For example, a `pipx`-managed PDM installation can
-    declare `cppython` as a plugin so that `pipx inject pdm cppython`
+    added to the parent package via its native plugin management
+    after it is installed.  For example, a PDM installation can
+    declare `cppython` as a plugin so that `pdm self add cppython`
     is executed automatically::
 
         {'name': 'pdm', 'plugins': ['cppython']}
 
-    The field is generic — any ecosystem whose installer supports
-    injection can use it in the future.
+    The field is generic — any tool whose project-environment plugin
+    implements ``PluginManager`` can use it.
     """
 
     name: PackageRef = Field(description='The package reference (name with optional version constraint)')
     description: str | None = Field(default=None, description='Human-readable description of this package')
     plugins: list[PackageRef] = Field(
         default_factory=list,
-        description="Sub-packages to inject into this package's isolated environment after installation",
+        description="Sub-packages to add via this tool's native plugin management after installation",
     )
 
     @model_validator(mode='before')

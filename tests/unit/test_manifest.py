@@ -864,7 +864,7 @@ FOUR_ACTIONS = 4
 
 
 class TestPackageSpecPlugins:
-    """Tests for the plugins field on PackageSpec and injection actions"""
+    """Tests for the plugins field on PackageSpec and plugin-management actions"""
 
     @staticmethod
     def test_package_spec_plugins_default_empty() -> None:
@@ -897,8 +897,8 @@ class TestPackageSpecPlugins:
         assert len(pkgs[1].plugins) == 0
 
     @staticmethod
-    def test_build_actions_emits_injection_actions(test_api: API) -> None:
-        """_build_actions emits injection actions after their parent package"""
+    def test_build_actions_emits_plugin_actions(test_api: API) -> None:
+        """_build_actions emits plugin-management actions after their parent package"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {
@@ -914,39 +914,39 @@ class TestPackageSpecPlugins:
 
             results = test_api.sync.parse_manifest(Path(tmpdir))
 
-            # pdm + 2 injections + ruff = 4 actions
+            # pdm + 2 plugin additions + ruff = 4 actions
             assert len(results.actions) == FOUR_ACTIONS
 
             # First action: install pdm
             assert str(results.actions[FIRST_ACTION_INDEX].package) == 'pdm'
-            assert results.actions[FIRST_ACTION_INDEX].inject_into is None
+            assert results.actions[FIRST_ACTION_INDEX].plugin_target is None
 
-            # Second action: inject cppython into pdm
+            # Second action: add cppython plugin to pdm
             assert str(results.actions[SECOND_ACTION_INDEX].package) == 'cppython'
             second = results.actions[SECOND_ACTION_INDEX]
-            assert second.inject_into is not None
-            assert second.inject_into.name == 'pdm'
+            assert second.plugin_target is not None
+            assert second.plugin_target.name == 'pdm'
 
-            # Third action: inject pdm-bump into pdm
+            # Third action: add pdm-bump plugin to pdm
             assert str(results.actions[THIRD_ACTION_INDEX].package) == 'pdm-bump'
             third = results.actions[THIRD_ACTION_INDEX]
-            assert third.inject_into is not None
-            assert third.inject_into.name == 'pdm'
+            assert third.plugin_target is not None
+            assert third.plugin_target.name == 'pdm'
 
-            # Fourth action: install ruff (no injection)
+            # Fourth action: install ruff (no plugin target)
             assert str(results.actions[FOURTH_ACTION_INDEX].package) == 'ruff'
-            assert results.actions[FOURTH_ACTION_INDEX].inject_into is None
+            assert results.actions[FOURTH_ACTION_INDEX].plugin_target is None
 
     @staticmethod
-    def test_injection_action_description_contains_inject() -> None:
-        """Injection actions should have 'Inject' in their description"""
+    def test_plugin_action_description_contains_add_plugin() -> None:
+        """Plugin-management actions should have 'Add plugin' in their description"""
         manifest = SetupManifest(tools={_PY: [{'name': 'pdm', 'plugins': ['cppython']}]})
         environments: dict[str, Environment] = {}
         actions = build_actions(manifest, environments)
 
-        injection_actions = [a for a in actions if a.inject_into is not None]
-        for action in injection_actions:
-            assert 'Inject' in action.description
+        plugin_actions = [a for a in actions if a.plugin_target is not None]
+        for action in plugin_actions:
+            assert 'Add plugin' in action.description
 
     @staticmethod
     def test_json_manifest_with_plugins_roundtrip() -> None:
@@ -1076,12 +1076,10 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps(
-                    {
-                        'name': 'my-project',
-                        'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
-                    }
-                )
+                json.dumps({
+                    'name': 'my-project',
+                    'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
+                })
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1096,11 +1094,9 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             deno_json = Path(tmpdir) / 'deno.json'
             deno_json.write_text(
-                json.dumps(
-                    {
-                        'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
-                    }
-                )
+                json.dumps({
+                    'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
+                })
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1157,12 +1153,10 @@ class TestManifestDiscovery:
 
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps(
-                    {
-                        'name': 'my-project',
-                        'porringer': {'manifest': 'config/porringer.json'},
-                    }
-                )
+                json.dumps({
+                    'name': 'my-project',
+                    'porringer': {'manifest': 'config/porringer.json'},
+                })
             )
 
             result = find_manifest(Path(tmpdir))
