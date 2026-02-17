@@ -207,7 +207,7 @@ class TestParseManifest:
 
             results = SyncCommands.parse_manifest(Path(tmpdir))
 
-            assert results.manifest_path == manifest_path
+            assert results.manifest_path == manifest_path.resolve()
             assert len(results.actions) > 0
             assert results.metadata is not None
             assert results.metadata.name == 'Test Project'
