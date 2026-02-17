@@ -2,14 +2,15 @@
 
 from typing import override
 
+from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import (
     ProjectEnvironment,
     ProjectSyncParameters,
 )
-from porringer.core.schema import Ecosystem
+from porringer.core.schema import Ecosystem, PackageRef
 
 
-class PoetryProjectEnvironment(ProjectEnvironment):
+class PoetryProjectEnvironment(ProjectEnvironment, PluginManager):
     """Project environment managed by Poetry.
 
     Delegates venv creation, dependency resolution, and lock-file
@@ -18,6 +19,9 @@ class PoetryProjectEnvironment(ProjectEnvironment):
     Overrides `sync()` because Poetry requires a separate
     `poetry env use <path>` step to select a non-default interpreter,
     unlike PDM/uv which accept `--python` inline.
+
+    Implements ``PluginManager`` so that declared sub-plugins are
+    installed via ``poetry self add``.
     """
 
     @staticmethod
@@ -37,6 +41,11 @@ class PoetryProjectEnvironment(ProjectEnvironment):
     def tool_name(cls) -> str:
         """Poetry wraps the `poetry` CLI."""
         return 'poetry'
+
+    @override
+    def plugin_add_command(self, plugin: PackageRef) -> list[str]:
+        """Return ``poetry self add <plugin>``."""
+        return ['poetry', 'self', 'add', plugin.specifier]
 
     @override
     def sync_command(self) -> list[str]:

@@ -19,6 +19,7 @@ from typing import cast
 
 from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
+from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectSyncParameters
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
@@ -158,6 +159,11 @@ class ExecutionState:
 
     # -- result helpers ------------------------------------------------
 
+    @property
+    def plugin_context(self) -> PluginContext:
+        """Plugin-management context for this execution run."""
+        return PluginContext(project_environments=self.project_environments)
+
     def early_return(self) -> SetupResults:
         """Create a ``SetupResults`` from the results accumulated so far."""
         return SetupResults(
@@ -167,6 +173,18 @@ class ExecutionState:
             root_directory=self.manifest_directory,
             metadata=self.metadata,
         )
+
+
+@dataclass
+class PluginContext:
+    """Bundled plugin-management context for the execution helpers.
+
+    Groups the project-path and project-environment references that
+    flow through ``execute_package_actions`` → ``execute_package``.
+    """
+
+    project_path: Path | None = None
+    project_environments: dict[str, ProjectEnvironment] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -286,8 +304,7 @@ async def execute_package(
     environments: dict[str, Environment],
     strategy: SyncStrategy,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
-    *,
-    project_path: Path | None = None,
+    plugin_context: PluginContext | None = None,
 ) -> SetupActionResult:
     """Execute a package install or upgrade based on the strategy.
 
@@ -300,7 +317,8 @@ async def execute_package(
         environments: Dict of instantiated environment plugins.
         strategy: The sync strategy.
         event_queue: Optional queue to emit sub-action events into.
-        project_path: Optional project directory for scoped package queries.
+        plugin_context: Optional plugin-management context providing
+            project-path and project-environment references.
 
     Returns:
         The result of the operation.
@@ -308,21 +326,23 @@ async def execute_package(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=False, message='Installer or package not specified')
 
+    # --- Plugin-management actions -----------------------------------------
+    if action.plugin_target is not None:
+        project_environments = plugin_context.project_environments if plugin_context else None
+        return await _attempt_plugin_add(action, event_queue, project_environments=project_environments)
+
     if action.installer not in environments:
         msg = f"Installer '{action.installer}' is not available"
         return SetupActionResult(action=action, success=False, message=msg)
 
     environment = environments[action.installer]
 
-    # --- Injection actions ------------------------------------------------
-    if action.inject_into is not None:
-        return await _attempt_inject_operation(action, environment, event_queue)
-
     # --- Normal install / upgrade -----------------------------------------
     # Check if package is already installed
     is_installed = False
     installed_detail: str | None = None
     validator = type(environment).package_name_validator()
+    project_path = plugin_context.project_path if plugin_context else None
     try:
         loop = asyncio.get_running_loop()
         installed_packages = await loop.run_in_executor(None, lambda: environment.packages(project_path=project_path))
@@ -378,67 +398,89 @@ async def _attempt_package_operation(
 
     return await _attempt_operation(
         action,
-        execute=execute,
-        verb=verb,
-        verb_past=verb_past,
+        spec=OperationSpec(
+            execute=execute,
+            verb=verb,
+            verb_past=verb_past,
+        ),
         event_queue=event_queue,
     )
 
 
-async def _attempt_inject_operation(
+async def _attempt_plugin_add(
     action: SetupAction,
-    environment: Environment,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    *,
+    project_environments: dict[str, ProjectEnvironment] | None = None,
 ) -> SetupActionResult:
-    """Attempt to inject a sub-package into a parent package's environment.
+    """Add a plugin to a parent tool via its native ``PluginManager``.
+
+    Looks up a ``PluginManager`` for the target tool among the
+    *project_environments*.  If none is found (or the tool is not on
+    PATH), the action fails.
 
     Args:
-        action: The injection action (`inject_into` must be set).
-        environment: The environment plugin to use.
+        action: The plugin action (``plugin_target`` must be set).
         event_queue: Optional queue to emit sub-action events into.
+        project_environments: Dict of project-environment plugins,
+            checked for ``PluginManager`` implementations.
 
     Returns:
         The result of the attempt.
     """
-    assert action.inject_into is not None
+    assert action.plugin_target is not None
     assert action.package is not None
 
-    if not environment.supports_injection():
-        msg = f"Installer '{action.installer}' does not support injection"
+    plugin_manager = find_plugin_manager(action.plugin_target.name, project_environments)
+    if plugin_manager is None:
+        msg = f"No PluginManager found for '{action.plugin_target.name}'"
         return SetupActionResult(action=action, success=False, message=msg)
 
-    inject_target = action.inject_into
+    logger.info(
+        "Using native plugin management for '%s' via %s",
+        action.plugin_target.name,
+        type(plugin_manager).__name__,
+    )
     return await _attempt_operation(
         action,
-        execute=lambda params: environment.async_inject(inject_target, params),
-        verb='inject',
-        verb_past='Injected',
-        success_suffix=f' into {inject_target.name}',
+        spec=OperationSpec(
+            execute=plugin_manager.async_plugin_add,
+            verb='add plugin',
+            verb_past='Added',
+            success_suffix=f' to {action.plugin_target.name} (native)',
+        ),
         event_queue=event_queue,
     )
 
 
-async def _attempt_operation(  # noqa: PLR0913
+@dataclass(frozen=True)
+class OperationSpec:
+    """Specification for a single package operation.
+
+    Bundles the async callable together with the human-readable verb
+    forms used in log / result messages.
+    """
+
+    execute: Callable[[PackageParameters], Awaitable[Package | None]]
+    verb: str
+    verb_past: str
+    success_suffix: str = ''
+
+
+async def _attempt_operation(
     action: SetupAction,
     *,
-    execute: Callable[[PackageParameters], Awaitable[Package | None]],
-    verb: str,
-    verb_past: str,
-    success_suffix: str = '',
+    spec: OperationSpec,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
 ) -> SetupActionResult:
     """Core helper that runs an async package operation with standard error handling.
 
     Builds the progress callback, constructs `PackageParameters`,
-    calls *execute*, and catches the standard exception set.
+    calls *spec.execute*, and catches the standard exception set.
 
     Args:
         action: The action being executed.
-        execute: Async callable that performs the operation.
-        verb: Infinitive verb for error messages (e.g. `"install"`).
-        verb_past: Past-tense verb for success messages (e.g. `"Installed"`).
-        success_suffix: Extra text appended to the success message
-            (e.g. `" into pdm"` for injection).
+        spec: The operation specification (callable + verb forms).
         event_queue: Optional queue to emit sub-action events into.
 
     Returns:
@@ -462,21 +504,21 @@ async def _attempt_operation(  # noqa: PLR0913
             dry=False,
             progress_callback=sub_action_cb,
         )
-        result = await execute(params)
+        result = await spec.execute(params)
 
         if result is not None:
             success = True
-            message = f'{verb_past} {result.name}{success_suffix}'
+            message = f'{spec.verb_past} {result.name}{spec.success_suffix}'
         else:
-            message = f"Failed to {verb} '{action.package}'{success_suffix}"
+            message = f"Failed to {spec.verb} '{action.package}'{spec.success_suffix}"
     except PluginError as e:
-        logger.error(f'Plugin error {verb}ing {action.package}: {e}')
+        logger.error(f'Plugin error {spec.verb}ing {action.package}: {e}')
         message = str(e)
     except asyncio.CancelledError:
-        logger.error(f'{verb.capitalize()} cancelled for {action.package}')
-        message = f'{verb.capitalize()} cancelled'
+        logger.error(f'{spec.verb.capitalize()} cancelled for {action.package}')
+        message = f'{spec.verb.capitalize()} cancelled'
     except TimeoutError as e:
-        logger.error(f'Timeout {verb}ing {action.package}: {e}')
+        logger.error(f'Timeout {spec.verb}ing {action.package}: {e}')
         message = str(e)
     except Exception as e:
         message = str(e)
@@ -494,8 +536,7 @@ async def execute_package_actions(
     environments: dict[str, Environment],
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
-    *,
-    project_path: Path | None = None,
+    plugin_context: PluginContext | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Execute PACKAGE actions with parallel support.
 
@@ -503,6 +544,7 @@ async def execute_package_actions(
         Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
     """
     if parameters.dry_run:
+        project_path = plugin_context.project_path if plugin_context else None
         return (
             _dry_run_package_actions(
                 package_actions, environments, parameters.strategy, event_queue, project_path=project_path
@@ -517,7 +559,11 @@ async def execute_package_actions(
     # Execute parallel actions concurrently
     if parallel_actions:
         parallel_results, should_continue = await _run_parallel_packages(
-            parallel_actions, environments, parameters, event_queue, project_path=project_path
+            parallel_actions,
+            environments,
+            parameters,
+            event_queue,
+            plugin_context,
         )
         results.extend(parallel_results)
         if not should_continue:
@@ -525,7 +571,11 @@ async def execute_package_actions(
 
     # Execute sequential actions one at a time
     sequential_results, should_continue = await _run_sequential_packages(
-        sequential_actions, environments, parameters, event_queue, project_path=project_path
+        sequential_actions,
+        environments,
+        parameters,
+        event_queue,
+        plugin_context,
     )
     results.extend(sequential_results)
 
@@ -576,8 +626,7 @@ async def _run_sequential_packages(
     environments: dict[str, Environment],
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
-    *,
-    project_path: Path | None = None,
+    plugin_context: PluginContext | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions sequentially."""
     results: list[SetupActionResult] = []
@@ -585,7 +634,11 @@ async def _run_sequential_packages(
         if event_queue is not None:
             event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
         result = await execute_package(
-            action, environments, parameters.strategy, event_queue, project_path=project_path
+            action,
+            environments,
+            parameters.strategy,
+            event_queue,
+            plugin_context,
         )
         results.append(result)
         if event_queue is not None:
@@ -601,8 +654,7 @@ async def _run_parallel_packages(
     environments: dict[str, Environment],
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
-    *,
-    project_path: Path | None = None,
+    plugin_context: PluginContext | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions in parallel using TaskGroup.
 
@@ -620,7 +672,11 @@ async def _run_parallel_packages(
             event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
         try:
             result = await execute_package(
-                action, environments, parameters.strategy, event_queue, project_path=project_path
+                action,
+                environments,
+                parameters.strategy,
+                event_queue,
+                plugin_context,
             )
         except Exception as e:
             result = SetupActionResult(action=action, success=False, message=str(e))
@@ -815,6 +871,7 @@ async def execute_single(
             state.environments,
             state.parameters,
             state.event_queue,
+            state.plugin_context,
         )
         state.results.extend(runtime_results)
         if not should_continue:
@@ -833,6 +890,7 @@ async def execute_single(
             state.environments,
             state.parameters,
             state.event_queue,
+            state.plugin_context,
         )
         state.results.extend(package_results)
         if not should_continue:
@@ -849,6 +907,7 @@ async def execute_single(
             state.environments,
             state.parameters,
             state.event_queue,
+            state.plugin_context,
         )
         state.results.extend(tool_results)
         if not should_continue:
@@ -1002,7 +1061,7 @@ def _resolve_deferred_actions(
                 verb,
                 installer,
                 package=action.package,
-                inject_into=action.inject_into,
+                plugin_target=action.plugin_target,
             )
             logger.info('Deferred action resolved: %s -> %s', action.description, installer)
         else:

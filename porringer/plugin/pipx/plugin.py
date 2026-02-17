@@ -52,17 +52,6 @@ class PipxEnvironment(PythonEnvironment):
         """Pipx wraps the `pipx` CLI."""
         return 'pipx'
 
-    @staticmethod
-    @override
-    def supports_injection() -> bool:
-        """Pipx supports injection via `pipx inject`."""
-        return True
-
-    @override
-    def inject_command(self, target: PackageRef, plugin: PackageRef) -> list[str]:
-        """Returns the CLI command to inject a sub-package into a pipx venv."""
-        return ['pipx', 'inject', target.name, plugin.specifier]
-
     @override
     def install_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to install a package via pipx."""

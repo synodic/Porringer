@@ -120,7 +120,8 @@ class TestSetupParametersPlugins:
             batch = test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
                 command_actions = [a for a in manifest_result.actions if a.command is not None]
-                assert len(command_actions) == 2  # noqa: PLR2004
+                expected_command_count = 2
+                assert len(command_actions) == expected_command_count
 
     @staticmethod
     def test_plugins_filter_applies_in_execute_stream(test_api: API) -> None:
