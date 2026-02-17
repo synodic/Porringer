@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
-from porringer.backend.command.execution import inject_runtime_path
+from porringer.backend.command.core.execution import inject_runtime_path
 from porringer.backend.command.sync import SyncCommands
 from porringer.core.schema import PluginKind
 from porringer.schema import SetupResults

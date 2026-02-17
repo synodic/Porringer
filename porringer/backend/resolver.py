@@ -1,6 +1,6 @@
 """Resolves"""
 
-from porringer.backend.schema import Configuration, GlobalConfiguration
+from porringer.backend.schema import GlobalConfiguration, ResolvedDirectories
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Plugin, PluginKind
 from porringer.schema import LocalConfiguration, PluginInfo
@@ -9,7 +9,7 @@ from porringer.utility.utility import canonicalize_type
 
 def resolve_configuration(
     local_configuration: LocalConfiguration, global_configuration: GlobalConfiguration
-) -> Configuration:
+) -> ResolvedDirectories:
     """Resolves the configuration.
 
     Args:
@@ -24,7 +24,7 @@ def resolve_configuration(
     global_configuration.config_directory.mkdir(parents=True, exist_ok=True)
     global_configuration.data_directory.mkdir(parents=True, exist_ok=True)
 
-    return Configuration(
+    return ResolvedDirectories(
         cache_directory=local_configuration.cache_directory,
         config_directory=global_configuration.config_directory,
         data_directory=global_configuration.data_directory,

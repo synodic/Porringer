@@ -12,8 +12,8 @@ from unittest.mock import patch
 
 from packaging.version import Version
 
-from porringer.backend.command.action_builder import PHASE_ORDER
-from porringer.backend.command.execution import ExecutionState, execute_single
+from porringer.backend.command.core.action_builder import PHASE_ORDER
+from porringer.backend.command.core.execution import ExecutionState, execute_single
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
@@ -212,9 +212,9 @@ class TestRuntimePropagationAfterPhaseTransition:
         new_consumer = _MockPythonEnv(_MOCK_DIST)
         assert new_consumer.runtime_executable is None
 
-        with patch('porringer.backend.command.execution.discover_plugins') as mock_discover:
+        with patch('porringer.backend.command.core.execution.discover_plugins') as mock_discover:
             mock_discover.return_value = {'mock-pip': new_consumer}
-            with patch('porringer.backend.command.execution.refresh_path'):
+            with patch('porringer.backend.command.core.execution.refresh_path'):
                 state.phase_transition()
 
         assert state.environments['mock-pip'] is new_consumer
@@ -227,9 +227,9 @@ class TestRuntimePropagationAfterPhaseTransition:
         assert state._resolved_runtime is None
 
         new_consumer = _MockPythonEnv(_MOCK_DIST)
-        with patch('porringer.backend.command.execution.discover_plugins') as mock_discover:
+        with patch('porringer.backend.command.core.execution.discover_plugins') as mock_discover:
             mock_discover.return_value = {'mock-pip': new_consumer}
-            with patch('porringer.backend.command.execution.refresh_path'):
+            with patch('porringer.backend.command.core.execution.refresh_path'):
                 state.phase_transition()
 
         assert new_consumer.runtime_executable is None
@@ -253,7 +253,7 @@ class TestRuntimePropagationAfterPhaseTransition:
         new_proj_env = _MockProjectEnv(_MOCK_DIST)
         assert new_proj_env.runtime_executable is None
 
-        with patch('porringer.backend.command.execution.discover_plugins') as mock_discover:
+        with patch('porringer.backend.command.core.execution.discover_plugins') as mock_discover:
             mock_discover.return_value = {'mock-pdm': new_proj_env}
             state.refresh_project_environments()
 
@@ -276,9 +276,9 @@ class TestRuntimePropagationAfterPhaseTransition:
         assert node_env.runtime_executable is None
 
         new_node_env = _MockNodeConsumer(_MOCK_DIST)
-        with patch('porringer.backend.command.execution.discover_plugins') as mock_discover:
+        with patch('porringer.backend.command.core.execution.discover_plugins') as mock_discover:
             mock_discover.return_value = {'mock-npm': new_node_env}
-            with patch('porringer.backend.command.execution.refresh_path'):
+            with patch('porringer.backend.command.core.execution.refresh_path'):
                 state.phase_transition()
 
         assert new_node_env.runtime_executable is None

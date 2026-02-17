@@ -10,6 +10,15 @@ from typing import Any, Literal, NamedTuple, NewType
 
 from porringer.schema import SetupAction, SubActionProgress
 
+__all__ = [
+    'CommandResult',
+    'StreamProgress',
+    'canonicalize_type',
+    'is_pipx_installation',
+    'run_command',
+    'stream_command',
+]
+
 TypeName = NewType('TypeName', str)
 TypeGroup = NewType('TypeGroup', str)
 

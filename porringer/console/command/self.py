@@ -6,7 +6,7 @@ import typer
 from rich.panel import Panel
 
 from porringer.api import API
-from porringer.console.schema import Configuration
+from porringer.console.schema import ConsoleConfiguration
 
 app = typer.Typer()
 
@@ -17,11 +17,11 @@ def self_check(context: typer.Context) -> None:
 
     Queries PyPI for the latest version and compares with the installed version.
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     api = API(configuration.local_configuration)
 
-    info = asyncio.run(api.updates.check())
+    info = asyncio.run(api.check_updates())
 
     current = str(info.current_version) if info.current_version else 'unknown'
     latest = str(info.latest_version) if info.latest_version else 'unknown'

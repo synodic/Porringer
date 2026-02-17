@@ -27,7 +27,7 @@ LOG_LEVELS: list[LogLevel] = [
 ]
 
 
-class Configuration(BaseModel):
+class ConsoleConfiguration(BaseModel):
     """Configuration object for the CLI"""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

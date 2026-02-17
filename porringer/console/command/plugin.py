@@ -7,7 +7,7 @@ import typer
 from rich.table import Table
 
 from porringer.backend.command.plugin import PluginCommands
-from porringer.console.schema import Configuration
+from porringer.console.schema import ConsoleConfiguration
 from porringer.utility.exception import PluginError
 
 app = typer.Typer()
@@ -22,7 +22,7 @@ def plugin_list(
     Args:
         context: The click context
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     results = PluginCommands.list()
 
@@ -52,7 +52,7 @@ def plugin_packages(
     reports as currently installed.  For venv-scoped plugins (pip, uv),
     the listing can be scoped to a project directory.
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     resolved_path = project_path.resolve()
 
@@ -82,7 +82,7 @@ def plugin_install(
     dry_run: Annotated[bool, typer.Option('--dry-run', help='Show what would be done without executing')] = False,
 ) -> None:
     """Install plugins from PyPI"""
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     for plugin in plugins:
         try:
@@ -105,7 +105,7 @@ def plugin_update(
     dry_run: Annotated[bool, typer.Option('--dry-run', help='Show what would be done without executing')] = False,
 ) -> None:
     """Update installed plugins"""
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     results = PluginCommands.update(plugins, dry_run=dry_run)
 
@@ -128,7 +128,7 @@ def plugin_uninstall(
     dry_run: Annotated[bool, typer.Option('--dry-run', help='Show what would be done without executing')] = False,
 ) -> None:
     """Remove installed plugins"""
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     results = PluginCommands.uninstall(plugins, dry_run=dry_run)
 

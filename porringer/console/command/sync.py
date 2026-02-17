@@ -10,7 +10,7 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
 
 from porringer.api import API
-from porringer.console.schema import Configuration
+from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
     BatchSetupResults,
     ProgressEvent,
@@ -46,7 +46,7 @@ class _ProgressState:
     overall_task: TaskID | None = None
 
 
-def _create_api(configuration: Configuration) -> API:
+def _create_api(configuration: ConsoleConfiguration) -> API:
     """Create and return API instance.
 
     Args:
@@ -206,7 +206,7 @@ def _format_cli_command(result: SetupActionResult) -> str:
 
 
 def _display_summary(
-    configuration: Configuration,
+    configuration: ConsoleConfiguration,
     results: BatchSetupResults,
     dry_run: bool,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
@@ -259,7 +259,7 @@ def _display_summary(
 
 
 def _display_results(
-    configuration: Configuration,
+    configuration: ConsoleConfiguration,
     results: BatchSetupResults,
     dry_run: bool,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
@@ -306,7 +306,7 @@ def _display_results(
 
 
 def _handle_manifest(
-    configuration: Configuration,
+    configuration: ConsoleConfiguration,
     *,
     path: Path | None = None,
     all_cached: bool = False,
@@ -400,7 +400,7 @@ def _handle_manifest(
 
 
 def _execute_with_progress(
-    configuration: Configuration,
+    configuration: ConsoleConfiguration,
     api: API,
     setup_params: SetupParameters,
 ) -> BatchSetupResults:
@@ -536,7 +536,7 @@ def sync_default(
         porringer sync --dry-run                        # Preview without executing
         porringer sync --path m.json --project-dir ./p  # Separate manifest & project
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     # Parse strategy string to enum
     strategy_map = {'minimal': SyncStrategy.MINIMAL, 'latest': SyncStrategy.LATEST, 'exact': SyncStrategy.EXACT}

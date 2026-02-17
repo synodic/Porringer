@@ -5,6 +5,20 @@ import sys
 from enum import Enum
 from typing import Any, NewType, Protocol
 
+__all__ = [
+    'Distribution',
+    'Ecosystem',
+    'ManifestContribution',
+    'Package',
+    'PackageRef',
+    'PlatformScoped',
+    'Plugin',
+    'PluginDependency',
+    'PluginKind',
+    'PluginParameters',
+    'PorringerModel',
+]
+
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator

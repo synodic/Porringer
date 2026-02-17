@@ -25,8 +25,8 @@ from porringer.schema import (
     SyncStrategy,
 )
 
+from ..manifest import find_manifest
 from .discovery import discover_plugins
-from .manifest import find_manifest
 
 logger = logging.getLogger(__name__)
 
