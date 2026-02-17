@@ -45,32 +45,24 @@ def get_current_version() -> Version | None:
         return None
 
 
-class SelfCommands:
-    """Commands related to the Porringer installation."""
+async def check_for_updates() -> PackageUpdateInfo:
+    """Check for updates to the Porringer package by querying PyPI.
 
-    def __init__(self) -> None:
-        """Initialize the SelfCommands class."""
-        pass
+    Returns:
+        PackageUpdateInfo with current version, latest version, and update status.
+    """
+    current = get_current_version()
+    latest = await get_latest_pypi_version()
 
-    @staticmethod
-    async def check() -> PackageUpdateInfo:
-        """Check for updates to the Porringer package by querying PyPI.
+    update_available = False
+    if current is not None and latest is not None:
+        update_available = latest > current
 
-        Returns:
-            PackageUpdateInfo with current version, latest version, and update status.
-        """
-        current = get_current_version()
-        latest = await get_latest_pypi_version()
+    logger.debug(f'Current version: {current}, Latest version: {latest}')
 
-        update_available = False
-        if current is not None and latest is not None:
-            update_available = latest > current
-
-        logger.debug(f'Current version: {current}, Latest version: {latest}')
-
-        return PackageUpdateInfo(
-            name=PACKAGE_NAME,
-            current_version=current,
-            latest_version=latest,
-            update_available=update_available,
-        )
+    return PackageUpdateInfo(
+        name=PACKAGE_NAME,
+        current_version=current,
+        latest_version=latest,
+        update_available=update_available,
+    )

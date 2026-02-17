@@ -7,7 +7,7 @@ import typer
 from rich.panel import Panel
 
 from porringer.api import API
-from porringer.console.schema import Configuration
+from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
     DownloadParameters,
     ProgressCallback,
@@ -16,7 +16,7 @@ from porringer.schema import (
 app = typer.Typer()
 
 
-def _create_api(configuration: Configuration) -> API:
+def _create_api(configuration: ConsoleConfiguration) -> API:
     """Create and return API instance.
 
     Args:
@@ -28,7 +28,7 @@ def _create_api(configuration: Configuration) -> API:
     return API(configuration.local_configuration)
 
 
-def _create_progress_callback(configuration: Configuration) -> ProgressCallback | None:
+def _create_progress_callback(configuration: ConsoleConfiguration) -> ProgressCallback | None:
     """Create a progress callback for downloads.
 
     Args:
@@ -70,7 +70,7 @@ def download_default(
         porringer download https://example.com/file.zip ./file.zip
         porringer download https://example.com/file.zip ./file.zip --hash sha256:abc123...
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     api = _create_api(configuration)
 
@@ -82,7 +82,7 @@ def download_default(
         timeout=timeout,
     )
 
-    result = api.sync.download(params, _create_progress_callback(configuration))
+    result = api.download(params, _create_progress_callback(configuration))
     configuration.console.print()  # Newline after progress
 
     if result.success:

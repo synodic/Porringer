@@ -22,21 +22,17 @@ from pathlib import Path
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.schema import (
     BatchSetupResults,
-    DownloadParameters,
-    DownloadResult,
     ManifestValidationResult,
-    ProgressCallback,
     ProgressEvent,
     ProgressEventKind,
     SetupParameters,
     SetupResults,
     SyncStrategy,
 )
-from porringer.utility.download import download_file
 from porringer.utility.exception import ManifestError
 
-from .action_builder import parse_manifest
-from .execution import execute_single
+from .core.action_builder import parse_manifest
+from .core.execution import execute_single
 from .manifest import has_manifest as _has_manifest
 from .manifest import manifest_filenames as _manifest_filenames
 from .manifest import manifest_schema, validate_manifest
@@ -56,23 +52,6 @@ class SyncCommands:
         self._cache_manager = cache_manager
 
     # --- Static helpers delegated to sub-modules ---
-
-    @staticmethod
-    def download(
-        parameters: DownloadParameters,
-        progress_callback: ProgressCallback | None = None,
-    ) -> DownloadResult:
-        """Download a file with optional hash verification.
-
-        Args:
-            parameters: Download parameters including URL and destination.
-            progress_callback: Optional callback for progress updates.
-
-        Returns:
-            DownloadResult with success status and details.
-        """
-        logger.info(f'Downloading: {parameters.url}')
-        return download_file(parameters, progress_callback)
 
     @staticmethod
     def validate_manifest(path: Path) -> ManifestValidationResult:
@@ -143,15 +122,12 @@ class SyncCommands:
         Raises:
             ValueError: If no paths can be resolved.
         """
-        # Explicit paths provided
         if parameters.paths is not None:
             if isinstance(parameters.paths, Path):
                 return [parameters.paths]
             return list(parameters.paths)
 
-        # Use cache
         if self._cache_manager is None:
-            # Default to current directory if no cache
             return [Path('.')]
 
         paths = self._cache_manager.get_paths()
@@ -159,6 +135,46 @@ class SyncCommands:
             raise ValueError('No cached directories. Add directories first with "porringer cache add".')
 
         return paths
+
+    # --- Manifest loading ---
+
+    def _load_manifests(self, parameters: SetupParameters) -> tuple[list[SetupResults], list[tuple[Path, str]]]:
+        """Load and filter manifests from the resolved paths.
+
+        Shared by `run()` and `execute_stream()` to avoid duplicating
+        the parse → filter → error-handling loop.
+
+        Args:
+            parameters: The setup parameters.
+
+        Returns:
+            A tuple of (loaded previews, failed paths).
+        """
+        paths = self._resolve_paths(parameters)
+        logger.info(f'Processing {len(paths)} path(s) (dry_run={parameters.dry_run})')
+
+        previews: list[SetupResults] = []
+        failed_paths: list[tuple[Path, str]] = []
+
+        for path in paths:
+            try:
+                preview = parse_manifest(path, strategy=parameters.strategy)
+            except ManifestError as e:
+                logger.warning(f'Failed to load manifest at {path}: {e.error}')
+                failed_paths.append((path, str(e.error)))
+                if parameters.fail_fast:
+                    break
+                continue
+
+            # Filter actions to only included plugins
+            if parameters.plugins:
+                preview.actions = [
+                    a for a in preview.actions if a.installer is None or a.installer in parameters.plugins
+                ]
+
+            previews.append(preview)
+
+        return previews, failed_paths
 
     # --- Streaming API ---
 
@@ -187,33 +203,19 @@ class SyncCommands:
         queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
 
         async def _run() -> None:
-            """Resolve paths, parse manifests, execute, and emit events."""
+            """Load manifests, emit events, and execute."""
             try:
-                paths = self._resolve_paths(parameters)
-                logger.info(f'Executing setup for {len(paths)} path(s) (dry_run={parameters.dry_run})')
+                previews, failed = self._load_manifests(parameters)
 
-                for path in paths:
-                    try:
-                        preview = parse_manifest(path, strategy=parameters.strategy)
-                    except ManifestError as e:
-                        logger.warning(f'Failed to load manifest at {path}: {e.error}')
-                        queue.put_nowait(
-                            ProgressEvent(
-                                kind=ProgressEventKind.MANIFEST_FAILED,
-                                failed_path=(path, str(e.error)),
-                            )
+                for path, error in failed:
+                    queue.put_nowait(
+                        ProgressEvent(
+                            kind=ProgressEventKind.MANIFEST_FAILED,
+                            failed_path=(path, error),
                         )
-                        if parameters.fail_fast:
-                            break
-                        continue
+                    )
 
-                    # Filter actions to only included plugins
-                    if parameters.plugins:
-                        preview.actions = [
-                            a for a in preview.actions if a.installer is None or a.installer in parameters.plugins
-                        ]
-
-                    # Emit MANIFEST_LOADED so consumers know the action plan
+                for preview in previews:
                     queue.put_nowait(
                         ProgressEvent(
                             kind=ProgressEventKind.MANIFEST_LOADED,
@@ -246,48 +248,20 @@ class SyncCommands:
     def run(self, parameters: SetupParameters) -> BatchSetupResults:
         """Execute setup synchronously and return collected results.
 
-        Resolves paths and parses manifests synchronously, then executes
-        (or dry-runs) actions via `execute_stream()` for each manifest.
-
         Args:
             parameters: The setup parameters (paths, dry_run, strategy, etc.).
 
         Returns:
             BatchSetupResults from execution.
         """
-        paths = self._resolve_paths(parameters)
-        logger.info(f'Running setup for {len(paths)} path(s) (dry_run={parameters.dry_run})')
+        previews, failed_paths = self._load_manifests(parameters)
 
         manifest_results: list[SetupResults] = []
-        failed_paths: list[tuple[Path, str]] = []
-        previews: list[SetupResults] = []
-
-        # Phase 1: synchronous manifest loading
-        for path in paths:
-            try:
-                preview = parse_manifest(path, strategy=parameters.strategy)
-
-                # Filter actions to only included plugins
-                if parameters.plugins:
-                    preview.actions = [
-                        a for a in preview.actions if a.installer is None or a.installer in parameters.plugins
-                    ]
-
-                previews.append(preview)
-            except ManifestError as e:
-                failed_paths.append((path, str(e.error)))
-                if parameters.fail_fast:
-                    break
-
-        # Phase 2: async execution for successfully loaded manifests
         if previews:
 
             async def _execute_all() -> None:
                 for preview in previews:
-                    sr = await execute_single(
-                        preview,
-                        parameters,
-                    )
+                    sr = await execute_single(preview, parameters)
                     manifest_results.append(sr)
 
             asyncio.run(_execute_all())

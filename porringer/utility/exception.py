@@ -4,6 +4,19 @@ from __future__ import annotations
 
 from enum import Enum
 
+__all__ = [
+    'CommandTimeoutError',
+    'ManifestError',
+    'ManifestValidationCode',
+    'NotSupportedError',
+    'PluginDependencyError',
+    'PluginError',
+    'PorringerError',
+    'ProcessError',
+    'SetupError',
+    'UpdateError',
+]
+
 
 class PorringerError(Exception):
     """Base class for all Porringer exceptions.
@@ -46,17 +59,23 @@ class SetupError(PorringerError):
     """Base class for setup-related errors"""
 
 
-class ManifestErrorCode(Enum):
-    """Machine-readable code carried by `ManifestError`.
+class ManifestValidationCode(Enum):
+    """Machine-readable codes for manifest validation and error diagnostics.
 
-    Allows downstream code to classify errors structurally instead of
-    relying on substring matching against the human-readable message.
+    Used both on `ManifestError` exceptions (for structured error
+    classification) and on `ManifestDiagnostic` items produced by the
+    validation engine.
     """
 
-    NO_MANIFEST = 'no_manifest'
     SYNTAX_ERROR = 'syntax_error'
-    LOAD_FAILED = 'load_failed'
     SCHEMA_INVALID = 'schema_invalid'
+    UNSUPPORTED_VERSION = 'unsupported_version'
+    UNKNOWN_PLUGIN = 'unknown_plugin'
+    INVALID_PACKAGE_NAME = 'invalid_package_name'
+    DUPLICATE_PACKAGE = 'duplicate_package'
+    PATH_NOT_FOUND = 'path_not_found'
+    NO_MANIFEST = 'no_manifest'
+    LOAD_FAILED = 'load_failed'
 
 
 class ManifestError(SetupError):
@@ -70,7 +89,7 @@ class ManifestError(SetupError):
     Carries an optional `code` for structured error classification.
     """
 
-    def __init__(self, error: str, *, code: ManifestErrorCode | None = None) -> None:
+    def __init__(self, error: str, *, code: ManifestValidationCode | None = None) -> None:
         """Initializes the error.
 
         Args:
@@ -81,7 +100,7 @@ class ManifestError(SetupError):
         self._code = code
 
     @property
-    def code(self) -> ManifestErrorCode | None:
+    def code(self) -> ManifestValidationCode | None:
         """Return the machine-readable error code, if set."""
         return self._code
 

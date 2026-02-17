@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from porringer.api import API
-from porringer.backend.command.action_builder import build_actions
+from porringer.backend.command.core.action_builder import build_actions
 from porringer.backend.command.manifest import collect_manifest_contributions, find_manifest, has_manifest
 from porringer.backend.command.sync import SyncCommands
 from porringer.console.entry import app

@@ -7,7 +7,7 @@ import typer
 from rich.table import Table
 
 from porringer.api import API
-from porringer.console.schema import Configuration
+from porringer.console.schema import ConsoleConfiguration
 
 app = typer.Typer(help='Manage cached manifest directories')
 
@@ -39,7 +39,7 @@ def cache_add(
         path: Path to directory.
         name: Optional display name.
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
     api = API(configuration.local_configuration)
 
     try:
@@ -68,7 +68,7 @@ def cache_remove(
         context: The typer context.
         path: Path to remove.
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
     api = API(configuration.local_configuration)
 
     if api.cache.remove_directory(path):
@@ -92,7 +92,7 @@ def cache_list(
         context: The typer context.
         validate: Check if paths exist.
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
     api = API(configuration.local_configuration)
 
     directories = api.cache.list_directories()
@@ -136,7 +136,7 @@ def cache_clear(
         context: The typer context.
         yes: Skip confirmation.
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
     api = API(configuration.local_configuration)
 
     if not yes and not typer.confirm('Clear all cached directories?', default=False):

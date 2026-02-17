@@ -6,16 +6,25 @@ without per-kind boilerplate.
 """
 
 import logging
+from dataclasses import dataclass
 from importlib import metadata
+from importlib.metadata import Distribution as MetadataDistribution
 
 from packaging.version import Version
 
 from porringer.core.schema import Distribution, Plugin, PluginDependency, PluginParameters
-from porringer.schema import PluginInformation
 from porringer.utility.exception import PluginDependencyError
 from porringer.utility.utility import canonicalize_type
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PluginInformation[P]:
+    """Gathered information about available plugins."""
+
+    type: type[P]
+    distribution: MetadataDistribution
 
 
 class Builder:

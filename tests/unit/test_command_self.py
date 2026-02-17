@@ -28,7 +28,7 @@ class TestCommandSelf:
         config = LocalConfiguration()
         api = API(config)
 
-        result = await api.updates.check()
+        result = await api.check_updates()
 
         assert isinstance(result, PackageUpdateInfo)
         assert result.name == PACKAGE_NAME
@@ -91,7 +91,7 @@ class TestVersionHelpers:
                 return_value=Version('2.0.0'),
             ),
         ):
-            result = await api.updates.check()
+            result = await api.check_updates()
             assert result.update_available is True
             assert result.current_version == Version('1.0.0')
             assert result.latest_version == Version('2.0.0')
@@ -111,5 +111,5 @@ class TestVersionHelpers:
                 return_value=Version('2.0.0'),
             ),
         ):
-            result = await api.updates.check()
+            result = await api.check_updates()
             assert result.update_available is False

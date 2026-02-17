@@ -9,12 +9,11 @@ from pathlib import Path
 
 from porringer.backend.builder import Builder
 from porringer.backend.resolver import build_plugin_info
-from porringer.backend.schema import PluginOperationResult
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Package, Plugin, PluginKind
-from porringer.schema import PluginInfo
+from porringer.schema import PluginInfo, PluginOperationResult
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import canonicalize_type, is_pipx_installation
 

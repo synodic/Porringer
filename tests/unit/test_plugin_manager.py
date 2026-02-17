@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from packaging.version import Version
 
-from porringer.backend.command.action_builder import get_cli_command
-from porringer.backend.command.execution import PluginContext, execute_package
+from porringer.backend.command.core.action_builder import get_cli_command
+from porringer.backend.command.core.execution import PluginContext, execute_package
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment

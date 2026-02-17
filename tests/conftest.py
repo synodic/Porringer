@@ -10,7 +10,7 @@ from rich.console import Console
 from porringer.api import API
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.schema import GlobalConfiguration
-from porringer.console.schema import Configuration
+from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
     BatchSetupResults,
     LocalConfiguration,
@@ -57,10 +57,10 @@ def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
 
 
 @pytest.fixture
-def test_config() -> Configuration:
+def test_config() -> ConsoleConfiguration:
     """Configuration for CLI testing."""
     console = Console(no_color=True, force_terminal=False)
-    return Configuration(console=console)
+    return ConsoleConfiguration(console=console)
 
 
 @pytest.fixture

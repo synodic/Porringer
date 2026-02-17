@@ -37,28 +37,19 @@ from porringer.core.schema import ManifestContribution, Plugin, PluginKind
 from porringer.schema import (
     ManifestDiagnostic,
     ManifestDiagnosticSeverity,
-    ManifestResult,
-    ManifestValidationCode,
     ManifestValidationResult,
     SetupManifest,
 )
-from porringer.utility.exception import ManifestError, ManifestErrorCode
+from porringer.schema.manifest import ManifestResult
+from porringer.utility.exception import ManifestError, ManifestValidationCode
 
-from .discovery import discover_plugins
+from .core.discovery import discover_plugins
 
 logger = logging.getLogger(__name__)
 
 # The native manifest filename — always probed first before any
 # plugin-contributed files.
 NATIVE_MANIFEST = 'porringer.json'
-
-# Maps ManifestErrorCode → ManifestValidationCode for structured classification.
-_MANIFEST_ERROR_CODE_MAP: dict[ManifestErrorCode, ManifestValidationCode] = {
-    ManifestErrorCode.NO_MANIFEST: ManifestValidationCode.NO_MANIFEST,
-    ManifestErrorCode.SYNTAX_ERROR: ManifestValidationCode.SYNTAX_ERROR,
-    ManifestErrorCode.LOAD_FAILED: ManifestValidationCode.SCHEMA_INVALID,
-    ManifestErrorCode.SCHEMA_INVALID: ManifestValidationCode.SCHEMA_INVALID,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +120,9 @@ def _load_native_manifest(path: Path) -> SetupManifest:
             data = json.load(f)
         return SetupManifest.model_validate(data)
     except json.JSONDecodeError as e:
-        raise ManifestError(f'Invalid JSON in manifest {path}: {e}', code=ManifestErrorCode.SYNTAX_ERROR) from e
+        raise ManifestError(f'Invalid JSON in manifest {path}: {e}', code=ManifestValidationCode.SYNTAX_ERROR) from e
     except Exception as e:
-        raise ManifestError(f'Failed to load manifest {path}: {e}', code=ManifestErrorCode.LOAD_FAILED) from e
+        raise ManifestError(f'Failed to load manifest {path}: {e}', code=ManifestValidationCode.LOAD_FAILED) from e
 
 
 def _read_file(path: Path, file_format: str) -> dict:
@@ -155,9 +146,11 @@ def _read_file(path: Path, file_format: str) -> dict:
             with open(path, encoding='utf-8') as f:
                 return json.load(f)
     except (json.JSONDecodeError, tomllib.TOMLDecodeError) as e:
-        raise ManifestError(f'Invalid {file_format.upper()} in {path}: {e}', code=ManifestErrorCode.SYNTAX_ERROR) from e
+        raise ManifestError(
+            f'Invalid {file_format.upper()} in {path}: {e}', code=ManifestValidationCode.SYNTAX_ERROR
+        ) from e
     except Exception as e:
-        raise ManifestError(f'Failed to read {path}: {e}', code=ManifestErrorCode.LOAD_FAILED) from e
+        raise ManifestError(f'Failed to read {path}: {e}', code=ManifestValidationCode.LOAD_FAILED) from e
 
 
 def _extract_section(data: dict, config_path: tuple[str, ...], source_path: Path) -> dict:
@@ -180,7 +173,7 @@ def _extract_section(data: dict, config_path: tuple[str, ...], source_path: Path
             dotted = '.'.join(config_path)
             raise ManifestError(
                 f'No [{dotted}] section found in {source_path}',
-                code=ManifestErrorCode.NO_MANIFEST,
+                code=ManifestValidationCode.NO_MANIFEST,
             )
         current = current[key]
 
@@ -188,7 +181,7 @@ def _extract_section(data: dict, config_path: tuple[str, ...], source_path: Path
         dotted = '.'.join(config_path)
         raise ManifestError(
             f'[{dotted}] in {source_path} is not a table/object',
-            code=ManifestErrorCode.SCHEMA_INVALID,
+            code=ManifestValidationCode.SCHEMA_INVALID,
         )
 
     return current
@@ -231,7 +224,7 @@ def _load_embedded_manifest(
         if not ref_path.exists():
             raise ManifestError(
                 f'Referenced manifest does not exist: {ref_path} (from {path})',
-                code=ManifestErrorCode.NO_MANIFEST,
+                code=ManifestValidationCode.NO_MANIFEST,
             )
         manifest = _load_native_manifest(ref_path)
         return ManifestResult(
@@ -246,7 +239,7 @@ def _load_embedded_manifest(
     except Exception as e:
         raise ManifestError(
             f'Invalid manifest in {path}: {e}',
-            code=ManifestErrorCode.SCHEMA_INVALID,
+            code=ManifestValidationCode.SCHEMA_INVALID,
         ) from e
 
     return ManifestResult(
@@ -295,7 +288,7 @@ def find_manifest(path: Path) -> ManifestResult:
     if path.is_dir():
         return _find_manifest_from_directory(path)
 
-    raise ManifestError(f'Path does not exist: {path}', code=ManifestErrorCode.NO_MANIFEST)
+    raise ManifestError(f'Path does not exist: {path}', code=ManifestValidationCode.NO_MANIFEST)
 
 
 def _find_manifest_from_file(path: Path) -> ManifestResult:
@@ -348,7 +341,7 @@ def _find_manifest_from_directory(path: Path) -> ManifestResult:
             except ManifestError as exc:
                 # File exists but has no porringer section — skip to next.
                 # Re-raise syntax / load errors so the caller sees them.
-                if exc.code != ManifestErrorCode.NO_MANIFEST:
+                if exc.code != ManifestValidationCode.NO_MANIFEST:
                     raise
                 continue
 
@@ -356,7 +349,7 @@ def _find_manifest_from_directory(path: Path) -> ManifestResult:
     tried = ', '.join(f"'{f}'" for f in manifest_filenames())
     raise ManifestError(
         f'No manifest found in directory: {path}. Tried: {tried}',
-        code=ManifestErrorCode.NO_MANIFEST,
+        code=ManifestValidationCode.NO_MANIFEST,
     )
 
 
@@ -444,7 +437,7 @@ def _map_manifest_error_code(error: ManifestError) -> ManifestValidationCode:
     falls back to substring matching for errors without one.
     """
     if error.code is not None:
-        return _MANIFEST_ERROR_CODE_MAP.get(error.code, ManifestValidationCode.SCHEMA_INVALID)
+        return error.code
 
     # Legacy fallback: substring matching for errors without a code.
     message = str(error)

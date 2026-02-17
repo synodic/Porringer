@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from porringer.backend.builder import Builder
-from porringer.console.schema import Configuration
+from porringer.console.schema import ConsoleConfiguration
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.schema import (
     CheckParameters,
@@ -22,7 +22,7 @@ app = typer.Typer()
 
 
 def _check_plugin_updates(
-    configuration: Configuration,
+    configuration: ConsoleConfiguration,
     params: CheckParameters,
 ) -> list[CheckResult]:
     """Check for updates across all plugins.
@@ -91,7 +91,7 @@ def _check_plugin_updates(
     return results
 
 
-def _display_results(configuration: Configuration, results: list[CheckResult]) -> None:
+def _display_results(configuration: ConsoleConfiguration, results: list[CheckResult]) -> None:
     """Display check results to the console.
 
     Args:
@@ -152,7 +152,7 @@ def check_default(
         porringer check --plugin pip
         porringer check --plugin pip --plugin pipx --prereleases
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     params = CheckParameters(
         plugins=plugin,

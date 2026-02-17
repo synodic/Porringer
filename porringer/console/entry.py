@@ -13,7 +13,7 @@ from porringer.console.command.download import app as download_app
 from porringer.console.command.plugin import app as plugin_app
 from porringer.console.command.self import app as self_app
 from porringer.console.command.sync import app as sync_app
-from porringer.console.schema import LOG_LEVELS, MAX_VERBOSITY_LEVEL, Configuration
+from porringer.console.schema import LOG_LEVELS, MAX_VERBOSITY_LEVEL, ConsoleConfiguration
 
 __version__ = version('porringer')
 
@@ -67,7 +67,7 @@ def application(
         debug: The debug flag
         version: The version request
     """
-    configuration = context.ensure_object(Configuration)
+    configuration = context.ensure_object(ConsoleConfiguration)
 
     configuration.debug = debug
     configuration.verbosity = verbose
