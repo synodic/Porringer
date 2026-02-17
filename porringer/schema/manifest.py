@@ -6,12 +6,14 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from porringer.core.schema import Ecosystem, PackageRef, PlatformScoped, PluginKind
-from porringer.utility.exception import ManifestValidationCode  # noqa: F401 - re-exported
+
+if TYPE_CHECKING:
+    from porringer.utility.exception import ManifestValidationCode
 
 
 class ManifestDiagnosticSeverity(Enum):

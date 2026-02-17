@@ -4,7 +4,7 @@ from typing import override
 
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.schema import Ecosystem, PackageRef
+from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
 class PdmProjectEnvironment(ProjectEnvironment, PluginManager):
@@ -39,3 +39,25 @@ class PdmProjectEnvironment(ProjectEnvironment, PluginManager):
     def plugin_add_command(self, plugin: PackageRef) -> list[str]:
         """Return ``pdm self add <plugin>``."""
         return ['pdm', 'self', 'add', plugin.specifier]
+
+    @override
+    def plugin_list_command(self) -> list[str]:
+        """Return ``pdm self list --plugins``."""
+        return ['pdm', 'self', 'list', '--plugins']
+
+    @staticmethod
+    @override
+    def parse_plugin_list(stdout: str) -> list[Package]:
+        """Parse ``pdm self list --plugins`` output.
+
+        Each line has the format ``name version [description...]``.
+        """
+        _min_versioned_parts = 2
+        plugins: list[Package] = []
+        for line in stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= _min_versioned_parts:
+                plugins.append(Package(name=parts[0], version=parts[1]))
+            elif parts:
+                plugins.append(Package(name=parts[0], version=None))
+        return plugins

@@ -14,6 +14,7 @@ plugin management is available.
 from __future__ import annotations
 
 import logging
+import subprocess
 from abc import abstractmethod
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
@@ -62,6 +63,65 @@ class PluginManager(Protocol):
             (e.g. ``['pdm', 'self', 'add', 'cppython']``).
         """
         ...
+
+    @abstractmethod
+    def plugin_list_command(self) -> list[str]:
+        """Return the CLI command that lists installed plugins.
+
+        The command should produce output that ``parse_plugin_list``
+        can interpret.
+
+        Returns:
+            A list of command arguments
+            (e.g. ``['pdm', 'self', 'list']``).
+        """
+        ...
+
+    @staticmethod
+    def parse_plugin_list(stdout: str) -> list[Package]:
+        """Parse the output of ``plugin_list_command`` into packages.
+
+        The default implementation treats each non-empty line as a
+        package name (no version).  Subclasses should override this
+        to match their tool's output format.
+
+        Args:
+            stdout: The captured standard output of the list command.
+
+        Returns:
+            A list of installed plugin packages.
+        """
+        return [Package(name=line.strip(), version=None) for line in stdout.splitlines() if line.strip()]
+
+    def installed_plugins(self) -> list[Package]:
+        """Query the tool for its currently installed plugins.
+
+        Runs ``plugin_list_command`` synchronously and delegates
+        parsing to ``parse_plugin_list``.
+
+        Returns:
+            A list of installed plugin packages, or an empty list
+            on failure.
+        """
+        tool = self.tool_name()
+        _logger = logging.getLogger(f'porringer.{tool}.plugin_list')
+        try:
+            result = subprocess.run(
+                self.plugin_list_command(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                _logger.debug('plugin list failed: %s', result.stderr)
+                return []
+            return self.parse_plugin_list(result.stdout)
+        except FileNotFoundError:
+            _logger.debug('%s not found', tool)
+            return []
+        except Exception as e:
+            _logger.debug('Failed to list plugins for %s: %s', tool, e)
+            return []
 
     async def async_plugin_add(self, params: PackageParameters) -> Package | None:
         """Asynchronously add a plugin via the tool's native command.

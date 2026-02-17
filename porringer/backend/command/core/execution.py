@@ -329,6 +329,25 @@ async def execute_package(
     # --- Plugin-management actions -----------------------------------------
     if action.plugin_target is not None:
         project_environments = plugin_context.project_environments if plugin_context else None
+        manager = find_plugin_manager(action.plugin_target.name, project_environments)
+
+        # Check presence before adding
+        if manager is not None and strategy == SyncStrategy.MINIMAL:
+            try:
+                installed = manager.installed_plugins()
+                is_plugin_installed, detail = is_package_installed(action.package, installed)
+                if is_plugin_installed:
+                    logger.info("Skipping plugin '%s': %s", action.package, detail)
+                    return SetupActionResult(
+                        action=action,
+                        success=True,
+                        skipped=True,
+                        skip_reason=SkipReason.ALREADY_INSTALLED,
+                        message=detail,
+                    )
+            except Exception as e:
+                logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
+
         return await _attempt_plugin_add(action, event_queue, project_environments=project_environments)
 
     if action.installer not in environments:
@@ -544,10 +563,13 @@ async def execute_package_actions(
         Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
     """
     if parameters.dry_run:
-        project_path = plugin_context.project_path if plugin_context else None
         return (
             _dry_run_package_actions(
-                package_actions, environments, parameters.strategy, event_queue, project_path=project_path
+                package_actions,
+                environments,
+                parameters.strategy,
+                event_queue,
+                plugin_context=plugin_context,
             ),
             True,
         )
@@ -588,12 +610,20 @@ def _dry_run_package_actions(
     strategy: SyncStrategy,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
     *,
-    project_path: Path | None = None,
+    plugin_context: PluginContext | None = None,
 ) -> list[SetupActionResult]:
     """Execute dry-run for package actions."""
+    project_path = plugin_context.project_path if plugin_context else None
+    project_environments = plugin_context.project_environments if plugin_context else None
     results: list[SetupActionResult] = []
     for action in package_actions:
-        result = dry_run_action(action, environments, strategy, project_path=project_path)
+        result = dry_run_action(
+            action,
+            environments,
+            strategy,
+            project_path=project_path,
+            project_environments=project_environments,
+        )
         results.append(result)
         if event_queue is not None:
             event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
