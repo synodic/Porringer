@@ -833,7 +833,6 @@ async def execute_single(
             state.environments,
             state.parameters,
             state.event_queue,
-            project_path=state.manifest_directory,
         )
         state.results.extend(package_results)
         if not should_continue:
@@ -850,7 +849,6 @@ async def execute_single(
             state.environments,
             state.parameters,
             state.event_queue,
-            project_path=state.manifest_directory,
         )
         state.results.extend(tool_results)
         if not should_continue:
