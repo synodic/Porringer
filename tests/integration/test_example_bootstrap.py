@@ -58,15 +58,19 @@ class TestBootstrapPreview:
 
     @staticmethod
     def test_tool_actions_present(preview: SetupResults) -> None:
-        """A TOOL action for pdm should be in the plan.
+        """TOOL actions for pdm and its cppython plugin should be in the plan.
 
         The tool action may have `installer=None` (deferred) if pipx
         is not currently available — this is expected and correct.
         """
         tool_actions = [a for a in preview.actions if a.kind == PluginKind.TOOL and a.ecosystem == 'python']
-        assert len(tool_actions) == 1
+        assert len(tool_actions) == 2
         assert tool_actions[0].package is not None
         assert tool_actions[0].package.name == 'pdm'
+        assert tool_actions[1].package is not None
+        assert tool_actions[1].package.name == 'cppython'
+        assert tool_actions[1].plugin_target is not None
+        assert tool_actions[1].plugin_target.name == 'pdm'
 
     @staticmethod
     def test_post_sync_command_present(preview: SetupResults) -> None:
