@@ -73,5 +73,11 @@ def application(
     configuration.verbosity = verbose
 
     logger = logging.getLogger('porringer')
+
+    # Remove any previously-attached TyperHandlers so that repeated
+    # CLI invocations (e.g. in tests) don't accumulate handlers
+    # pointing to closed output streams.
+    logger.handlers = [h for h in logger.handlers if not isinstance(h, TyperHandler)]
+
     handler = TyperHandler(configuration.console)
     logger.addHandler(handler)

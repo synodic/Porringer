@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import LiteralString
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from rich.console import Console
 
 from porringer.schema import LocalConfiguration
@@ -32,7 +32,7 @@ class ConsoleConfiguration(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    console: Console = Console()
+    console: Console = Field(default_factory=Console)
     local_configuration: LocalConfiguration = LocalConfiguration()
     debug: bool = False
     verbosity: int = 0

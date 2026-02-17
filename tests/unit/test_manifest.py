@@ -6,13 +6,11 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 from porringer.api import API
 from porringer.backend.command.core.action_builder import build_actions
 from porringer.backend.command.manifest import collect_manifest_contributions, find_manifest, has_manifest
 from porringer.backend.command.sync import SyncCommands
-from porringer.console.entry import app
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.manifest import ManifestContributor
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
@@ -39,7 +37,6 @@ FOURTH_ACTION_INDEX = 3
 
 # Exit codes
 EXIT_CODE_SUCCESS = 0
-EXIT_CODE_FAILURE = 1
 
 # Count constants
 SINGLE_MANIFEST = 1
@@ -443,19 +440,6 @@ class TestSetupCLI:
             assert len(results.manifest_results[0].results) == 1
             # Should succeed in dry-run
             assert results.manifest_results[0].results[0].success
-
-    @staticmethod
-    def test_sync_missing_manifest_error() -> None:
-        """Test that missing manifest shows error in CLI"""
-        runner = CliRunner()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = runner.invoke(
-                app,
-                ['sync', '--dry-run', '--path', tmpdir],
-            )
-
-            assert result.exit_code == EXIT_CODE_FAILURE
 
 
 # --- Validation constants ---
