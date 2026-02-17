@@ -69,7 +69,7 @@ class TestSetupManifest:
 
             results = test_api.sync.parse_manifest(Path(tmpdir))
 
-            assert results.manifest_path == manifest_path
+            assert results.manifest_path == manifest_path.resolve()
             # 1 install + 1 command = 2 actions
             assert len(results.actions) == EXPECTED_ACTIONS_JSON_MANIFEST
 
@@ -87,7 +87,7 @@ packages.python = ["requests"]
 
             results = test_api.sync.parse_manifest(Path(tmpdir))
 
-            assert results.manifest_path == pyproject_path
+            assert results.manifest_path == pyproject_path.resolve()
             assert len(results.actions) == 1  # 1 install
 
     @staticmethod
