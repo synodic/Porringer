@@ -15,7 +15,8 @@ The manifest executes in **phased order**:
    environment via `pip` or `uv`.
 3. **`tools.python`** → installs `pdm` as an isolated CLI tool via
    `pipx`.  The pipx backend is **deferred** at preview time — it becomes
-   available only after Phase 2 installs it.
+   available only after Phase 2 installs it.  The `plugins` list then
+   runs `pdm self add cppython` to add the cppython plugin natively.
 4. **`post_sync`** → runs `pdm install` in the manifest directory,
    creating the project virtualenv and installing all dependencies from
    `pyproject.toml`.
@@ -26,6 +27,7 @@ The manifest executes in **phased order**:
 runtimes.python  ─►  pim / pyenv   ─►  Python 3.14
 packages.python  ─►  pip / uv      ─►  pipx
 tools.python     ─►  pipx          ─►  pdm          (deferred resolution)
+                 ─►  pdm self add  ─►  cppython     (native plugin management)
 post_sync        ─►  pdm install                    (project sync)
 ```
 

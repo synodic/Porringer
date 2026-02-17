@@ -21,7 +21,10 @@
         "python": [
             {
                 "name": "pdm",
-                "description": "Python package and dependency manager"
+                "description": "Python package and dependency manager",
+                "plugins": [
+                    "cppython"
+                ]
             }
         ]
     },
