@@ -105,6 +105,7 @@ class PimEnvironment(Environment, RuntimeProvider):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=30,
             )
             path = Path(result.stdout.strip())
             if path.exists():

@@ -10,6 +10,7 @@ import logging
 import re
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from packaging.version import InvalidVersion, Version
@@ -135,6 +136,7 @@ class ToolBasedPlugin(Plugin):
                 capture_output=True,
                 text=True,
                 check=check,
+                timeout=30,
             )
             if not check and result.returncode != 0:
                 logger.warning('%s exited with code %d', args[0], result.returncode)
@@ -147,3 +149,85 @@ class ToolBasedPlugin(Plugin):
         except json.JSONDecodeError as e:
             logger.warning('Could not parse JSON output from %s: %s', args[0], e)
         return None
+
+    @classmethod
+    def _run_text_command(cls, args: list[str], *, check: bool = False) -> str | None:
+        """Run a CLI command and return its stdout as text.
+
+        Centralises the common pattern of running a subprocess and
+        returning its standard output while handling failure modes:
+
+        * ``FileNotFoundError`` — the tool is not on PATH.
+        * ``subprocess.SubprocessError`` — the tool failed to run.
+
+        When *check* is ``True`` the call uses ``check=True`` so that a
+        non-zero exit code raises ``subprocess.CalledProcessError``.
+
+        Args:
+            args: Command and arguments.
+            check: Whether to raise on a non-zero exit code.
+
+        Returns:
+            The stdout string, or ``None`` on failure.
+        """
+        logger = logging.getLogger(f'porringer.{cls.tool_name()}.text_command')
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                check=check,
+                timeout=30,
+            )
+            if not check and result.returncode != 0:
+                logger.warning('%s exited with code %d', args[0], result.returncode)
+                return None
+            return result.stdout
+        except FileNotFoundError:
+            logger.error('%s not found on PATH', args[0])
+        except subprocess.SubprocessError as e:
+            logger.error('Failed to run %s: %s', args[0], e)
+        return None
+
+    @classmethod
+    def _run_bool_command(
+        cls,
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        label: str = 'command',
+    ) -> bool:
+        """Run a CLI command and return whether it succeeded.
+
+        Logs stdout at info level and stderr at error level on failure.
+        Returns ``True`` when the process exits with code 0.
+
+        Args:
+            args: Command and arguments.
+            cwd: Working directory for the subprocess.
+            label: Context label used in the logger name and error messages.
+
+        Returns:
+            ``True`` if the process exited cleanly, ``False`` otherwise.
+        """
+        logger = logging.getLogger(f'porringer.{cls.tool_name()}.{label}')
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=cwd,
+                timeout=300,
+            )
+            logger.info(result.stdout)
+            if result.returncode != 0:
+                logger.error(result.stderr)
+                return False
+        except FileNotFoundError:
+            logger.error('%s not found on PATH', args[0])
+            return False
+        except subprocess.SubprocessError as e:
+            logger.error('Failed to run %s: %s', label, e)
+            return False
+        return True

@@ -347,7 +347,7 @@ class PipEnvironment(PythonEnvironment):
             return self._cached_packages
 
         # Fallback: importlib.metadata (works without pip module installed)
-        logger.debug('pip module unavailable, falling back to importlib.metadata')
+        logger.warning('pip module unavailable for %s, falling back to importlib.metadata', effective_python)
         packages = self._list_packages_via_importlib(logger, effective_python)
         if packages is not None:
             self._cached_packages = packages
@@ -375,6 +375,7 @@ class PipEnvironment(PythonEnvironment):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=30,
             )
             entries: list[dict[str, str]] = json.loads(result.stdout)
             return [
@@ -418,6 +419,7 @@ class PipEnvironment(PythonEnvironment):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=30,
             )
             entries: list[dict[str, str]] = json.loads(result.stdout)
             return [

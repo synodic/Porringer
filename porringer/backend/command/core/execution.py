@@ -12,6 +12,7 @@ import logging
 import os
 import subprocess
 import sysconfig
+import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,7 +40,7 @@ from porringer.schema import (
 from porringer.utility.exception import PluginError
 
 from .action_builder import PHASE_ORDER, STRATEGY_VERB, action_description, get_cli_command
-from .discovery import discover_plugins
+from .discovery import discover_all_plugins, discover_plugins
 from .presence import dry_run_action, is_package_installed
 
 logger = logging.getLogger(__name__)
@@ -191,9 +192,13 @@ class PluginContext:
 # PATH refresh
 # ---------------------------------------------------------------------------
 
+_path_lock = threading.Lock()
+
 
 def _prepend_to_path(dirs: list[str], *, require_exists: bool = False) -> None:
     """Prepend directories to ``os.environ['PATH']`` if not already present.
+
+    Uses a lock to prevent concurrent mutations from interleaving.
 
     Args:
         dirs: Directory paths to prepend (in order).
@@ -201,12 +206,13 @@ def _prepend_to_path(dirs: list[str], *, require_exists: bool = False) -> None:
             exist on disk.  Useful for ``sysconfig`` directories that
             may not have been created yet.
     """
-    current_path = os.environ.get('PATH', '')
-    current_entries = set(current_path.split(os.pathsep))
-    new_entries = [d for d in dirs if d not in current_entries and (not require_exists or Path(d).is_dir())]
-    if new_entries:
-        os.environ['PATH'] = os.pathsep.join(new_entries) + os.pathsep + current_path
-        logger.debug('PATH updated with: %s', ', '.join(new_entries))
+    with _path_lock:
+        current_path = os.environ.get('PATH', '')
+        current_entries = set(current_path.split(os.pathsep))
+        new_entries = [d for d in dirs if d not in current_entries and (not require_exists or Path(d).is_dir())]
+        if new_entries:
+            os.environ['PATH'] = os.pathsep.join(new_entries) + os.pathsep + current_path
+            logger.debug('PATH updated with: %s', ', '.join(new_entries))
 
 
 def refresh_path() -> None:
@@ -865,16 +871,14 @@ async def execute_single(
 
     logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
-    environments = discover_plugins('environment', Environment, check_dependencies=True)
-    project_environments = discover_plugins('project_environment', ProjectEnvironment)
-    scm_environments = discover_plugins('scm', ScmEnvironment)
+    plugins = discover_all_plugins()
 
     state = ExecutionState(
         actions=actions,
         phases=group_actions_by_phase(actions),
-        environments=environments,
-        project_environments=project_environments,
-        scm_environments=scm_environments,
+        environments=plugins.environments,
+        project_environments=plugins.project_environments,
+        scm_environments=plugins.scm_environments,
         parameters=parameters,
         event_queue=event_queue,
         manifest_directory=root_directory,
