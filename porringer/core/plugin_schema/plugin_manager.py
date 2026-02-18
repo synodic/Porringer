@@ -48,6 +48,16 @@ class PluginManager(Protocol):
         """
         ...
 
+    @classmethod
+    @abstractmethod
+    def is_available(cls) -> bool:
+        """Check if the underlying tool is available on the system.
+
+        Implementers inherit this from ``ToolBasedPlugin`` which checks
+        ``shutil.which(tool_name())``.
+        """
+        ...
+
     @abstractmethod
     def plugin_add_command(self, plugin: PackageRef) -> list[str]:
         """Return the CLI command that adds a plugin natively.
@@ -111,6 +121,7 @@ class PluginManager(Protocol):
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=30,
             )
             if result.returncode != 0:
                 _logger.debug('plugin list failed: %s', result.stderr)
@@ -178,8 +189,6 @@ def find_plugin_manager(
     if not project_environments:
         return None
     for proj_env in project_environments.values():
-        if (
-            isinstance(proj_env, PluginManager) and type(proj_env).tool_name() == tool_name and proj_env.is_available()  # type: ignore[attr-defined]
-        ):
+        if isinstance(proj_env, PluginManager) and proj_env.tool_name() == tool_name and proj_env.is_available():
             return proj_env
     return None

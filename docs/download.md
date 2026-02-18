@@ -51,7 +51,7 @@ params = DownloadParameters(
     expected_hash="sha256:abc123...",
 )
 
-result = api.sync.download(params)
+result = api.download(params)
 print(f"Download success: {result.success}")
 ```
 
@@ -65,5 +65,5 @@ def progress(downloaded: int, total: int | None) -> None:
         percent = (downloaded / total) * 100
         print(f"Progress: {percent:.1f}%")
 
-result = api.sync.download(params, progress_callback=progress)
+result = api.download(params, progress_callback=progress)
 ```

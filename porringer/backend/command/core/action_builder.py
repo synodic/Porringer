@@ -26,7 +26,7 @@ from porringer.schema import (
 )
 
 from ..manifest import find_manifest
-from .discovery import discover_plugins
+from .discovery import discover_all_plugins
 
 logger = logging.getLogger(__name__)
 
@@ -292,10 +292,14 @@ def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) ->
     logger.info(f'Parsing manifest from: {path}')
 
     result = find_manifest(path)
-    environments = discover_plugins('environment', Environment, check_dependencies=True)
-    project_environments = discover_plugins('project_environment', ProjectEnvironment)
-    scm_environments = discover_plugins('scm', ScmEnvironment)
-    actions = build_actions(result.manifest, environments, strategy, project_environments, scm_environments)
+    plugins = discover_all_plugins()
+    actions = build_actions(
+        result.manifest,
+        plugins.environments,
+        strategy,
+        plugins.project_environments,
+        plugins.scm_environments,
+    )
     metadata = ManifestMetadata(
         name=result.manifest.name,
         description=result.manifest.description,

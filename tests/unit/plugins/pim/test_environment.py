@@ -56,6 +56,7 @@ class TestResolveExecutable:
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=30,
             )
 
     def test_resolve_not_installed(self, environment: PimEnvironment) -> None:

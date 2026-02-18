@@ -1,7 +1,6 @@
 """Plugin implementation for APT (Advanced Package Tool) package manager."""
 
 import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import override
@@ -147,46 +146,22 @@ class AptEnvironment(Environment):
         Returns:
             A list of installed packages
         """
-        logger = logging.getLogger('porringer.apt.packages')
+        output = self._run_text_command(['dpkg-query', '-W', '-f', '${Package}\t${Version}\n'])
+        if output is None:
+            return []
+
         packages: list[Package] = []
-
-        try:
-            # Use dpkg-query for more structured output
-            # Format: package-name\tversion
-            result = subprocess.run(
-                ['dpkg-query', '-W', '-f', '${Package}\t${Version}\n'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            if result.returncode != 0:
-                logger.warning('Failed to list installed packages')
-                return packages
-
-            # Parse the tab-separated output
-            for line in result.stdout.strip().split('\n'):
-                if '\t' in line:
-                    parts = line.split('\t', 1)
-                    name = parts[0].strip()
-                    version = parts[1].strip() if len(parts) > 1 else 'unknown'
-                    if name:
-                        packages.append(
-                            Package(
-                                name=name,
-                                version=version,
-                            )
-                        )
-
-        except FileNotFoundError:
-            logger.error('dpkg-query not found')
-        except Exception as e:
-            logger.error(f'Failed to list packages: {e}')
-
+        for line in output.strip().split('\n'):
+            if '\t' in line:
+                parts = line.split('\t', 1)
+                name = parts[0].strip()
+                version = parts[1].strip() if len(parts) > 1 else 'unknown'
+                if name:
+                    packages.append(Package(name=name, version=version))
         return packages
 
-    @staticmethod
-    def _get_package_version(package: str) -> str | None:
+    @classmethod
+    def _get_package_version(cls, package: str) -> str | None:
         """Gets the installed version for a package.
 
         Args:
@@ -195,17 +170,7 @@ class AptEnvironment(Environment):
         Returns:
             The version string, or None if not found
         """
-        try:
-            result = subprocess.run(
-                ['dpkg-query', '-W', '-f', '${Version}', package],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except Exception:
-            pass
-
+        output = cls._run_text_command(['dpkg-query', '-W', '-f', '${Version}', package])
+        if output and output.strip():
+            return output.strip()
         return None

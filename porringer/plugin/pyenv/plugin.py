@@ -95,6 +95,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=30,
             )
             prefix = Path(result.stdout.strip())
             executable = prefix / 'bin' / 'python'
@@ -126,29 +127,8 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         Returns:
             A list of installed Python runtime packages.
         """
-        logger = logging.getLogger('porringer.pyenv.packages')
-        packages: list[Package] = []
+        output = self._run_text_command(['pyenv', 'versions', '--bare'])
+        if output is None:
+            return []
 
-        try:
-            result = subprocess.run(
-                ['pyenv', 'versions', '--bare'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            if result.returncode != 0:
-                logger.warning('pyenv versions --bare failed')
-                return packages
-
-            for line in result.stdout.splitlines():
-                version = line.strip()
-                if version:
-                    packages.append(Package(name=version, version=version))
-
-        except FileNotFoundError:
-            logger.error('pyenv not found on PATH')
-        except Exception as e:
-            logger.error('Failed to list pyenv runtimes: %s', e)
-
-        return packages
+        return [Package(name=version, version=version) for line in output.splitlines() if (version := line.strip())]

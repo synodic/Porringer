@@ -127,6 +127,93 @@ class PluginCommands:
         return packages
 
     @staticmethod
+    def _build_install_args(name: str) -> builtins.list[str]:
+        """Build the install command for a plugin package."""
+        if is_pipx_installation():
+            return ['pipx', 'inject', 'porringer', name]
+        return [sys.executable, '-m', 'pip', 'install', name]
+
+    @staticmethod
+    def _build_uninstall_args(name: str) -> builtins.list[str]:
+        """Build the uninstall command for a plugin package."""
+        if is_pipx_installation():
+            return ['pipx', 'uninject', 'porringer', name]
+        return [sys.executable, '-m', 'pip', 'uninstall', '-y', name]
+
+    @staticmethod
+    def _build_update_args(name: str) -> builtins.list[str]:
+        """Build the update command for a plugin package."""
+        if is_pipx_installation():
+            return ['pipx', 'runpip', 'porringer', 'install', '--upgrade', name]
+        return [sys.executable, '-m', 'pip', 'install', '--upgrade', name]
+
+    @staticmethod
+    def _run_plugin_operation(
+        name: str,
+        args: builtins.list[str],
+        *,
+        verb: str,
+        dry_run: bool,
+        timeout: int,
+    ) -> PluginOperationResult:
+        """Execute a plugin subprocess operation with dry-run support.
+
+        Centralises the dry-run check, subprocess invocation, error
+        handling, and result construction shared by install / uninstall /
+        update.
+
+        Args:
+            name: Plugin package name.
+            args: Full command-line arguments.
+            verb: Human-readable verb (``"install"``, ``"uninstall"``, ``"update"``).
+            dry_run: If ``True``, only report what would be done.
+            timeout: Subprocess timeout in seconds.
+
+        Returns:
+            PluginOperationResult indicating outcome.
+        """
+        past = f'{verb}ed' if not verb.endswith('e') else f'{verb}d'
+
+        if dry_run:
+            cmd_str = ' '.join(args)
+            logger.info(f'Dry run: would execute: {cmd_str}')
+            return PluginOperationResult(
+                plugin_name=name,
+                success=True,
+                message=f'Would {verb}: {cmd_str}',
+            )
+
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=timeout)
+            if result.returncode != 0:
+                logger.error(f'{verb.capitalize()} failed for {name}: {result.stderr}')
+                return PluginOperationResult(
+                    plugin_name=name,
+                    success=False,
+                    message=f'{verb.capitalize()} failed: {result.stderr.strip()}',
+                )
+            logger.info(f'Successfully {past} plugin: {name}')
+            return PluginOperationResult(
+                plugin_name=name,
+                success=True,
+                message=f"Successfully {past} plugin '{name}'",
+            )
+        except FileNotFoundError as e:
+            logger.error(f'Command not found: {e}')
+            return PluginOperationResult(
+                plugin_name=name,
+                success=False,
+                message=f'Command not found: {e}',
+            )
+        except subprocess.SubprocessError as e:
+            logger.error(f'Subprocess error: {e}')
+            return PluginOperationResult(
+                plugin_name=name,
+                success=False,
+                message=f'Subprocess error: {e}',
+            )
+
+    @staticmethod
     def install(name: str, *, dry_run: bool = False) -> PluginOperationResult:
         """Install a plugin package.
 
@@ -149,45 +236,14 @@ class PluginCommands:
         # Get plugins before installation for comparison
         plugins_before = PluginCommands._get_existing_plugin_packages()
 
-        # Build installation command
-        if is_pipx_installation():
-            args = ['pipx', 'inject', 'porringer', name]
-        else:
-            args = [sys.executable, '-m', 'pip', 'install', name]
+        args = PluginCommands._build_install_args(name)
 
         if dry_run:
-            # For dry run, just show what would be done
-            cmd_str = ' '.join(args)
-            logger.info(f'Dry run: would execute: {cmd_str}')
-            return PluginOperationResult(
-                plugin_name=name,
-                success=True,
-                message=f'Would install: {cmd_str}',
-            )
+            return PluginCommands._run_plugin_operation(name, args, verb='install', dry_run=True, timeout=120)
 
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
-            if result.returncode != 0:
-                logger.error(f'Installation failed: {result.stderr}')
-                return PluginOperationResult(
-                    plugin_name=name,
-                    success=False,
-                    message=f'Installation failed: {result.stderr.strip()}',
-                )
-        except FileNotFoundError as e:
-            logger.error(f'Command not found: {e}')
-            return PluginOperationResult(
-                plugin_name=name,
-                success=False,
-                message=f'Command not found: {e}',
-            )
-        except subprocess.SubprocessError as e:
-            logger.error(f'Subprocess error: {e}')
-            return PluginOperationResult(
-                plugin_name=name,
-                success=False,
-                message=f'Subprocess error: {e}',
-            )
+        result = PluginCommands._run_plugin_operation(name, args, verb='install', dry_run=False, timeout=120)
+        if not result.success:
+            return result
 
         # Validate that the package provides a porringer plugin entry point
         plugins_after = PluginCommands._get_existing_plugin_packages()
@@ -199,12 +255,7 @@ class PluginCommands:
             groups = ', '.join(PluginCommands._PLUGIN_GROUPS)
             raise PluginError(f"Package '{name}' is not a valid Porringer plugin (no entry point in {groups})")
 
-        logger.info(f'Successfully installed plugin: {name}')
-        return PluginOperationResult(
-            plugin_name=name,
-            success=True,
-            message=f"Successfully installed plugin '{name}'",
-        )
+        return result
 
     @staticmethod
     def _uninstall_package(name: str) -> subprocess.CompletedProcess[str]:
@@ -216,12 +267,8 @@ class PluginCommands:
         Returns:
             The completed process result.
         """
-        if is_pipx_installation():
-            args = ['pipx', 'uninject', 'porringer', name]
-        else:
-            args = [sys.executable, '-m', 'pip', 'uninstall', '-y', name]
-
-        return subprocess.run(args, capture_output=True, text=True, check=False)
+        args = PluginCommands._build_uninstall_args(name)
+        return subprocess.run(args, capture_output=True, text=True, check=False, timeout=60)
 
     @staticmethod
     def uninstall(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
@@ -238,63 +285,10 @@ class PluginCommands:
 
         for name in names:
             logger.info(f'Uninstalling plugin: {name}')
-
-            # Build uninstall command
-            if is_pipx_installation():
-                args = ['pipx', 'uninject', 'porringer', name]
-            else:
-                args = [sys.executable, '-m', 'pip', 'uninstall', '-y', name]
-
-            if dry_run:
-                cmd_str = ' '.join(args)
-                logger.info(f'Dry run: would execute: {cmd_str}')
-                results.append(
-                    PluginOperationResult(
-                        plugin_name=name,
-                        success=True,
-                        message=f'Would uninstall: {cmd_str}',
-                    )
-                )
-                continue
-
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                if result.returncode != 0:
-                    logger.error(f'Uninstall failed for {name}: {result.stderr}')
-                    results.append(
-                        PluginOperationResult(
-                            plugin_name=name,
-                            success=False,
-                            message=f'Uninstall failed: {result.stderr.strip()}',
-                        )
-                    )
-                else:
-                    logger.info(f'Successfully uninstalled plugin: {name}')
-                    results.append(
-                        PluginOperationResult(
-                            plugin_name=name,
-                            success=True,
-                            message=f"Successfully uninstalled plugin '{name}'",
-                        )
-                    )
-            except FileNotFoundError as e:
-                logger.error(f'Command not found: {e}')
-                results.append(
-                    PluginOperationResult(
-                        plugin_name=name,
-                        success=False,
-                        message=f'Command not found: {e}',
-                    )
-                )
-            except subprocess.SubprocessError as e:
-                logger.error(f'Subprocess error: {e}')
-                results.append(
-                    PluginOperationResult(
-                        plugin_name=name,
-                        success=False,
-                        message=f'Subprocess error: {e}',
-                    )
-                )
+            args = PluginCommands._build_uninstall_args(name)
+            results.append(
+                PluginCommands._run_plugin_operation(name, args, verb='uninstall', dry_run=dry_run, timeout=60)
+            )
 
         return results
 
@@ -313,62 +307,9 @@ class PluginCommands:
 
         for name in names:
             logger.info(f'Updating plugin: {name}')
-
-            # Build update command
-            if is_pipx_installation():
-                args = ['pipx', 'runpip', 'porringer', 'install', '--upgrade', name]
-            else:
-                args = [sys.executable, '-m', 'pip', 'install', '--upgrade', name]
-
-            if dry_run:
-                cmd_str = ' '.join(args)
-                logger.info(f'Dry run: would execute: {cmd_str}')
-                results.append(
-                    PluginOperationResult(
-                        plugin_name=name,
-                        success=True,
-                        message=f'Would update: {cmd_str}',
-                    )
-                )
-                continue
-
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, check=False)
-                if result.returncode != 0:
-                    logger.error(f'Update failed for {name}: {result.stderr}')
-                    results.append(
-                        PluginOperationResult(
-                            plugin_name=name,
-                            success=False,
-                            message=f'Update failed: {result.stderr.strip()}',
-                        )
-                    )
-                else:
-                    logger.info(f'Successfully updated plugin: {name}')
-                    results.append(
-                        PluginOperationResult(
-                            plugin_name=name,
-                            success=True,
-                            message=f"Successfully updated plugin '{name}'",
-                        )
-                    )
-            except FileNotFoundError as e:
-                logger.error(f'Command not found: {e}')
-                results.append(
-                    PluginOperationResult(
-                        plugin_name=name,
-                        success=False,
-                        message=f'Command not found: {e}',
-                    )
-                )
-            except subprocess.SubprocessError as e:
-                logger.error(f'Subprocess error: {e}')
-                results.append(
-                    PluginOperationResult(
-                        plugin_name=name,
-                        success=False,
-                        message=f'Subprocess error: {e}',
-                    )
-                )
+            args = PluginCommands._build_update_args(name)
+            results.append(
+                PluginCommands._run_plugin_operation(name, args, verb='update', dry_run=dry_run, timeout=120)
+            )
 
         return results

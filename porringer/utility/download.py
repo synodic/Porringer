@@ -6,6 +6,7 @@ import hashlib
 import http.client
 import logging
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -23,6 +24,11 @@ from porringer.schema import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for transient network errors.
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 1.0  # seconds; doubles each attempt
+_SERVER_ERROR_THRESHOLD = 500  # HTTP status codes >= this are retryable
 
 
 @dataclass
@@ -140,13 +146,21 @@ def _parse_and_validate_hash(
     return parse_hash_string(expected_hash)
 
 
+def _is_retryable_http_error(exc: HTTPError) -> bool:
+    """Return True for server-side HTTP errors that may succeed on retry."""
+    return exc.code >= _SERVER_ERROR_THRESHOLD
+
+
 def _download_with_temp_file(
     parameters: DownloadParameters,
     expected_algorithm: HashAlgorithm | None,
     expected_digest: str | None,
     progress_callback: ProgressCallback | None,
 ) -> DownloadResult:
-    """Download file to temporary location with verification.
+    """Download file to temporary location with verification and retries.
+
+    Transient network errors (timeouts, connection resets, 5xx responses)
+    are retried up to ``_MAX_RETRIES`` times with exponential back-off.
 
     Args:
         parameters: Download parameters.
@@ -158,46 +172,58 @@ def _download_with_temp_file(
         DownloadResult.
     """
     state = _DownloadState(parameters, expected_algorithm, expected_digest, progress_callback)
-    temp_path: Path | None = None
+    last_result: DownloadResult | None = None
 
-    try:
-        # Create temp file
-        temp_fd, temp_path_str = tempfile.mkstemp(
-            dir=parameters.destination.parent,
-            prefix='.download_',
-            suffix='.tmp',
-        )
-        temp_path = Path(temp_path_str)
+    for attempt in range(_MAX_RETRIES):
+        temp_path: Path | None = None
+        try:
+            temp_fd, temp_path_str = tempfile.mkstemp(
+                dir=parameters.destination.parent,
+                prefix='.download_',
+                suffix='.tmp',
+            )
+            temp_path = Path(temp_path_str)
 
-        # Perform download
-        result = _perform_download(temp_fd, state)
+            result = _perform_download(temp_fd, state)
 
-        if result.success:
-            # Atomic move to destination
-            temp_path.replace(parameters.destination)
-            logger.info(f'Saved to: {parameters.destination}')
+            if result.success:
+                temp_path.replace(parameters.destination)
+                logger.info(f'Saved to: {parameters.destination}')
+                return result
 
-        return result
+            # Non-retryable verification failure
+            return result
 
-    except TimeoutError:
-        return DownloadResult(success=False, message=f'Download timed out after {parameters.timeout} seconds')
-    except HTTPError as e:
-        logger.error(f'Download failed with HTTP error {e.code}: {e.reason}')
-        return DownloadResult(success=False, message=f'HTTP Error {e.code}: {e.reason}')
-    except URLError as e:
-        logger.error(f'Download failed with network error: {e.reason}')
-        return DownloadResult(success=False, message=f'Network error: {e.reason}')
-    except OSError as e:
-        logger.error(f'Download failed with file error: {e}')
-        return DownloadResult(success=False, message=str(e))
-    except Exception as e:
-        logger.error(f'Download failed: {e}')
-        return DownloadResult(success=False, message=str(e))
-    finally:
-        # Clean up temp file on failure
-        if temp_path and temp_path.exists():
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
+        except HTTPError as e:
+            last_result = DownloadResult(success=False, message=f'HTTP Error {e.code}: {e.reason}')
+            if not _is_retryable_http_error(e):
+                logger.error(f'Download failed with HTTP error {e.code}: {e.reason}')
+                return last_result
+            logger.warning('Retryable HTTP %d on attempt %d/%d', e.code, attempt + 1, _MAX_RETRIES)
+        except TimeoutError:
+            last_result = DownloadResult(
+                success=False, message=f'Download timed out after {parameters.timeout} seconds'
+            )
+            logger.warning('Timeout on attempt %d/%d', attempt + 1, _MAX_RETRIES)
+        except (URLError, ConnectionError, OSError) as e:
+            last_result = DownloadResult(success=False, message=f'Network error: {e}')
+            logger.warning('Network error on attempt %d/%d: %s', attempt + 1, _MAX_RETRIES, e)
+        except Exception as e:
+            logger.error(f'Download failed: {e}')
+            return DownloadResult(success=False, message=str(e))
+        finally:
+            if temp_path and temp_path.exists():
+                with contextlib.suppress(OSError):
+                    temp_path.unlink()
+
+        # Exponential back-off before next attempt
+        if attempt < _MAX_RETRIES - 1:
+            delay = _RETRY_BACKOFF_BASE * (2**attempt)
+            logger.debug('Waiting %.1fs before retry', delay)
+            time.sleep(delay)
+
+    # All retries exhausted
+    return last_result or DownloadResult(success=False, message='Download failed after retries')
 
 
 def _perform_download(temp_fd: int, state: _DownloadState) -> DownloadResult:
@@ -334,6 +360,57 @@ def _verify_download(
 # --- Async Download Implementation ---
 
 
+async def _async_download_attempt(
+    state: _DownloadState,
+    cancellation_token: CancellationToken | None,
+) -> DownloadResult:
+    """Execute a single async download attempt.
+
+    Downloads to a temporary file, verifies, and moves to the
+    destination on success.  The caller is responsible for retry logic.
+
+    Args:
+        state: Download state.
+        cancellation_token: Optional cancellation token.
+
+    Returns:
+        DownloadResult.
+
+    Raises:
+        asyncio.CancelledError: If cancelled.
+        TimeoutError: On timeout.
+        httpx.HTTPStatusError: On HTTP status errors.
+        httpx.HTTPError: On other HTTP errors.
+        OSError: On filesystem errors.
+    """
+    temp_path: Path | None = None
+    try:
+        temp_fd, temp_path_str = tempfile.mkstemp(
+            dir=state.parameters.destination.parent,
+            prefix='.download_',
+            suffix='.tmp',
+        )
+        temp_path = Path(temp_path_str)
+
+        result = await _async_perform_download(temp_fd, state, cancellation_token)
+
+        if result.success:
+            temp_path.replace(state.parameters.destination)
+            logger.info(f'Saved to: {state.parameters.destination}')
+            return DownloadResult(
+                success=True,
+                path=state.parameters.destination,
+                verified=result.verified,
+                size=result.size,
+            )
+
+        return result
+    finally:
+        if temp_path and temp_path.exists():
+            with contextlib.suppress(OSError):
+                temp_path.unlink()
+
+
 async def async_download_file(
     parameters: DownloadParameters,
     progress_callback: ProgressCallback | None = None,
@@ -345,7 +422,8 @@ async def async_download_file(
     that need to keep their event loop responsive during downloads.
 
     Downloads to a temporary file first, verifies hash if provided,
-    then atomically moves to the destination.
+    then atomically moves to the destination.  Transient network errors
+    are retried up to ``_MAX_RETRIES`` times with exponential back-off.
 
     Note: Callbacks are invoked from the asyncio event loop thread.
     GUI applications must marshal updates to their UI thread.
@@ -363,20 +441,16 @@ async def async_download_file(
     """
     logger.info(f'Downloading (async): {parameters.url}')
 
-    # Check for cancellation before starting
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
 
-    # Parse and validate hash if provided
     try:
         expected_algorithm, expected_digest = _parse_and_validate_hash(parameters.expected_hash)
     except ValueError as e:
         return DownloadResult(success=False, message=str(e))
 
-    # Create parent directory if needed
     parameters.destination.parent.mkdir(parents=True, exist_ok=True)
 
-    # Bundle state for download
     state = _DownloadState(
         parameters=parameters,
         expected_algorithm=expected_algorithm,
@@ -384,51 +458,42 @@ async def async_download_file(
         progress_callback=progress_callback,
     )
 
-    # Download to temp file
-    temp_path: Path | None = None
+    last_result: DownloadResult | None = None
 
-    try:
-        temp_fd, temp_path_str = tempfile.mkstemp(
-            dir=parameters.destination.parent,
-            prefix='.download_',
-            suffix='.tmp',
-        )
-        temp_path = Path(temp_path_str)
+    for attempt in range(_MAX_RETRIES):
+        try:
+            result = await _async_download_attempt(state, cancellation_token)
+            if not result.success:
+                return result
+            return result
 
-        result = await _async_perform_download(
-            temp_fd,
-            state,
-            cancellation_token,
-        )
-
-        if result.success:
-            temp_path.replace(parameters.destination)
-            logger.info(f'Saved to: {parameters.destination}')
-            # Update path in result
-            return DownloadResult(
-                success=True,
-                path=parameters.destination,
-                verified=result.verified,
-                size=result.size,
+        except asyncio.CancelledError:
+            logger.info('Download cancelled')
+            raise
+        except TimeoutError:
+            last_result = DownloadResult(
+                success=False, message=f'Download timed out after {parameters.timeout} seconds'
             )
+            logger.warning('Timeout on attempt %d/%d', attempt + 1, _MAX_RETRIES)
+        except httpx.HTTPStatusError as e:
+            last_result = DownloadResult(success=False, message=str(e))
+            if e.response.status_code < _SERVER_ERROR_THRESHOLD:
+                logger.error(f'HTTP error: {e}')
+                return last_result
+            logger.warning('Retryable HTTP %d on attempt %d/%d', e.response.status_code, attempt + 1, _MAX_RETRIES)
+        except (httpx.HTTPError, OSError) as e:
+            last_result = DownloadResult(success=False, message=str(e))
+            logger.warning('Network error on attempt %d/%d: %s', attempt + 1, _MAX_RETRIES, e)
+        except Exception as e:
+            logger.error(f'Download failed: {e}')
+            return DownloadResult(success=False, message=str(e))
 
-        return result
+        if attempt < _MAX_RETRIES - 1:
+            delay = _RETRY_BACKOFF_BASE * (2**attempt)
+            logger.debug('Waiting %.1fs before retry', delay)
+            await asyncio.sleep(delay)
 
-    except asyncio.CancelledError:
-        logger.info('Download cancelled')
-        raise
-    except TimeoutError:
-        return DownloadResult(success=False, message=f'Download timed out after {parameters.timeout} seconds')
-    except httpx.HTTPError as e:
-        logger.error(f'HTTP error: {e}')
-        return DownloadResult(success=False, message=str(e))
-    except Exception as e:
-        logger.error(f'Download failed: {e}')
-        return DownloadResult(success=False, message=str(e))
-    finally:
-        if temp_path and temp_path.exists():
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
+    return last_result or DownloadResult(success=False, message='Download failed after retries')
 
 
 async def _async_stream_download(

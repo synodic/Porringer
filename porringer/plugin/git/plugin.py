@@ -1,7 +1,6 @@
 """Git SCM plugin implementation."""
 
 import logging
-import subprocess
 from pathlib import Path
 from typing import override
 
@@ -54,20 +53,7 @@ class GitScm(ScmEnvironment):
             logger.info('Would clone %s into %s', url, destination)
             return True
 
-        args = ['git', 'clone', url, str(destination)]
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return False
-        except FileNotFoundError:
-            logger.error('git not found on PATH')
-            return False
-        except subprocess.SubprocessError as e:
-            logger.error('Failed to clone repository: %s', e)
-            return False
-        return True
+        return self._run_bool_command(['git', 'clone', url, str(destination)], label='clone')
 
     @override
     def is_cloned(self, url: str, destination: Path) -> bool:

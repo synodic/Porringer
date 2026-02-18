@@ -97,7 +97,7 @@ flag so they can report what they *would* do without modifying the environment.
 
 ## Execution Phases
 
-The sync engine processes actions in five ordered phases:
+The sync engine processes actions in six ordered phases:
 
 | Phase | Kind        | Description                                               |
 | ----- | ----------- | --------------------------------------------------------- |
@@ -105,7 +105,8 @@ The sync engine processes actions in five ordered phases:
 | 2a    | `packages`  | Install packages (e.g. `pipx` via `pip`)                  |
 | 2b    | `tools`     | Install CLI tools (e.g. `pdm` via `pipx`)                 |
 | 3     | `projects`  | Synchronise project dependencies from lock files          |
-| 4     | `post_sync` | Run post-sync commands (e.g. `pdm install`)               |
+| 4     | `scm`       | Clone source repositories (e.g. via `git`)                |
+| 5     | `post_sync` | Run post-sync commands (e.g. `pdm install`)               |
 
 Between Phases 2a and 2b the engine **re-discovers available plugins** so that
 tools installed during Phase 2a (e.g. `pipx`) can be used as installers in

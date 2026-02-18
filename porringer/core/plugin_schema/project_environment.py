@@ -14,7 +14,6 @@ ecosystem's marker file (e.g. `package.json` for Node,
 """
 
 import logging
-import subprocess
 from abc import abstractmethod
 from pathlib import Path
 
@@ -273,18 +272,4 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         Returns:
             `True` if the process exited cleanly.
         """
-        tool = self.tool_name()
-        sync_logger = logging.getLogger(f'porringer.{tool}.sync')
-        try:
-            result = subprocess.run(args, cwd=directory, capture_output=True, text=True, check=False)
-            sync_logger.info(result.stdout)
-            if result.returncode != 0:
-                sync_logger.error(result.stderr)
-                return False
-        except FileNotFoundError:
-            sync_logger.error('%s not found on PATH', tool)
-            return False
-        except subprocess.SubprocessError as e:
-            sync_logger.error('Failed to sync project: %s', e)
-            return False
-        return True
+        return self._run_bool_command(args, cwd=directory, label='sync')

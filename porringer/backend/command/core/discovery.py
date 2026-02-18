@@ -9,10 +9,22 @@ it without circular dependencies.
 from __future__ import annotations
 
 import importlib
+from typing import NamedTuple
 
 from porringer.backend.builder import Builder
+from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin
 from porringer.utility.utility import canonicalize_type
+
+
+class DiscoveredPlugins(NamedTuple):
+    """Result of discovering all three plugin groups at once."""
+
+    environments: dict[str, Environment]
+    project_environments: dict[str, ProjectEnvironment]
+    scm_environments: dict[str, ScmEnvironment]
 
 
 def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> dict[str, T]:
@@ -38,3 +50,21 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
     infos = Builder.find_plugins(group, base_class, **kwargs)
     instances = Builder.build_plugins(infos)
     return {canonicalize_type(type(inst)).name: inst for inst in instances}
+
+
+def discover_all_plugins() -> DiscoveredPlugins:
+    """Discover all three plugin groups in one call.
+
+    Convenience wrapper that discovers environments (with dependency
+    checking), project environments, and SCM environments, returning
+    them as a :class:`DiscoveredPlugins` named tuple.
+
+    Returns:
+        A ``DiscoveredPlugins`` with ``environments``,
+        ``project_environments``, and ``scm_environments``.
+    """
+    return DiscoveredPlugins(
+        environments=discover_plugins('environment', Environment, check_dependencies=True),
+        project_environments=discover_plugins('project_environment', ProjectEnvironment),
+        scm_environments=discover_plugins('scm', ScmEnvironment),
+    )

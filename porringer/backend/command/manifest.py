@@ -29,10 +29,8 @@ from packaging.utils import canonicalize_name
 
 from porringer.backend.backend import BackendResolver
 from porringer.backend.builder import Builder
-from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.manifest import ManifestContributor
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import ManifestContribution, Plugin, PluginKind
 from porringer.schema import (
     ManifestDiagnostic,
@@ -43,7 +41,7 @@ from porringer.schema import (
 from porringer.schema.manifest import ManifestResult
 from porringer.utility.exception import ManifestError, ManifestValidationCode
 
-from .core.discovery import discover_plugins
+from .core.discovery import discover_all_plugins
 
 logger = logging.getLogger(__name__)
 
@@ -398,10 +396,12 @@ def validate_manifest(path: Path) -> ManifestValidationResult:
 
     _validate_schema_version(manifest, _error)
 
-    environments = discover_plugins('environment', Environment, check_dependencies=True)
-    project_environments = discover_plugins('project_environment', ProjectEnvironment)
-    scm_environments = discover_plugins('scm', ScmEnvironment)
-    all_plugins: dict[str, Plugin] = {**environments, **project_environments, **scm_environments}
+    plugins = discover_all_plugins()
+    all_plugins: dict[str, Plugin] = {
+        **plugins.environments,
+        **plugins.project_environments,
+        **plugins.scm_environments,
+    }
     resolver = BackendResolver(all_plugins, manifest.preferences)
 
     _validate_backends(manifest, resolver, _error, _warning)
