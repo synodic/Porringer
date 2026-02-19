@@ -52,9 +52,9 @@ def dry_run_action(
         project_environments: Optional dict of project-environment
             plugins, used to look up ``PluginManager`` instances for
             plugin-target presence checks.
-        parameters: Full setup parameters.  When provided, ``strategy``,
-            ``detect_updates`` and ``include_prereleases`` are read
-            from it.  When ``None``, ``SyncStrategy.MINIMAL`` is used.
+        parameters: Full setup parameters.  When provided, ``strategy``
+            and ``detect_updates`` are read from it.  When ``None``,
+            ``SyncStrategy.MINIMAL`` is used.
 
     Returns:
         The simulated result.
@@ -127,12 +127,11 @@ def _dry_run_package_action(
             msg: str | None = installed_detail
 
             if parameters is not None and parameters.detect_updates:
-                use_prereleases = action.include_prereleases or parameters.include_prereleases
                 newer = _check_for_newer_version(
                     env,
                     action.package,
                     installed_ver,
-                    include_prereleases=use_prereleases,
+                    include_prereleases=action.include_prereleases,
                 )
                 if newer is not None:
                     skip_reason = SkipReason.UPDATE_AVAILABLE
@@ -206,12 +205,11 @@ def _dry_run_plugin_action(
 
         if detect and has_env and action.installer is not None and parameters is not None:
             env = environments[action.installer]
-            use_prereleases = action.include_prereleases or parameters.include_prereleases
             newer = _check_for_newer_version(
                 env,
                 action.package,
                 installed_ver,
-                include_prereleases=use_prereleases,
+                include_prereleases=action.include_prereleases,
             )
             if newer is not None:
                 skip_reason = SkipReason.UPDATE_AVAILABLE

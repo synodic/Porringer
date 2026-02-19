@@ -1,8 +1,8 @@
 """Tests for update detection during dry-run.
 
 Covers the new ``SkipReason.UPDATE_AVAILABLE`` path, version fields
-on ``SetupActionResult``, and the ``detect_updates`` /
-``include_prereleases`` flags on ``SetupParameters``.
+on ``SetupActionResult``, and the ``detect_updates`` flag on
+``SetupParameters``.
 """
 
 from __future__ import annotations
@@ -221,25 +221,8 @@ class TestDryRunUpdateAvailable:
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
 
     @staticmethod
-    def test_include_prereleases_forwarded() -> None:
-        """include_prereleases flag is threaded to the check_updates call."""
-        action = _make_action()
-        env = _make_env(
-            installed=[Package(name='ruff', version='0.8.0')],
-            updates=[],
-        )
-        envs = {'pip': env}
-        params = SetupParameters(dry_run=True, detect_updates=True, include_prereleases=True)
-
-        _dry_run_package_action(action, envs, parameters=params)
-
-        call_args = env.check_updates.call_args
-        check_params: CheckUpdatesParameters = call_args[0][0]
-        assert check_params.include_prereleases is True
-
-    @staticmethod
-    def test_per_package_prereleases_overrides_global() -> None:
-        """Per-action include_prereleases=True is combined with global flag."""
+    def test_per_action_prereleases_forwarded() -> None:
+        """Per-action include_prereleases is threaded to check_updates."""
         action = _make_action()
         action.include_prereleases = True
         env = _make_env(
@@ -247,8 +230,7 @@ class TestDryRunUpdateAvailable:
             updates=[Package(name='ruff', version='0.9.0a1')],
         )
         envs = {'pip': env}
-        # Global is False, but per-package is True → prereleases included
-        params = SetupParameters(dry_run=True, detect_updates=True, include_prereleases=False)
+        params = SetupParameters(dry_run=True, detect_updates=True)
 
         _dry_run_package_action(action, envs, parameters=params)
 
@@ -301,13 +283,11 @@ class TestSetupParametersDefaults:
     def test_defaults() -> None:
         params = SetupParameters()
         assert params.detect_updates is False
-        assert params.include_prereleases is False
 
     @staticmethod
     def test_explicit_values() -> None:
-        params = SetupParameters(detect_updates=True, include_prereleases=True)
+        params = SetupParameters(detect_updates=True)
         assert params.detect_updates is True
-        assert params.include_prereleases is True
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +430,7 @@ class TestPluginTargetUpdateDetection:
         manager.tool_name.return_value = 'pdm'
         manager.is_available.return_value = True
 
-        params = SetupParameters(dry_run=True, detect_updates=True, include_prereleases=False)
+        params = SetupParameters(dry_run=True, detect_updates=True)
 
         with patch(
             'porringer.backend.command.core.presence.find_plugin_manager',
@@ -458,7 +438,7 @@ class TestPluginTargetUpdateDetection:
         ):
             result = dry_run_action(action, envs, parameters=params)
 
-        # Per-package flag overrides global False
+        # Per-action flag is threaded through
         call_args = env.check_updates.call_args
         check_params: CheckUpdatesParameters = call_args[0][0]
         assert check_params.include_prereleases is True
