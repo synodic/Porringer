@@ -45,7 +45,7 @@ def get_current_version() -> Version | None:
         return None
 
 
-async def check_for_updates() -> PackageUpdateInfo:
+async def check_self_updates() -> PackageUpdateInfo:
     """Check for updates to the Porringer package by querying PyPI.
 
     Returns:

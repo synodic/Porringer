@@ -22,6 +22,7 @@ class SkipReason(Enum):
 
     ALREADY_INSTALLED = auto()
     NO_PROJECT_DIRECTORY = auto()
+    UPDATE_AVAILABLE = auto()
 
 
 @dataclass
@@ -74,6 +75,10 @@ class SetupActionResult:
         message: Optional human-readable detail (error on failure, description on skip).
         skipped: Whether the action was skipped.
         skip_reason: Machine-readable skip code (see `SkipReason`).
+        installed_version: The currently installed version string, populated
+            when the action is skipped due to presence detection.
+        available_version: The latest upstream version string, populated
+            when ``skip_reason`` is ``UPDATE_AVAILABLE``.
     """
 
     action: SetupAction
@@ -81,6 +86,8 @@ class SetupActionResult:
     message: str | None = None
     skipped: bool = False
     skip_reason: SkipReason | None = None
+    installed_version: str | None = None
+    available_version: str | None = None
 
 
 class SyncStrategy(Enum):
@@ -122,6 +129,18 @@ class SetupParameters(BaseModel):
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
     dry_run: bool = Field(default=False, description='Preview actions without executing them')
     strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal, latest, or exact')
+    detect_updates: bool = Field(
+        default=False,
+        description=(
+            'When True and dry_run is True, installed packages are checked '
+            'for newer upstream versions via each plugin\u2019s native tooling. '
+            'Adds network latency; the GUI sets this explicitly.'
+        ),
+    )
+    include_prereleases: bool = Field(
+        default=False,
+        description='Include pre-release versions when checking for updates',
+    )
     plugins: list[str] | None = Field(
         default=None,
         description=(
