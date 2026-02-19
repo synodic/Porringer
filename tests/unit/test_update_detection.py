@@ -7,7 +7,7 @@ on ``SetupActionResult``, and the ``detect_updates`` /
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from porringer.backend.command.core.presence import (
     _check_for_newer_version,  # noqa: PLC2701
@@ -237,6 +237,25 @@ class TestDryRunUpdateAvailable:
         check_params: CheckUpdatesParameters = call_args[0][0]
         assert check_params.include_prereleases is True
 
+    @staticmethod
+    def test_per_package_prereleases_overrides_global() -> None:
+        """Per-action include_prereleases=True is combined with global flag."""
+        action = _make_action()
+        action.include_prereleases = True
+        env = _make_env(
+            installed=[Package(name='ruff', version='0.8.0')],
+            updates=[Package(name='ruff', version='0.9.0a1')],
+        )
+        envs = {'pip': env}
+        # Global is False, but per-package is True → prereleases included
+        params = SetupParameters(dry_run=True, detect_updates=True, include_prereleases=False)
+
+        _dry_run_package_action(action, envs, parameters=params)
+
+        call_args = env.check_updates.call_args
+        check_params: CheckUpdatesParameters = call_args[0][0]
+        assert check_params.include_prereleases is True
+
 
 # ---------------------------------------------------------------------------
 # dry_run_action — top-level dispatch
@@ -317,3 +336,130 @@ class TestSetupActionResultVersionFields:
         )
         assert result.installed_version == '1.0.0'
         assert result.available_version == '2.0.0'
+
+
+# ---------------------------------------------------------------------------
+# Plugin-target update detection
+# ---------------------------------------------------------------------------
+
+
+def _make_plugin_action(
+    name: str = 'cppython',
+    installer: str = 'pipx',
+    plugin_target: str = 'pdm',
+    include_prereleases: bool = False,
+) -> SetupAction:
+    """Create a plugin-target SetupAction (e.g. cppython added to pdm)."""
+    return SetupAction(
+        description=f"Add plugin '{name}' to '{plugin_target}' via {installer}",
+        kind=PluginKind.TOOL,
+        ecosystem=Ecosystem('python'),
+        installer=installer,
+        package=PackageRef.model_validate(name),
+        plugin_target=PackageRef.model_validate(plugin_target),
+        include_prereleases=include_prereleases,
+    )
+
+
+class TestPluginTargetUpdateDetection:
+    """Verify update detection for plugin-management actions (e.g. cppython→pdm)."""
+
+    @staticmethod
+    def test_plugin_update_available() -> None:
+        """When detect_updates=True and a newer version exists, plugin gets UPDATE_AVAILABLE."""
+        action = _make_plugin_action()
+        env = _make_env(updates=[Package(name='cppython', version='1.0.0')])
+        envs = {'pipx': env}
+
+        manager = MagicMock()
+        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.tool_name.return_value = 'pdm'
+        manager.is_available.return_value = True
+
+        params = SetupParameters(dry_run=True, detect_updates=True)
+
+        with patch(
+            'porringer.backend.command.core.presence.find_plugin_manager',
+            return_value=manager,
+        ):
+            result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
+        assert result.installed_version == '0.9.14'
+        assert result.available_version == '1.0.0'
+
+    @staticmethod
+    def test_plugin_no_update() -> None:
+        """When detect_updates=True but no newer version, plugin gets ALREADY_INSTALLED."""
+        action = _make_plugin_action()
+        env = _make_env(updates=[Package(name='cppython', version='0.9.14')])
+        envs = {'pipx': env}
+
+        manager = MagicMock()
+        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.tool_name.return_value = 'pdm'
+        manager.is_available.return_value = True
+
+        params = SetupParameters(dry_run=True, detect_updates=True)
+
+        with patch(
+            'porringer.backend.command.core.presence.find_plugin_manager',
+            return_value=manager,
+        ):
+            result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_INSTALLED
+
+    @staticmethod
+    def test_plugin_detect_updates_off() -> None:
+        """When detect_updates=False, plugin never calls check_updates."""
+        action = _make_plugin_action()
+        env = _make_env()
+        envs = {'pipx': env}
+
+        manager = MagicMock()
+        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.tool_name.return_value = 'pdm'
+        manager.is_available.return_value = True
+
+        params = SetupParameters(dry_run=True, detect_updates=False)
+
+        with patch(
+            'porringer.backend.command.core.presence.find_plugin_manager',
+            return_value=manager,
+        ):
+            result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_INSTALLED
+        env.check_updates.assert_not_called()
+
+    @staticmethod
+    def test_plugin_per_package_prereleases() -> None:
+        """Per-package include_prereleases on a plugin action is threaded to check_updates."""
+        action = _make_plugin_action(include_prereleases=True)
+        env = _make_env(
+            updates=[Package(name='cppython', version='1.0.0a1')],
+        )
+        envs = {'pipx': env}
+
+        manager = MagicMock()
+        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.tool_name.return_value = 'pdm'
+        manager.is_available.return_value = True
+
+        params = SetupParameters(dry_run=True, detect_updates=True, include_prereleases=False)
+
+        with patch(
+            'porringer.backend.command.core.presence.find_plugin_manager',
+            return_value=manager,
+        ):
+            result = dry_run_action(action, envs, parameters=params)
+
+        # Per-package flag overrides global False
+        call_args = env.check_updates.call_args
+        check_params: CheckUpdatesParameters = call_args[0][0]
+        assert check_params.include_prereleases is True
+        assert result.skip_reason == SkipReason.UPDATE_AVAILABLE

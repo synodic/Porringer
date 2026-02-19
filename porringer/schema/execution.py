@@ -52,6 +52,7 @@ class SetupAction:
         command: The command to run (for post-sync commands).
         cli_command: The actual CLI command (for display purposes).
         package_description: Optional per-package description from the manifest.
+        include_prereleases: Per-package opt-in for pre-release update detection.
     """
 
     description: str
@@ -63,6 +64,7 @@ class SetupAction:
     command: list[str] | None = None
     cli_command: list[str] | None = None
     package_description: str | None = None
+    include_prereleases: bool = False
 
 
 @dataclass

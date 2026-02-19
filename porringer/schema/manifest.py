@@ -86,6 +86,10 @@ class PackageSpec(PlatformScoped):
 
     name: PackageRef = Field(description='The package reference (name with optional version constraint)')
     description: str | None = Field(default=None, description='Human-readable description of this package')
+    include_prereleases: bool = Field(
+        default=False,
+        description='Include pre-release versions when checking this package for updates',
+    )
     plugins: list[PackageRef] = Field(
         default_factory=list,
         description="Sub-packages to add via this tool's native plugin management after installation",
