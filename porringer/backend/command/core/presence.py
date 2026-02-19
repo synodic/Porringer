@@ -97,7 +97,12 @@ def _dry_run_package_action(
 
     # --- Plugin-target actions: query the PluginManager, not the installer ---
     if action.plugin_target is not None:
-        return _dry_run_plugin_action(action, strategy, project_environments=project_environments)
+        return _dry_run_plugin_action(
+            action,
+            environments,
+            project_environments=project_environments,
+            parameters=parameters,
+        )
 
     # Determine name validator from the plugin
     env = environments[action.installer]
@@ -122,11 +127,12 @@ def _dry_run_package_action(
             msg: str | None = installed_detail
 
             if parameters is not None and parameters.detect_updates:
+                use_prereleases = action.include_prereleases or parameters.include_prereleases
                 newer = _check_for_newer_version(
                     env,
                     action.package,
                     installed_ver,
-                    include_prereleases=parameters.include_prereleases,
+                    include_prereleases=use_prereleases,
                 )
                 if newer is not None:
                     skip_reason = SkipReason.UPDATE_AVAILABLE
@@ -159,16 +165,20 @@ def _dry_run_package_action(
 
 def _dry_run_plugin_action(
     action: SetupAction,
-    strategy: SyncStrategy,
+    environments: dict[str, Environment],
     *,
     project_environments: dict[str, ProjectEnvironment] | None = None,
+    parameters: SetupParameters | None = None,
 ) -> SetupActionResult:
     """Simulate a plugin-management action in dry-run mode.
 
     Locates the ``PluginManager`` for the target tool and queries
     its installed plugins to determine whether the action would be
-    skipped.
+    skipped.  When ``parameters.detect_updates`` is ``True``, the
+    installer environment's ``check_updates`` is called to discover
+    newer upstream versions.
     """
+    strategy = parameters.strategy if parameters else SyncStrategy.MINIMAL
     assert action.plugin_target is not None
     assert action.package is not None
 
@@ -184,13 +194,43 @@ def _dry_run_plugin_action(
         return SetupActionResult(action=action, success=True)
 
     if strategy == SyncStrategy.MINIMAL and is_installed:
-        logger.info("Dry-run: skipping plugin '%s': %s", action.package, detail)
+        installed_ver = _matched.version if _matched else None
+
+        # --- Update detection (opt-in) --------------------------------
+        skip_reason = SkipReason.ALREADY_INSTALLED
+        available_ver: str | None = None
+        msg: str | None = detail
+
+        detect = parameters is not None and parameters.detect_updates
+        has_env = action.installer is not None and action.installer in environments
+
+        if detect and has_env and action.installer is not None and parameters is not None:
+            env = environments[action.installer]
+            use_prereleases = action.include_prereleases or parameters.include_prereleases
+            newer = _check_for_newer_version(
+                env,
+                action.package,
+                installed_ver,
+                include_prereleases=use_prereleases,
+            )
+            if newer is not None:
+                skip_reason = SkipReason.UPDATE_AVAILABLE
+                available_ver = newer
+                msg = f'{action.package.name} {installed_ver} \u2192 {available_ver}'
+                logger.info(f"Dry-run: update available for plugin '{action.package}': {msg}")
+            else:
+                logger.info("Dry-run: skipping plugin '%s': %s", action.package, detail)
+        else:
+            logger.info("Dry-run: skipping plugin '%s': %s", action.package, detail)
+
         return SetupActionResult(
             action=action,
             success=True,
             skipped=True,
-            skip_reason=SkipReason.ALREADY_INSTALLED,
-            message=detail,
+            skip_reason=skip_reason,
+            message=msg,
+            installed_version=installed_ver,
+            available_version=available_ver,
         )
     if strategy != SyncStrategy.MINIMAL and not is_installed:
         return SetupActionResult(action=action, success=True, message='not installed, will install instead')

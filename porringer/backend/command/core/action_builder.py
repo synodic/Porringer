@@ -229,6 +229,7 @@ def build_actions(
                     installer=installer,
                     package=package.name,
                     package_description=package.description,
+                    include_prereleases=package.include_prereleases,
                 )
             )
 
@@ -248,6 +249,7 @@ def build_actions(
                         installer=installer,
                         package=plugin_ref,
                         plugin_target=package.name,
+                        include_prereleases=package.include_prereleases,
                     )
                 )
 
