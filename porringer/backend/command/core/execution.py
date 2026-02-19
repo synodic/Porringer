@@ -341,7 +341,7 @@ async def execute_package(
         if manager is not None and strategy == SyncStrategy.MINIMAL:
             try:
                 installed = manager.installed_plugins()
-                is_plugin_installed, detail = is_package_installed(action.package, installed)
+                is_plugin_installed, detail = is_package_installed(action.package, installed)[:2]
                 if is_plugin_installed:
                     logger.info("Skipping plugin '%s': %s", action.package, detail)
                     return SetupActionResult(
@@ -373,7 +373,7 @@ async def execute_package(
         installed_packages = await loop.run_in_executor(None, lambda: environment.packages(project_path=project_path))
         is_installed, installed_detail = is_package_installed(
             action.package, installed_packages, validator, action.kind
-        )
+        )[:2]
     except PluginError as e:
         logger.debug(f'Plugin error checking packages for {action.installer}: {e}')
     except Exception as e:
@@ -573,9 +573,9 @@ async def execute_package_actions(
             _dry_run_package_actions(
                 package_actions,
                 environments,
-                parameters.strategy,
                 event_queue,
                 plugin_context=plugin_context,
+                parameters=parameters,
             ),
             True,
         )
@@ -613,10 +613,10 @@ async def execute_package_actions(
 def _dry_run_package_actions(
     package_actions: list[SetupAction],
     environments: dict[str, Environment],
-    strategy: SyncStrategy,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
     *,
     plugin_context: PluginContext | None = None,
+    parameters: SetupParameters | None = None,
 ) -> list[SetupActionResult]:
     """Execute dry-run for package actions."""
     project_path = plugin_context.project_path if plugin_context else None
@@ -626,9 +626,9 @@ def _dry_run_package_actions(
         result = dry_run_action(
             action,
             environments,
-            strategy,
             project_path=project_path,
             project_environments=project_environments,
+            parameters=parameters,
         )
         results.append(result)
         if event_queue is not None:
@@ -764,7 +764,7 @@ async def execute_command_actions(
             result = dry_run_action(
                 action,
                 state.environments,
-                state.strategy,
+                parameters=state.parameters,
             )
         else:
             result = execute_run_command(action, state.fallback_dir, state.parameters.timeout)

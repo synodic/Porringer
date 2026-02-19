@@ -464,7 +464,6 @@ class TestDryRunPluginPresence:
             result = dry_run_action(
                 _PLUGIN_ACTION,
                 environments,
-                SyncStrategy.MINIMAL,
                 project_environments=project_environments,
             )
 
@@ -482,7 +481,6 @@ class TestDryRunPluginPresence:
             result = dry_run_action(
                 _PLUGIN_ACTION,
                 environments,
-                SyncStrategy.MINIMAL,
                 project_environments=project_environments,
             )
 
@@ -495,7 +493,6 @@ class TestDryRunPluginPresence:
         result = dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            SyncStrategy.MINIMAL,
             project_environments=None,
         )
 

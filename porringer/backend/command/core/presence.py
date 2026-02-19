@@ -13,13 +13,14 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
-from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.schema import (
     SetupAction,
     SetupActionResult,
+    SetupParameters,
     SkipReason,
     SyncStrategy,
 )
@@ -30,10 +31,10 @@ logger = logging.getLogger(__name__)
 def dry_run_action(
     action: SetupAction,
     environments: dict[str, Environment],
-    strategy: SyncStrategy = SyncStrategy.MINIMAL,
     *,
     project_path: Path | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
+    parameters: SetupParameters | None = None,
 ) -> SetupActionResult:
     """Simulates executing an action in dry-run mode.
 
@@ -47,11 +48,13 @@ def dry_run_action(
     Args:
         action: The action to simulate.
         environments: Dict of instantiated environment plugins.
-        strategy: The sync strategy (affects skip logic for packages).
         project_path: Optional project directory for scoped package queries.
         project_environments: Optional dict of project-environment
             plugins, used to look up ``PluginManager`` instances for
             plugin-target presence checks.
+        parameters: Full setup parameters.  When provided, ``strategy``,
+            ``detect_updates`` and ``include_prereleases`` are read
+            from it.  When ``None``, ``SyncStrategy.MINIMAL`` is used.
 
     Returns:
         The simulated result.
@@ -59,7 +62,11 @@ def dry_run_action(
     match action.kind:
         case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
             return _dry_run_package_action(
-                action, environments, strategy, project_path=project_path, project_environments=project_environments
+                action,
+                environments,
+                project_path=project_path,
+                project_environments=project_environments,
+                parameters=parameters,
             )
         case PluginKind.PROJECT | PluginKind.SCM | None:
             return SetupActionResult(action=action, success=True)
@@ -70,12 +77,21 @@ def dry_run_action(
 def _dry_run_package_action(
     action: SetupAction,
     environments: dict[str, Environment],
-    strategy: SyncStrategy,
     *,
     project_path: Path | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
+    parameters: SetupParameters | None = None,
 ) -> SetupActionResult:
-    """Simulate a package action in dry-run mode."""
+    """Simulate a package action in dry-run mode.
+
+    When ``parameters.detect_updates`` is ``True`` and the package
+    is already installed under ``MINIMAL`` strategy, the plugin's
+    ``check_updates`` method is called to discover whether a newer
+    upstream version exists.  If one does, the result carries
+    ``SkipReason.UPDATE_AVAILABLE`` together with structured version
+    fields for GUI consumption.
+    """
+    strategy = parameters.strategy if parameters else SyncStrategy.MINIMAL
     if action.installer is None or action.package is None or action.installer not in environments:
         return SetupActionResult(action=action, success=True)
 
@@ -89,7 +105,7 @@ def _dry_run_package_action(
 
     try:
         installed_packages = environments[action.installer].packages(project_path=project_path)
-        is_installed, installed_detail = is_package_installed(
+        is_installed, installed_detail, matched_package = is_package_installed(
             action.package, installed_packages, validator, action.kind
         )
     except Exception as e:
@@ -98,13 +114,38 @@ def _dry_run_package_action(
 
     if strategy == SyncStrategy.MINIMAL:
         if is_installed:
-            logger.info(f"Dry-run: skipping '{action.package}': {installed_detail}")
+            installed_ver = matched_package.version if matched_package else None
+
+            # --- Update detection (opt-in) --------------------------------
+            skip_reason = SkipReason.ALREADY_INSTALLED
+            available_ver: str | None = None
+            msg: str | None = installed_detail
+
+            if parameters is not None and parameters.detect_updates:
+                newer = _check_for_newer_version(
+                    env,
+                    action.package,
+                    installed_ver,
+                    include_prereleases=parameters.include_prereleases,
+                )
+                if newer is not None:
+                    skip_reason = SkipReason.UPDATE_AVAILABLE
+                    available_ver = newer
+                    msg = f'{action.package.name} {installed_ver} → {available_ver}'
+                    logger.info(f"Dry-run: update available for '{action.package}': {msg}")
+                else:
+                    logger.info(f"Dry-run: skipping '{action.package}': {installed_detail}")
+            else:
+                logger.info(f"Dry-run: skipping '{action.package}': {installed_detail}")
+
             return SetupActionResult(
                 action=action,
                 success=True,
                 skipped=True,
-                skip_reason=SkipReason.ALREADY_INSTALLED,
-                message=installed_detail,
+                skip_reason=skip_reason,
+                message=msg,
+                installed_version=installed_ver,
+                available_version=available_ver,
             )
     elif not is_installed:
         return SetupActionResult(
@@ -137,7 +178,7 @@ def _dry_run_plugin_action(
 
     try:
         installed = manager.installed_plugins()
-        is_installed, detail = is_package_installed(action.package, installed)
+        is_installed, detail, _matched = is_package_installed(action.package, installed)
     except Exception as e:
         logger.debug('Dry-run: could not check installed plugins for %s: %s', action.plugin_target.name, e)
         return SetupActionResult(action=action, success=True)
@@ -157,12 +198,56 @@ def _dry_run_plugin_action(
     return SetupActionResult(action=action, success=True)
 
 
+def _check_for_newer_version(
+    env: Environment,
+    package: PackageRef,
+    installed_version: str | None,
+    *,
+    include_prereleases: bool = False,
+) -> str | None:
+    """Query the plugin for a newer upstream version.
+
+    Returns the latest version string when a newer version exists,
+    or ``None`` when the installed version is already the latest
+    (or when the plugin does not support update checks).
+    """
+    try:
+        updates = env.check_updates(
+            CheckUpdatesParameters(
+                packages=[package],
+                include_prereleases=include_prereleases,
+            )
+        )
+    except Exception as e:
+        logger.debug('check_updates failed for %s via %s: %s', package, env.tool_name(), e)
+        return None
+
+    if not updates:
+        return None
+
+    latest = updates[0]
+    if latest.version is None:
+        return None
+
+    # Compare versions when possible to avoid false positives
+    if installed_version is not None:
+        try:
+            if Version(latest.version) <= Version(installed_version):
+                return None
+        except InvalidVersion:
+            # Non-PEP-440 versions — fall back to string inequality
+            if latest.version == installed_version:
+                return None
+
+    return latest.version
+
+
 def is_package_installed(
     package: PackageRef,
     installed_packages: list[Package],
     name_validator: str | None = None,
     kind: PluginKind | None = None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, Package | None]:
     """Checks if a package is already installed with a compatible version.
 
     When *name_validator* is `'pep440'`, uses PEP 440 canonicalization
@@ -180,7 +265,9 @@ def is_package_installed(
         kind: The plugin kind (enables prefix matching for RUNTIME)
 
     Returns:
-        Tuple of (is_installed, skip_reason or None)
+        Tuple of (is_installed, detail_message, matched_package).
+        ``matched_package`` is the ``Package`` object that matched,
+        or ``None`` when the package is not installed.
     """
     is_pep440 = name_validator == 'pep440'
     is_runtime = kind == PluginKind.RUNTIME
@@ -198,19 +285,19 @@ def is_package_installed(
 
         # Name matched
         if not package.constraint:
-            return True, f'{installed.name}=={installed.version} already installed'
+            return True, f'{installed.name}=={installed.version} already installed', installed
 
         if installed.version is not None:
             if is_pep440:
                 try:
                     req = Requirement(str(package))
                     if Version(installed.version) in req.specifier:
-                        return True, f'{installed.name}=={installed.version} satisfies {package}'
+                        return True, f'{installed.name}=={installed.version} satisfies {package}', installed
                 except InvalidVersion, InvalidRequirement:
                     pass
             else:
                 # Non-PEP-440: installed means installed; constraint
                 # satisfaction is left to the underlying tool.
-                return True, f'{installed.name}=={installed.version} already installed'
+                return True, f'{installed.name}=={installed.version} already installed', installed
 
-    return False, None
+    return False, None, None

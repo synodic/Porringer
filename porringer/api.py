@@ -4,7 +4,7 @@ import logging
 
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.plugin import PluginCommands
-from porringer.backend.command.self import check_for_updates
+from porringer.backend.command.self import check_self_updates
 from porringer.backend.command.sync import SyncCommands
 from porringer.backend.resolver import resolve_configuration
 from porringer.backend.schema import GlobalConfiguration
@@ -46,13 +46,13 @@ class API:
         self.sync = SyncCommands(self.cache)
 
     @staticmethod
-    async def check_updates() -> PackageUpdateInfo:
+    async def check_self_updates() -> PackageUpdateInfo:
         """Check for updates to the Porringer package by querying PyPI.
 
         Returns:
             PackageUpdateInfo with current version, latest version, and update status.
         """
-        return await check_for_updates()
+        return await check_self_updates()
 
     @staticmethod
     def download(
