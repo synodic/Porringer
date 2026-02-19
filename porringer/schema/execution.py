@@ -139,10 +139,6 @@ class SetupParameters(BaseModel):
             'Adds network latency; the GUI sets this explicitly.'
         ),
     )
-    include_prereleases: bool = Field(
-        default=False,
-        description='Include pre-release versions when checking for updates',
-    )
     plugins: list[str] | None = Field(
         default=None,
         description=(
