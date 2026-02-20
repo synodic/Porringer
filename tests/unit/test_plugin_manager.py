@@ -452,6 +452,8 @@ class TestDryRunPluginPresence:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=installed)
         mock_pipx = MagicMock(spec=Environment)
         mock_pipx.packages.return_value = []
+        mock_pipx.check_updates.return_value = []
+        mock_pipx.tool_name.return_value = 'pipx'
         environments: dict[str, Environment] = {'pipx': mock_pipx}
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         return mock_pm, environments, project_environments
@@ -496,7 +498,7 @@ class TestDryRunPluginPresence:
         assert result.skipped is not True
 
     def test_upgrade_when_plugin_installed_latest_strategy(self) -> None:
-        """dry_run_action reports upgrade intent when LATEST strategy and plugin is installed."""
+        """dry_run_action skips plugin when LATEST strategy and no newer version exists."""
         _, environments, project_environments = self._make_envs(
             installed=[Package(name='cppython', version='0.9.14')],
         )
@@ -509,9 +511,9 @@ class TestDryRunPluginPresence:
             parameters=params,
         )
 
-        # LATEST + installed → upgrade, not skipped
-        assert result.skipped is not True
-        assert result.success is True
+        # LATEST + installed + no newer version → skip (ALREADY_LATEST)
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_LATEST
 
     def test_install_when_plugin_missing_latest_strategy(self) -> None:
         """dry_run_action reports install when LATEST strategy and plugin is missing."""
@@ -764,6 +766,8 @@ class TestResolveOperation:
     ) -> dict[str, Environment]:
         env = MagicMock(spec=Environment)
         env.packages.return_value = installed or []
+        env.check_updates.return_value = []
+        env.tool_name.return_value = 'pipx'
         type(env).package_name_validator = MagicMock(return_value='pep440')
         return {'pipx': env}
 
@@ -787,12 +791,13 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.INSTALL
 
     def test_latest_installed_upgrades(self) -> None:
-        """LATEST + installed → UPGRADE."""
+        """LATEST + installed + no newer version → SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
         resolved = asyncio.run(resolve_operation(action, envs, SyncStrategy.LATEST))
-        assert resolved.operation == OperationKind.UPGRADE
+        assert resolved.operation == OperationKind.SKIP
+        assert resolved.skip_reason == SkipReason.ALREADY_LATEST
 
     def test_latest_not_installed_installs(self) -> None:
         """LATEST + not installed → INSTALL (fallback)."""
@@ -803,12 +808,13 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.INSTALL
 
     def test_exact_installed_upgrades(self) -> None:
-        """EXACT + installed → UPGRADE."""
+        """EXACT + installed + no newer version → SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
         resolved = asyncio.run(resolve_operation(action, envs, SyncStrategy.EXACT))
-        assert resolved.operation == OperationKind.UPGRADE
+        assert resolved.operation == OperationKind.SKIP
+        assert resolved.skip_reason == SkipReason.ALREADY_LATEST
 
     # --- Plugin-management resolution ---
 
