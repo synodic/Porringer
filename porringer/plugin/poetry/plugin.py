@@ -49,6 +49,15 @@ class PoetryProjectEnvironment(ProjectEnvironment, PluginManager):
         return ['poetry', 'self', 'add', plugin.specifier]
 
     @override
+    def plugin_update_command(self, plugin: PackageRef) -> list[str]:
+        """Return ``poetry self add <plugin>``.
+
+        Poetry's ``self add`` handles both initial install and
+        upgrade, so this delegates to ``plugin_add_command``.
+        """
+        return self.plugin_add_command(plugin)
+
+    @override
     def plugin_list_command(self) -> list[str]:
         """Return ``poetry self show plugins``."""
         return ['poetry', 'self', 'show', 'plugins']
