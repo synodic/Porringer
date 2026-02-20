@@ -458,7 +458,7 @@ class TestPrereleasePackagesOverride:
     def test_override_sets_include_prereleases() -> None:
         """An action whose package is in prerelease_packages gets include_prereleases=True."""
         action = _make_action(name='ruff')
-        assert action.include_prereleases is False
+        assert not action.include_prereleases
 
         env = _make_env(
             installed=[Package(name='ruff', version='0.8.0')],
@@ -473,7 +473,7 @@ class TestPrereleasePackagesOverride:
             if action.package is not None and action.package.name.lower() in overrides:
                 action.include_prereleases = True
 
-        assert action.include_prereleases is True
+        assert action.include_prereleases
 
         result = _dry_run_package_action(action, envs, parameters=params)
 
@@ -578,15 +578,13 @@ class TestPluginSpec:
     @staticmethod
     def test_package_spec_plugins_accepts_mixed() -> None:
         """PackageSpec.plugins accepts a mix of strings and objects."""
-        spec = PackageSpec.model_validate(
-            {
-                'name': 'pdm',
-                'plugins': [
-                    'cppython',
-                    {'name': 'another-plugin', 'include_prereleases': True},
-                ],
-            }
-        )
+        spec = PackageSpec.model_validate({
+            'name': 'pdm',
+            'plugins': [
+                'cppython',
+                {'name': 'another-plugin', 'include_prereleases': True},
+            ],
+        })
         assert len(spec.plugins) == 2
         assert spec.plugins[0].name.name == 'cppython'
         assert spec.plugins[0].include_prereleases is False
@@ -596,13 +594,11 @@ class TestPluginSpec:
     @staticmethod
     def test_plugin_prereleases_independent_of_parent() -> None:
         """Plugin include_prereleases does not inherit from the parent PackageSpec."""
-        spec = PackageSpec.model_validate(
-            {
-                'name': 'pdm',
-                'include_prereleases': True,
-                'plugins': ['cppython'],
-            }
-        )
+        spec = PackageSpec.model_validate({
+            'name': 'pdm',
+            'include_prereleases': True,
+            'plugins': ['cppython'],
+        })
         # Parent has include_prereleases=True, but the plugin string shorthand defaults to False
         assert spec.include_prereleases is True
         assert spec.plugins[0].include_prereleases is False

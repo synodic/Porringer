@@ -63,10 +63,10 @@ _PEP440_CONSTRAINT_START = re.compile(r'[><=!~]')
 class PorringerModel(BaseModel):
     """The base model to use for all Porringer models"""
 
-    model_config = {'populate_by_name': False, 'arbitrary_types_allowed': True}
+    model_config = {'populate_by_name': False, 'arbitrary_types_allowed': True, 'extra': 'forbid'}
 
 
-class PlatformScoped(BaseModel):
+class PlatformScoped(PorringerModel):
     """Mixin for models that can be scoped to specific platforms.
 
     When `platforms` is empty the entry applies everywhere.
@@ -231,7 +231,7 @@ class ManifestContribution(PorringerModel):
     file_format: str = Field(description='File format: "toml" or "json"')
 
 
-class PluginDependency(PorringerModel, PlatformScoped):
+class PluginDependency(PlatformScoped):
     """Defines a dependency on another plugin"""
 
     plugin: str = Field(description='The name of the required plugin')

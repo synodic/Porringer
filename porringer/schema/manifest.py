@@ -8,9 +8,9 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import Field, HttpUrl, model_validator
 
-from porringer.core.schema import Ecosystem, PackageRef, PlatformScoped, PluginKind
+from porringer.core.schema import Ecosystem, PackageRef, PlatformScoped, PluginKind, PorringerModel
 
 if TYPE_CHECKING:
     from porringer.utility.exception import ManifestValidationCode
@@ -66,7 +66,7 @@ class ManifestValidationResult:
         return [d for d in self.diagnostics if d.severity == ManifestDiagnosticSeverity.WARNING]
 
 
-class PluginSpec(BaseModel):
+class PluginSpec(PorringerModel):
     """A plugin sub-package entry with optional metadata.
 
     Supports both string shorthand (just a package specifier) and object form
@@ -132,7 +132,7 @@ class PackageSpec(PlatformScoped):
         return data
 
 
-class SetupManifest(BaseModel):
+class SetupManifest(PorringerModel):
     """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer].
 
     Manifest entries are grouped by **kind** (`packages`, `tools`,
