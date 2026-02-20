@@ -172,6 +172,13 @@ class SyncCommands:
                     a for a in preview.actions if a.installer is None or a.installer in parameters.plugins
                 ]
 
+            # Apply caller-level prerelease overrides
+            if parameters.prerelease_packages:
+                overrides = {n.lower() for n in parameters.prerelease_packages}
+                for action in preview.actions:
+                    if action.package is not None and action.package.name.lower() in overrides:
+                        action.include_prereleases = True
+
             previews.append(preview)
 
         return previews, failed_paths
