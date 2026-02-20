@@ -924,15 +924,15 @@ class TestPackageSpecPlugins:
             assert results.actions[FOURTH_ACTION_INDEX].plugin_target is None
 
     @staticmethod
-    def test_plugin_action_description_contains_add_plugin() -> None:
-        """Plugin-management actions should have 'Add plugin' in their description"""
+    def test_plugin_action_description_contains_plugin_keyword() -> None:
+        """Plugin-management actions should have 'plugin' in their description"""
         manifest = SetupManifest(tools={_PY: [{'name': 'pdm', 'plugins': ['cppython']}]})
         environments: dict[str, Environment] = {}
         actions = build_actions(manifest, environments)
 
         plugin_actions = [a for a in actions if a.plugin_target is not None]
         for action in plugin_actions:
-            assert 'Add plugin' in action.description
+            assert 'plugin' in action.description
 
     @staticmethod
     def test_json_manifest_with_plugins_roundtrip() -> None:

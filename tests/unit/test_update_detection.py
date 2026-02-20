@@ -8,9 +8,10 @@ on ``SetupActionResult``, and the ``detect_updates`` flag on
 from unittest.mock import MagicMock, patch
 
 from porringer.backend.command.core.presence import (
-    _check_for_newer_version,  # noqa: PLC2701
-    _dry_run_package_action,  # noqa: PLC2701
     dry_run_action,
+)
+from porringer.backend.command.core.resolution import (
+    _check_for_newer_version,  # noqa: PLC2701
     is_package_installed,
 )
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
@@ -132,7 +133,7 @@ class TestCheckForNewerVersion:
 
 
 # ---------------------------------------------------------------------------
-# _dry_run_package_action — UPDATE_AVAILABLE path
+# dry_run_action — UPDATE_AVAILABLE path
 # ---------------------------------------------------------------------------
 
 
@@ -150,7 +151,7 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        result = _dry_run_package_action(action, envs, parameters=params)
+        result = dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
@@ -169,7 +170,7 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        result = _dry_run_package_action(action, envs, parameters=params)
+        result = dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
@@ -184,7 +185,7 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=False)
 
-        result = _dry_run_package_action(action, envs, parameters=params)
+        result = dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
@@ -198,7 +199,7 @@ class TestDryRunUpdateAvailable:
         env = _make_env(installed=[Package(name='ruff', version='0.8.0')])
         envs = {'pip': env}
 
-        result = _dry_run_package_action(action, envs)
+        result = dry_run_action(action, envs)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
@@ -215,7 +216,7 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        result = _dry_run_package_action(action, envs, parameters=params)
+        result = dry_run_action(action, envs, parameters=params)
 
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
 
@@ -231,7 +232,7 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        _dry_run_package_action(action, envs, parameters=params)
+        dry_run_action(action, envs, parameters=params)
 
         call_args = env.check_updates.call_args
         check_params: CheckUpdatesParameters = call_args[0][0]
@@ -358,7 +359,7 @@ class TestPluginTargetUpdateDetection:
         params = SetupParameters(dry_run=True, detect_updates=True)
 
         with patch(
-            'porringer.backend.command.core.presence.find_plugin_manager',
+            'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
             result = dry_run_action(action, envs, parameters=params)
@@ -383,7 +384,7 @@ class TestPluginTargetUpdateDetection:
         params = SetupParameters(dry_run=True, detect_updates=True)
 
         with patch(
-            'porringer.backend.command.core.presence.find_plugin_manager',
+            'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
             result = dry_run_action(action, envs, parameters=params)
@@ -406,7 +407,7 @@ class TestPluginTargetUpdateDetection:
         params = SetupParameters(dry_run=True, detect_updates=False)
 
         with patch(
-            'porringer.backend.command.core.presence.find_plugin_manager',
+            'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
             result = dry_run_action(action, envs, parameters=params)
@@ -432,7 +433,7 @@ class TestPluginTargetUpdateDetection:
         params = SetupParameters(dry_run=True, detect_updates=True)
 
         with patch(
-            'porringer.backend.command.core.presence.find_plugin_manager',
+            'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
             result = dry_run_action(action, envs, parameters=params)
@@ -473,7 +474,7 @@ class TestPrereleasePackagesOverride:
 
         assert action.include_prereleases
 
-        result = _dry_run_package_action(action, envs, parameters=params)
+        result = dry_run_action(action, envs, parameters=params)
 
         call_args = env.check_updates.call_args
         check_params: CheckUpdatesParameters = call_args[0][0]
@@ -533,7 +534,7 @@ class TestPrereleasePackagesOverride:
         action.include_prereleases = True
 
         params = SetupParameters(dry_run=True, detect_updates=True)
-        result = _dry_run_package_action(action, envs, parameters=params)
+        result = dry_run_action(action, envs, parameters=params)
 
         call_args = env.check_updates.call_args
         check_params: CheckUpdatesParameters = call_args[0][0]

@@ -18,7 +18,7 @@ from typing import cast
 
 from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
-from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
+from porringer.core.plugin_schema.plugin_manager import PluginManager, find_plugin_manager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectSyncParameters
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
@@ -39,7 +39,8 @@ from porringer.utility.exception import PluginError
 
 from .action_builder import PHASE_ORDER, STRATEGY_VERB, action_description, get_cli_command
 from .discovery import discover_all_plugins, discover_plugins
-from .presence import dry_run_action, is_package_installed
+from .presence import async_dry_run_action
+from .resolution import OperationKind, ResolutionContext, resolve_operation, resolved_to_result
 
 logger = logging.getLogger(__name__)
 
@@ -312,9 +313,9 @@ async def execute_package(
 ) -> SetupActionResult:
     """Execute a package install or upgrade based on the strategy.
 
-    In MINIMAL strategy, skips already-installed packages.
-    In LATEST/EXACT strategy, upgrades installed packages and falls back to
-    install for packages that are not yet present.
+    Delegates to :func:`resolve_operation` to determine the correct
+    operation (install, upgrade, or skip), then dispatches to the
+    appropriate execution helper.
 
     Args:
         action: The package action.
@@ -330,66 +331,43 @@ async def execute_package(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=False, message='Installer or package not specified')
 
-    # --- Plugin-management actions -----------------------------------------
+    project_path = plugin_context.project_path if plugin_context else None
+    project_environments = plugin_context.project_environments if plugin_context else None
+
+    resolved = await resolve_operation(
+        action,
+        environments,
+        strategy,
+        ResolutionContext(
+            project_path=project_path,
+            project_environments=project_environments,
+        ),
+    )
+
+    # --- Skip -------------------------------------------------------------
+    if resolved.operation == OperationKind.SKIP:
+        logger.info("Skipping '%s': %s", action.package, resolved.message)
+        return resolved_to_result(resolved)
+
+    # --- Plugin-management actions ----------------------------------------
     if action.plugin_target is not None:
-        project_environments = plugin_context.project_environments if plugin_context else None
-        manager = find_plugin_manager(action.plugin_target.name, project_environments)
+        is_install = resolved.operation == OperationKind.INSTALL
+        return await _attempt_plugin_operation(
+            action,
+            is_install=is_install,
+            event_queue=event_queue,
+            plugin_manager=resolved.plugin_manager,
+            project_environments=project_environments,
+        )
 
-        # Check presence before adding
-        if manager is not None and strategy == SyncStrategy.MINIMAL:
-            try:
-                installed = manager.installed_plugins()
-                is_plugin_installed, detail = is_package_installed(action.package, installed)[:2]
-                if is_plugin_installed:
-                    logger.info("Skipping plugin '%s': %s", action.package, detail)
-                    return SetupActionResult(
-                        action=action,
-                        success=True,
-                        skipped=True,
-                        skip_reason=SkipReason.ALREADY_INSTALLED,
-                        message=detail,
-                    )
-            except Exception as e:
-                logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
-
-        return await _attempt_plugin_add(action, event_queue, project_environments=project_environments)
-
+    # --- Normal package actions -------------------------------------------
     if action.installer not in environments:
         msg = f"Installer '{action.installer}' is not available"
         return SetupActionResult(action=action, success=False, message=msg)
 
     environment = environments[action.installer]
-
-    # --- Normal install / upgrade -----------------------------------------
-    # Check if package is already installed
-    is_installed = False
-    installed_detail: str | None = None
-    validator = type(environment).package_name_validator()
-    project_path = plugin_context.project_path if plugin_context else None
-    try:
-        loop = asyncio.get_running_loop()
-        installed_packages = await loop.run_in_executor(None, lambda: environment.packages(project_path=project_path))
-        is_installed, installed_detail = is_package_installed(
-            action.package, installed_packages, validator, action.kind
-        )[:2]
-    except PluginError as e:
-        logger.debug(f'Plugin error checking packages for {action.installer}: {e}')
-    except Exception as e:
-        logger.debug(f'Could not check installed packages for {action.installer}: {e}')
-
-    if strategy == SyncStrategy.MINIMAL and is_installed:
-        logger.info(f"Skipping '{action.package}': {installed_detail}")
-        return SetupActionResult(
-            action=action,
-            success=True,
-            skipped=True,
-            skip_reason=SkipReason.ALREADY_INSTALLED,
-            message=installed_detail,
-        )
-
-    # Install if not present, otherwise honour the requested strategy
-    effective = SyncStrategy.MINIMAL if not is_installed else strategy
-    verb = 'Installing' if effective == SyncStrategy.MINIMAL else 'Upgrading'
+    effective = SyncStrategy.MINIMAL if resolved.operation == OperationKind.INSTALL else strategy
+    verb = 'Installing' if resolved.operation == OperationKind.INSTALL else 'Upgrading'
     logger.info(f"{verb} '{action.package}' via {action.installer}")
     return await _attempt_package_operation(action, environment, effective, event_queue)
 
@@ -430,23 +408,28 @@ async def _attempt_package_operation(
     )
 
 
-async def _attempt_plugin_add(
+async def _attempt_plugin_operation(
     action: SetupAction,
-    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
     *,
+    is_install: bool,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    plugin_manager: PluginManager | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
 ) -> SetupActionResult:
-    """Add a plugin to a parent tool via its native ``PluginManager``.
+    """Add or update a plugin via its native ``PluginManager``.
 
-    Looks up a ``PluginManager`` for the target tool among the
-    *project_environments*.  If none is found (or the tool is not on
-    PATH), the action fails.
+    Uses the *plugin_manager* resolved during operation resolution
+    when available, falling back to a fresh lookup when not provided.
 
     Args:
         action: The plugin action (``plugin_target`` must be set).
+        is_install: ``True`` to add (install) the plugin,
+            ``False`` to update (upgrade) it.
         event_queue: Optional queue to emit sub-action events into.
+        plugin_manager: Pre-resolved ``PluginManager`` from
+            :func:`resolve_operation`, if available.
         project_environments: Dict of project-environment plugins,
-            checked for ``PluginManager`` implementations.
+            used as fallback when *plugin_manager* is ``None``.
 
     Returns:
         The result of the attempt.
@@ -454,22 +437,31 @@ async def _attempt_plugin_add(
     assert action.plugin_target is not None
     assert action.package is not None
 
-    plugin_manager = find_plugin_manager(action.plugin_target.name, project_environments)
+    if plugin_manager is None:
+        plugin_manager = find_plugin_manager(action.plugin_target.name, project_environments)
     if plugin_manager is None:
         msg = f"No PluginManager found for '{action.plugin_target.name}'"
         return SetupActionResult(action=action, success=False, message=msg)
 
+    if is_install:
+        execute = plugin_manager.async_plugin_add
+        verb, verb_past = 'add plugin', 'Added'
+    else:
+        execute = plugin_manager.async_plugin_update
+        verb, verb_past = 'update plugin', 'Updated'
+
     logger.info(
-        "Using native plugin management for '%s' via %s",
+        "Using native plugin management (%s) for '%s' via %s",
+        verb,
         action.plugin_target.name,
         type(plugin_manager).__name__,
     )
     return await _attempt_operation(
         action,
         spec=OperationSpec(
-            execute=plugin_manager.async_plugin_add,
-            verb='add plugin',
-            verb_past='Added',
+            execute=execute,
+            verb=verb,
+            verb_past=verb_past,
             success_suffix=f' to {action.plugin_target.name} (native)',
         ),
         event_queue=event_queue,
@@ -568,7 +560,7 @@ async def execute_package_actions(
     """
     if parameters.dry_run:
         return (
-            _dry_run_package_actions(
+            await _dry_run_package_actions(
                 package_actions,
                 environments,
                 event_queue,
@@ -608,7 +600,7 @@ async def execute_package_actions(
     return results, should_continue
 
 
-def _dry_run_package_actions(
+async def _dry_run_package_actions(
     package_actions: list[SetupAction],
     environments: dict[str, Environment],
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
@@ -621,7 +613,7 @@ def _dry_run_package_actions(
     project_environments = plugin_context.project_environments if plugin_context else None
     results: list[SetupActionResult] = []
     for action in package_actions:
-        result = dry_run_action(
+        result = await async_dry_run_action(
             action,
             environments,
             project_path=project_path,
@@ -759,7 +751,7 @@ async def execute_command_actions(
     results: list[SetupActionResult] = []
     for action in command_actions:
         if state.parameters.dry_run:
-            result = dry_run_action(
+            result = await async_dry_run_action(
                 action,
                 state.environments,
                 parameters=state.parameters,

@@ -41,6 +41,11 @@ class PdmProjectEnvironment(ProjectEnvironment, PluginManager):
         return ['pdm', 'self', 'add', plugin.specifier]
 
     @override
+    def plugin_update_command(self, plugin: PackageRef) -> list[str]:
+        """Return ``pdm self update <plugin>``."""
+        return ['pdm', 'self', 'update', plugin.specifier]
+
+    @override
     def plugin_list_command(self) -> list[str]:
         """Return ``pdm self list --plugins``."""
         return ['pdm', 'self', 'list', '--plugins']

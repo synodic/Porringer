@@ -80,12 +80,34 @@ def action_description(
         return f"Clone '{package}' {suffix}" if package else f'Clone {suffix}'
 
     if plugin_target is not None and package is not None:
-        return f"Add plugin '{package}' to '{plugin_target}' {suffix}"
+        return f"{verb} plugin '{package}' to '{plugin_target}' {suffix}"
 
     if package is not None:
         return f"{verb} '{package}' {suffix}"
 
     return f'{verb} {suffix}'
+
+
+def _get_plugin_cli_command(
+    action: SetupAction,
+    strategy: SyncStrategy,
+    project_environments: dict[str, ProjectEnvironment] | None,
+) -> list[str]:
+    """Return the native CLI command for a plugin-management action.
+
+    Looks up the ``PluginManager`` for the plugin target and returns
+    the appropriate add or update command based on the strategy.
+
+    Returns:
+        The CLI command, or empty list when no manager is found.
+    """
+    assert action.plugin_target is not None
+    manager = find_plugin_manager(action.plugin_target.name, project_environments)
+    if manager is None or action.package is None:
+        return []
+    if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
+        return manager.plugin_update_command(action.package)
+    return manager.plugin_add_command(action.package)
 
 
 def get_cli_command(
@@ -113,9 +135,7 @@ def get_cli_command(
             if action.installer and action.package and action.installer in environments:
                 env = environments[action.installer]
                 if action.plugin_target is not None:
-                    manager = find_plugin_manager(action.plugin_target.name, project_environments)
-                    if manager is not None:
-                        cmd = manager.plugin_add_command(action.package)
+                    cmd = _get_plugin_cli_command(action, strategy, project_environments)
                 elif strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
                     cmd = env.upgrade_command(action.package)
                 else:

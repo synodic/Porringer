@@ -73,6 +73,22 @@ class PluginManager(Protocol):
         ...
 
     @abstractmethod
+    def plugin_update_command(self, plugin: PackageRef) -> list[str]:
+        """Return the CLI command that upgrades an installed plugin.
+
+        This is used for dry-run / preview display and as the
+        default implementation for ``async_plugin_update``.
+
+        Args:
+            plugin: The sub-package to upgrade.
+
+        Returns:
+            A list of command arguments
+            (e.g. ``['pdm', 'self', 'update', 'cppython']``).
+        """
+        ...
+
+    @abstractmethod
     def plugin_list_command(self) -> list[str]:
         """Return the CLI command that lists installed plugins.
 
@@ -158,6 +174,35 @@ class PluginManager(Protocol):
             return None
         except Exception as e:
             _logger.error('Failed to add plugin %s: %s', params.package.name, e)
+            return None
+        return Package(name=params.package.name, version=None)
+
+    async def async_plugin_update(self, params: PackageParameters) -> Package | None:
+        """Asynchronously upgrade an installed plugin via the tool's native command.
+
+        The default implementation delegates to ``plugin_update_command``
+        and runs the result as an async subprocess.
+
+        Args:
+            params: Package parameters (``params.package`` is the plugin).
+
+        Returns:
+            The upgraded package, or ``None`` on failure.
+        """
+        args = self.plugin_update_command(params.package)
+        tool = self.tool_name()
+        _logger = logging.getLogger(f'porringer.{tool}.plugin_update')
+        try:
+            result = await run_command(args)
+            _logger.info(result.stdout)
+            if result.returncode != 0:
+                _logger.error(result.stderr)
+                return None
+        except FileNotFoundError:
+            _logger.error('%s not found', tool)
+            return None
+        except Exception as e:
+            _logger.error('Failed to update plugin %s: %s', params.package.name, e)
             return None
         return Package(name=params.package.name, version=None)
 
