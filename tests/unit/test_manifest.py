@@ -861,8 +861,8 @@ class TestPackageSpecPlugins:
         """PackageSpec accepts a plugins list of package refs"""
         spec = PackageSpec.model_validate({'name': 'pdm', 'plugins': ['cppython', 'pdm-bump']})
         assert len(spec.plugins) == 2
-        assert spec.plugins[0].name == 'cppython'
-        assert spec.plugins[1].name == 'pdm-bump'
+        assert spec.plugins[0].name.name == 'cppython'
+        assert spec.plugins[1].name.name == 'pdm-bump'
 
     @staticmethod
     def test_string_coercion_has_empty_plugins() -> None:
@@ -877,7 +877,7 @@ class TestPackageSpecPlugins:
         pkgs = manifest.tools[_PY]
         assert len(pkgs) == 2
         assert len(pkgs[0].plugins) == 1
-        assert pkgs[0].plugins[0].name == 'cppython'
+        assert pkgs[0].plugins[0].name.name == 'cppython'
         assert len(pkgs[1].plugins) == 0
 
     @staticmethod
@@ -945,17 +945,17 @@ class TestPackageSpecPlugins:
         }
         manifest = SetupManifest.model_validate(data)
         spec = manifest.tools[_PY][0]
-        assert spec.plugins[0].name == 'cppython'
-        assert spec.plugins[0].constraint == '>=0.5'
+        assert spec.plugins[0].name.name == 'cppython'
+        assert spec.plugins[0].name.constraint == '>=0.5'
 
     @staticmethod
     def test_package_spec_plugins_with_version_constraint() -> None:
         """Plugin refs support version constraints"""
         spec = PackageSpec.model_validate({'name': 'pdm', 'plugins': ['cppython>=1.0,<2.0']})
-        assert spec.plugins[0].name == 'cppython'
-        assert spec.plugins[0].constraint is not None
-        assert '>=1.0' in spec.plugins[0].constraint
-        assert '<2.0' in spec.plugins[0].constraint
+        assert spec.plugins[0].name.name == 'cppython'
+        assert spec.plugins[0].name.constraint is not None
+        assert '>=1.0' in spec.plugins[0].name.constraint
+        assert '<2.0' in spec.plugins[0].name.constraint
 
 
 class TestManifestContributor:
@@ -1060,10 +1060,12 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1078,9 +1080,11 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             deno_json = Path(tmpdir) / 'deno.json'
             deno_json.write_text(
-                json.dumps({
-                    'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
-                })
+                json.dumps(
+                    {
+                        'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1137,10 +1141,12 @@ class TestManifestDiscovery:
 
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'manifest': 'config/porringer.json'},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'manifest': 'config/porringer.json'},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))

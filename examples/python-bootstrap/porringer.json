@@ -23,7 +23,10 @@
                 "name": "pdm",
                 "description": "Python package and dependency manager",
                 "plugins": [
-                    "cppython"
+                    {
+                        "name": "cppython",
+                        "include_prereleases": true
+                    }
                 ]
             }
         ]
