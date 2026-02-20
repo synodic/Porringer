@@ -517,6 +517,7 @@ async def _attempt_operation(
         params = PackageParameters(
             package=action.package,
             dry=False,
+            include_prereleases=action.include_prereleases,
             progress_callback=sub_action_cb,
         )
         result = await spec.execute(params)

@@ -57,7 +57,7 @@ class PluginManager(Protocol):
         ...
 
     @abstractmethod
-    def plugin_add_command(self, plugin: PackageRef) -> list[str]:
+    def plugin_add_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return the CLI command that adds a plugin natively.
 
         This is used for dry-run / preview display and as the
@@ -65,6 +65,8 @@ class PluginManager(Protocol):
 
         Args:
             plugin: The sub-package to add.
+            include_prereleases: When ``True``, allow pre-release
+                versions (e.g. append ``--pre`` for pip-based tools).
 
         Returns:
             A list of command arguments
@@ -73,7 +75,7 @@ class PluginManager(Protocol):
         ...
 
     @abstractmethod
-    def plugin_update_command(self, plugin: PackageRef) -> list[str]:
+    def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return the CLI command that upgrades an installed plugin.
 
         This is used for dry-run / preview display and as the
@@ -81,6 +83,8 @@ class PluginManager(Protocol):
 
         Args:
             plugin: The sub-package to upgrade.
+            include_prereleases: When ``True``, allow pre-release
+                versions (e.g. append ``--pre`` for pip-based tools).
 
         Returns:
             A list of command arguments
@@ -160,7 +164,7 @@ class PluginManager(Protocol):
         Returns:
             The installed package, or ``None`` on failure.
         """
-        args = self.plugin_add_command(params.package)
+        args = self.plugin_add_command(params.package, include_prereleases=params.include_prereleases)
         tool = self.tool_name()
         _logger = logging.getLogger(f'porringer.{tool}.plugin_add')
         try:
@@ -189,7 +193,7 @@ class PluginManager(Protocol):
         Returns:
             The upgraded package, or ``None`` on failure.
         """
-        args = self.plugin_update_command(params.package)
+        args = self.plugin_update_command(params.package, include_prereleases=params.include_prereleases)
         tool = self.tool_name()
         _logger = logging.getLogger(f'porringer.{tool}.plugin_update')
         try:

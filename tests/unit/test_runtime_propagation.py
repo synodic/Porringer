@@ -69,11 +69,11 @@ class _MockRuntimeProvider(Environment):
         return self._resolved
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return ['mock-pim', 'install', str(package)]
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return ['mock-pim', 'upgrade', str(package)]
 
     @override
@@ -98,11 +98,11 @@ class _MockPythonEnv(PythonEnvironment):
         return 'mock-pip'
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return ['mock-pip', 'install', str(package)]
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return ['mock-pip', 'upgrade', str(package)]
 
     @override
@@ -148,11 +148,11 @@ class _MockNodeConsumer(Environment, RuntimeConsumer):
         return None
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return []
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return []
 
     @override

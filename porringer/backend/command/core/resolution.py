@@ -281,15 +281,15 @@ def _apply_strategy(
             msg: str | None = presence.detail
 
             if detect_updates and presence.env_for_updates is not None:
-                newer = _check_for_newer_version(
+                check = _check_for_newer_version(
                     presence.env_for_updates,
                     action.package,
                     installed_ver,
                     include_prereleases=action.include_prereleases,
                 )
-                if newer is not None:
+                if check.newer_version is not None:
                     skip_reason = SkipReason.UPDATE_AVAILABLE
-                    available_ver = newer
+                    available_ver = check.newer_version
                     pkg_name = action.package.name if action.package else ''
                     msg = f'{pkg_name} {installed_ver} → {available_ver}'
 
@@ -312,6 +312,42 @@ def _apply_strategy(
 
     # LATEST or EXACT strategy
     if presence.is_installed:
+        # Check whether this package actually has a newer version
+        # available before attempting an upgrade.  When the plugin
+        # confirms the package is already at its latest version we
+        # can skip the no-op upgrade entirely.
+        if presence.env_for_updates is not None:
+            check = _check_for_newer_version(
+                presence.env_for_updates,
+                action.package,
+                installed_ver,
+                include_prereleases=action.include_prereleases,
+            )
+            if not check.error:
+                if check.newer_version is not None:
+                    pkg_name = action.package.name if action.package else ''
+                    return ResolvedOperation(
+                        action=action,
+                        operation=OperationKind.UPGRADE,
+                        message=f'{pkg_name} {installed_ver} → {check.newer_version}',
+                        installed_version=installed_ver,
+                        available_version=check.newer_version,
+                        plugin_manager=plugin_manager,
+                    )
+                # Confirmed up-to-date — skip.
+                return ResolvedOperation(
+                    action=action,
+                    operation=OperationKind.SKIP,
+                    skip_reason=SkipReason.ALREADY_LATEST,
+                    message=presence.detail,
+                    installed_version=installed_ver,
+                    plugin_manager=plugin_manager,
+                )
+            # Could not determine upstream state — fall through
+            # to attempt the upgrade conservatively.
+
+        # No environment for update checks, or check failed — upgrade
+        # unconditionally.
         return ResolvedOperation(
             action=action,
             operation=OperationKind.UPGRADE,
@@ -319,14 +355,32 @@ def _apply_strategy(
             installed_version=installed_ver,
             plugin_manager=plugin_manager,
         )
-    else:
-        # Not installed under LATEST/EXACT → fall back to install
-        return ResolvedOperation(
-            action=action,
-            operation=OperationKind.INSTALL,
-            message='not installed, will install instead',
-            plugin_manager=plugin_manager,
-        )
+
+    # Not installed under LATEST/EXACT → fall back to install
+    return ResolvedOperation(
+        action=action,
+        operation=OperationKind.INSTALL,
+        message='not installed, will install instead',
+        plugin_manager=plugin_manager,
+    )
+
+
+@dataclass(slots=True)
+class _UpdateCheckResult:
+    """Result of a newer-version check.
+
+    Distinguishes three outcomes:
+
+    * **newer version found** — ``newer_version`` is a string.
+    * **confirmed up-to-date** — ``newer_version`` is ``None`` and
+      ``error`` is ``False``.
+    * **check failed** — ``newer_version`` is ``None`` and ``error``
+      is ``True``.  The caller should fall back to a conservative
+      action (e.g. attempt the upgrade anyway).
+    """
+
+    newer_version: str | None = None
+    error: bool = False
 
 
 def _check_for_newer_version(
@@ -335,15 +389,14 @@ def _check_for_newer_version(
     installed_version: str | None,
     *,
     include_prereleases: bool = False,
-) -> str | None:
+) -> _UpdateCheckResult:
     """Query the plugin for a newer upstream version.
 
-    Returns the latest version string when a newer version exists,
-    or ``None`` when the installed version is already the latest
-    (or when the plugin does not support update checks).
+    Returns an :class:`_UpdateCheckResult` that distinguishes *newer
+    version found*, *confirmed up-to-date*, and *check failed*.
     """
     if package is None:
-        return None
+        return _UpdateCheckResult(error=True)
 
     try:
         updates = env.check_updates(
@@ -354,10 +407,11 @@ def _check_for_newer_version(
         )
     except Exception as e:
         logger.debug('check_updates failed for %s via %s: %s', package, env.tool_name(), e)
-        return None
+        return _UpdateCheckResult(error=True)
 
     if not updates or updates[0].version is None:
-        return None
+        # Plugin responded but reported no updates — confirmed up-to-date.
+        return _UpdateCheckResult()
 
     latest_ver = updates[0].version
 
@@ -365,12 +419,12 @@ def _check_for_newer_version(
     if installed_version is not None:
         try:
             if Version(latest_ver) <= Version(installed_version):
-                return None
+                return _UpdateCheckResult()
         except InvalidVersion:
             if latest_ver == installed_version:
-                return None
+                return _UpdateCheckResult()
 
-    return latest_ver
+    return _UpdateCheckResult(newer_version=latest_ver)
 
 
 # ---------------------------------------------------------------------------

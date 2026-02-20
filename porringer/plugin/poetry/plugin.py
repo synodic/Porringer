@@ -44,18 +44,26 @@ class PoetryProjectEnvironment(ProjectEnvironment, PluginManager):
         return 'poetry'
 
     @override
-    def plugin_add_command(self, plugin: PackageRef) -> list[str]:
-        """Return ``poetry self add <plugin>``."""
-        return ['poetry', 'self', 'add', plugin.specifier]
+    def plugin_add_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+        """Return ``poetry self add <plugin>``.
+
+        When *include_prereleases* is ``True``, appends
+        ``--allow-prereleases`` so Poetry considers pre-release
+        versions.
+        """
+        cmd = ['poetry', 'self', 'add', plugin.specifier]
+        if include_prereleases:
+            cmd.append('--allow-prereleases')
+        return cmd
 
     @override
-    def plugin_update_command(self, plugin: PackageRef) -> list[str]:
+    def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return ``poetry self add <plugin>``.
 
         Poetry's ``self add`` handles both initial install and
         upgrade, so this delegates to ``plugin_add_command``.
         """
-        return self.plugin_add_command(plugin)
+        return self.plugin_add_command(plugin, include_prereleases=include_prereleases)
 
     @override
     def plugin_list_command(self) -> list[str]:

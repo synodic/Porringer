@@ -811,7 +811,7 @@ class TestSyncStrategyUpgrade:
 
     @staticmethod
     def test_dry_run_upgrade_installed_package(test_api: API) -> None:
-        """Test that dry-run upgrade of an installed package succeeds without skip."""
+        """Test that dry-run upgrade of an installed package skips when already at latest."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # 'packaging' is always installed
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -824,8 +824,9 @@ class TestSyncStrategyUpgrade:
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
             assert action_result.success is True
-            # Upgrade of an installed package should NOT be skipped
-            assert action_result.skipped is False
+            # LATEST strategy now skips packages already at their latest version
+            assert action_result.skipped is True
+            assert action_result.skip_reason is not None
 
     @staticmethod
     def test_dry_run_upgrade_missing_package(test_api: API) -> None:

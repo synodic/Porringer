@@ -77,14 +77,17 @@ class PipEnvironment(PythonEnvironment):
         return shutil.which('pip') is not None or shutil.which('python') is not None
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to install a package via pip."""
-        return [self.python_command, '-m', 'pip', 'install', package.specifier]
+        cmd = [self.python_command, '-m', 'pip', 'install', package.specifier]
+        if include_prereleases:
+            cmd.append('--pre')
+        return cmd
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to upgrade a package via pip."""
-        return [
+        cmd = [
             self.python_command,
             '-m',
             'pip',
@@ -92,6 +95,9 @@ class PipEnvironment(PythonEnvironment):
             '--upgrade',
             package.specifier,
         ]
+        if include_prereleases:
+            cmd.append('--pre')
+        return cmd
 
     @staticmethod
     @override
@@ -108,7 +114,7 @@ class PipEnvironment(PythonEnvironment):
         `run_command` path for zero overhead.
         """
         logger = logging.getLogger('porringer.pip.install')
-        args = list(self.install_command(params.package))
+        args = list(self.install_command(params.package, include_prereleases=params.include_prereleases))
         if params.dry:
             args.append('--dry-run')
 

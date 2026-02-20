@@ -39,7 +39,7 @@ class WingetEnvironment(Environment):
         return 'winget'
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to install a package via winget."""
         cmd = ['winget', 'install', '--id', package.name]
         if package.constraint:
@@ -47,7 +47,7 @@ class WingetEnvironment(Environment):
         return cmd
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to upgrade a package via winget."""
         cmd = ['winget', 'upgrade', '--id', package.name]
         if package.constraint:

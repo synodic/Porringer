@@ -21,6 +21,7 @@ class SkipReason(Enum):
     ALREADY_INSTALLED = auto()
     NO_PROJECT_DIRECTORY = auto()
     UPDATE_AVAILABLE = auto()
+    ALREADY_LATEST = auto()
 
 
 @dataclass

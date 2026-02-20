@@ -21,6 +21,7 @@ from porringer.schema import (
     SetupActionResult,
     SetupParameters,
     SkipReason,
+    SyncStrategy,
 )
 from porringer.schema.manifest import PackageSpec, PluginSpec
 
@@ -96,26 +97,30 @@ class TestCheckForNewerVersion:
     def test_returns_newer_version() -> None:
         env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
         result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
-        assert result == '0.9.0'
+        assert result.newer_version == '0.9.0'
+        assert result.error is False
 
     @staticmethod
     def test_returns_none_when_up_to_date() -> None:
         env = _make_env(updates=[Package(name='ruff', version='0.8.0')])
         result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
-        assert result is None
+        assert result.newer_version is None
+        assert result.error is False
 
     @staticmethod
     def test_returns_none_when_plugin_has_no_updates() -> None:
         env = _make_env(updates=[])
         result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
-        assert result is None
+        assert result.newer_version is None
+        assert result.error is False
 
     @staticmethod
-    def test_returns_none_when_plugin_raises() -> None:
+    def test_returns_error_when_plugin_raises() -> None:
         env = _make_env()
         env.check_updates.side_effect = RuntimeError('boom')
         result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
-        assert result is None
+        assert result.newer_version is None
+        assert result.error is True
 
     @staticmethod
     def test_forwards_include_prereleases() -> None:
@@ -129,7 +134,8 @@ class TestCheckForNewerVersion:
     def test_returns_newer_prerelease() -> None:
         env = _make_env(updates=[Package(name='ruff', version='0.9.0a1')])
         result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True)
-        assert result == '0.9.0a1'
+        assert result.newer_version == '0.9.0a1'
+        assert result.error is False
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +243,177 @@ class TestDryRunUpdateAvailable:
         call_args = env.check_updates.call_args
         check_params: CheckUpdatesParameters = call_args[0][0]
         assert check_params.include_prereleases is True
+
+
+# ---------------------------------------------------------------------------
+# LATEST strategy — skip when already at latest
+# ---------------------------------------------------------------------------
+
+
+class TestLatestStrategySkip:
+    """Verify that LATEST strategy skips packages already at the latest version."""
+
+    @staticmethod
+    def test_latest_skips_when_at_latest() -> None:
+        """LATEST + installed + no newer version → SKIP with ALREADY_LATEST."""
+        action = _make_action()
+        env = _make_env(
+            installed=[Package(name='ruff', version='0.8.0')],
+            updates=[Package(name='ruff', version='0.8.0')],  # same version → no update
+        )
+        envs = {'pip': env}
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
+
+        result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_LATEST
+        assert result.installed_version == '0.8.0'
+        assert result.available_version is None
+
+    @staticmethod
+    def test_latest_upgrades_when_newer_available() -> None:
+        """LATEST + installed + newer version exists → not skipped (UPGRADE)."""
+        action = _make_action()
+        env = _make_env(
+            installed=[Package(name='ruff', version='0.8.0')],
+            updates=[Package(name='ruff', version='0.9.0')],
+        )
+        envs = {'pip': env}
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
+
+        result = dry_run_action(action, envs, parameters=params)
+
+        # Dry-run maps UPGRADE to a success (non-skipped) result
+        assert result.skipped is False
+        assert result.success is True
+
+    @staticmethod
+    def test_latest_installs_when_not_present() -> None:
+        """LATEST + not installed → INSTALL (not skipped)."""
+        action = _make_action()
+        env = _make_env(installed=[], updates=[])
+        envs = {'pip': env}
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
+
+        result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is False
+        assert result.success is True
+
+    @staticmethod
+    def test_latest_falls_back_to_upgrade_on_check_error() -> None:
+        """LATEST + installed + check_updates raises → UPGRADE (conservative)."""
+        action = _make_action()
+        env = _make_env(installed=[Package(name='ruff', version='0.8.0')])
+        env.check_updates.side_effect = RuntimeError('network error')
+        envs = {'pip': env}
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
+
+        result = dry_run_action(action, envs, parameters=params)
+
+        # Should not skip — falls back to upgrade attempt
+        assert result.skipped is False
+        assert result.success is True
+
+    @staticmethod
+    def test_latest_skip_has_no_available_version() -> None:
+        """When LATEST skips (already at latest), available_version should be None."""
+        action = _make_action()
+        env = _make_env(
+            installed=[Package(name='ruff', version='0.8.0')],
+            updates=[],  # empty → confirmed up-to-date
+        )
+        envs = {'pip': env}
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
+
+        result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_LATEST
+        assert result.available_version is None
+
+    @staticmethod
+    def test_latest_plugin_target_skips_when_at_latest() -> None:
+        """Plugin-target actions under LATEST also skip when at latest."""
+        action = _make_plugin_action()
+        env = _make_env(updates=[Package(name='cppython', version='0.9.14')])  # same version
+        envs = {'pipx': env}
+
+        manager = MagicMock()
+        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.tool_name.return_value = 'pdm'
+        manager.is_available.return_value = True
+
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
+
+        with patch(
+            'porringer.backend.command.core.resolution.find_plugin_manager',
+            return_value=manager,
+        ):
+            result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_LATEST
+
+    @staticmethod
+    def test_latest_plugin_target_upgrades_when_newer() -> None:
+        """Plugin-target actions under LATEST do upgrade when newer version exists."""
+        action = _make_plugin_action()
+        env = _make_env(updates=[Package(name='cppython', version='1.0.0')])
+        envs = {'pipx': env}
+
+        manager = MagicMock()
+        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.tool_name.return_value = 'pdm'
+        manager.is_available.return_value = True
+
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
+
+        with patch(
+            'porringer.backend.command.core.resolution.find_plugin_manager',
+            return_value=manager,
+        ):
+            result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is False
+        assert result.success is True
+
+
+class TestExactStrategySkip:
+    """Verify that EXACT strategy also skips packages already at latest."""
+
+    @staticmethod
+    def test_exact_skips_when_at_latest() -> None:
+        """EXACT + installed + no newer version → SKIP with ALREADY_LATEST."""
+        action = _make_action()
+        env = _make_env(
+            installed=[Package(name='ruff', version='0.8.0')],
+            updates=[Package(name='ruff', version='0.8.0')],
+        )
+        envs = {'pip': env}
+        params = SetupParameters(strategy=SyncStrategy.EXACT)
+
+        result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is True
+        assert result.skip_reason == SkipReason.ALREADY_LATEST
+
+    @staticmethod
+    def test_exact_upgrades_when_newer() -> None:
+        """EXACT + installed + newer version → UPGRADE (not skipped)."""
+        action = _make_action()
+        env = _make_env(
+            installed=[Package(name='ruff', version='0.8.0')],
+            updates=[Package(name='ruff', version='0.9.0')],
+        )
+        envs = {'pip': env}
+        params = SetupParameters(strategy=SyncStrategy.EXACT)
+
+        result = dry_run_action(action, envs, parameters=params)
+
+        assert result.skipped is False
+        assert result.success is True
 
 
 # ---------------------------------------------------------------------------
