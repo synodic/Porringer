@@ -139,6 +139,15 @@ class SetupParameters(BaseModel):
             'Adds network latency; the GUI sets this explicitly.'
         ),
     )
+    prerelease_packages: set[str] | None = Field(
+        default=None,
+        description=(
+            'Set of package names whose ``include_prereleases`` flag '
+            'should be forced to ``True``, overriding the manifest '
+            'default.  Names are compared case-insensitively against '
+            '``action.package.name``.  ``None`` means no overrides.'
+        ),
+    )
     plugins: list[str] | None = Field(
         default=None,
         description=(

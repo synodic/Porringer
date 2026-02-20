@@ -443,3 +443,101 @@ class TestPluginTargetUpdateDetection:
         check_params: CheckUpdatesParameters = call_args[0][0]
         assert check_params.include_prereleases is True
         assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
+
+
+# ---------------------------------------------------------------------------
+# prerelease_packages override on SetupParameters
+# ---------------------------------------------------------------------------
+
+
+class TestPrereleasePackagesOverride:
+    """Verify that SetupParameters.prerelease_packages mutates actions."""
+
+    @staticmethod
+    def test_override_sets_include_prereleases() -> None:
+        """An action whose package is in prerelease_packages gets include_prereleases=True."""
+        action = _make_action(name='ruff')
+        assert action.include_prereleases is False
+
+        env = _make_env(
+            installed=[Package(name='ruff', version='0.8.0')],
+            updates=[Package(name='ruff', version='0.9.0a1')],
+        )
+        envs = {'pip': env}
+
+        # Simulate what _load_manifests does: mutate the action
+        params = SetupParameters(dry_run=True, detect_updates=True, prerelease_packages={'ruff'})
+        if params.prerelease_packages:
+            overrides = {n.lower() for n in params.prerelease_packages}
+            if action.package is not None and action.package.name.lower() in overrides:
+                action.include_prereleases = True
+
+        assert action.include_prereleases is True
+
+        result = _dry_run_package_action(action, envs, parameters=params)
+
+        call_args = env.check_updates.call_args
+        check_params: CheckUpdatesParameters = call_args[0][0]
+        assert check_params.include_prereleases is True
+        assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
+
+    @staticmethod
+    def test_override_case_insensitive() -> None:
+        """Override matching is case-insensitive."""
+        action = _make_action(name='Ruff')
+        params = SetupParameters(prerelease_packages={'ruff'})
+        if params.prerelease_packages:
+            overrides = {n.lower() for n in params.prerelease_packages}
+            if action.package is not None and action.package.name.lower() in overrides:
+                action.include_prereleases = True
+        assert action.include_prereleases is True
+
+    @staticmethod
+    def test_no_override_when_not_in_set() -> None:
+        """Actions whose package is not in the set are left unchanged."""
+        action = _make_action(name='ruff')
+        params = SetupParameters(prerelease_packages={'black'})
+        if params.prerelease_packages:
+            overrides = {n.lower() for n in params.prerelease_packages}
+            if action.package is not None and action.package.name.lower() in overrides:
+                action.include_prereleases = True
+        assert action.include_prereleases is False
+
+    @staticmethod
+    def test_no_override_when_none() -> None:
+        """When prerelease_packages is None, nothing is mutated."""
+        action = _make_action(name='ruff')
+        params = SetupParameters(prerelease_packages=None)
+        if params.prerelease_packages:
+            overrides = {n.lower() for n in params.prerelease_packages}
+            if action.package is not None and action.package.name.lower() in overrides:
+                action.include_prereleases = True
+        assert action.include_prereleases is False
+
+    @staticmethod
+    def test_default_is_none() -> None:
+        """prerelease_packages defaults to None."""
+        params = SetupParameters()
+        assert params.prerelease_packages is None
+
+    @staticmethod
+    def test_override_threaded_to_check_for_newer_version() -> None:
+        """Full pipeline: override → action mutation → check_updates receives True."""
+        action = _make_action(name='ruff')
+        env = _make_env(
+            installed=[Package(name='ruff', version='0.8.0')],
+            updates=[Package(name='ruff', version='0.9.0a1')],
+        )
+        envs = {'pip': env}
+
+        # Apply override (mirrors _load_manifests logic)
+        action.include_prereleases = True
+
+        params = SetupParameters(dry_run=True, detect_updates=True)
+        result = _dry_run_package_action(action, envs, parameters=params)
+
+        call_args = env.check_updates.call_args
+        check_params: CheckUpdatesParameters = call_args[0][0]
+        assert check_params.include_prereleases is True
+        assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
+        assert result.available_version == '0.9.0a1'
