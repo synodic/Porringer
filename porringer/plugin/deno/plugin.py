@@ -1,9 +1,12 @@
 """Plugin implementation for Deno environment."""
 
+import logging
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import Environment
+import httpx
+
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -52,6 +55,60 @@ class DenoEnvironment(Environment):
     def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a global script via Deno."""
         return ['deno', 'install', '-g', '--force', self._deno_specifier(package)]
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for available updates by querying package registries.
+
+        Routes packages to the appropriate registry:
+
+        * ``jsr:`` prefixed → JSR API (``https://jsr.io/…/meta.json``)
+        * ``npm:`` prefixed or bare names → shared ``_check_npm_registry``
+
+        Args:
+            params: The check parameters.
+
+        Returns:
+            A list of packages with their latest available version.
+        """
+        logger = logging.getLogger('porringer.deno.check_updates')
+        jsr_refs: list[PackageRef] = []
+        npm_refs: list[PackageRef] = []
+
+        for pkg_ref in params.packages:
+            if pkg_ref.name.startswith('jsr:'):
+                jsr_refs.append(pkg_ref)
+            else:
+                # Strip npm: prefix for the registry lookup, but keep
+                # the original name in the result.
+                npm_refs.append(pkg_ref)
+
+        # Delegate npm-compatible packages to the shared helper
+        results = self._check_npm_registry(
+            [PackageRef.model_validate(r.name[4:] if r.name.startswith('npm:') else r.name) for r in npm_refs],
+            include_prereleases=params.include_prereleases,
+            logger=logger,
+        )
+        # Restore original names (with npm: prefix) for npm results
+        for i, npm_ref in enumerate(npm_refs):
+            if i < len(results):
+                results[i] = Package(name=npm_ref.name, version=results[i].version)
+
+        # JSR packages
+        for pkg_ref in jsr_refs:
+            jsr_name = pkg_ref.name[4:]  # strip 'jsr:'
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.get(f'https://jsr.io/{jsr_name}/meta.json')
+                    response.raise_for_status()
+                    data = response.json()
+                latest = data.get('latest')
+                if latest:
+                    results.append(Package(name=pkg_ref.name, version=latest))
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.debug('JSR query failed for %s: %s', pkg_ref.name, exc)
+
+        return results
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:

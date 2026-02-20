@@ -8,17 +8,22 @@ boilerplate declarations:
 * `consumed_runtime_kind() -> 'python'`
 * `_discover_venv_python()` — locating the interpreter in a project's
   `.venv` directory.
+* `_check_pypi_updates()` — querying PyPI for newer package versions.
 
 `PythonEnvironment` bundles these once so that concrete plugins can
 focus on their tool-specific behaviour.
 """
 
+import logging
 import sys
 from pathlib import Path
 
-from porringer.core.plugin_schema.environment import Environment
+import httpx
+from packaging.version import InvalidVersion, Version
+
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Ecosystem
+from porringer.core.schema import Ecosystem, Package
 
 
 class PythonEnvironment(Environment, RuntimeConsumer):
@@ -82,3 +87,72 @@ class PythonEnvironment(Environment, RuntimeConsumer):
             python = venv_dir / 'bin' / 'python'
 
         return python if python.is_file() else None
+
+    def _check_pypi_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Query the PyPI JSON API for newer versions of the requested packages.
+
+        For each package in *params.packages*, fetches
+        ``https://pypi.org/pypi/{name}/json`` and determines the latest
+        available version.  When *params.include_prereleases* is
+        ``False`` (default), only the stable ``info.version`` is
+        returned.  When ``True``, the highest version across all
+        ``releases`` keys is selected (including dev/alpha/beta/rc).
+
+        This helper is shared by pip, uv, and pipx plugins.
+
+        Args:
+            params: The check parameters including which packages to
+                check and whether to include pre-releases.
+
+        Returns:
+            A list of packages with their ``version`` set to the latest
+            available on PyPI.
+        """
+        logger = logging.getLogger(f'porringer.{self.tool_name()}.check_pypi')
+        results: list[Package] = []
+
+        for pkg_ref in params.packages:
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.get(f'https://pypi.org/pypi/{pkg_ref.name}/json')
+                    response.raise_for_status()
+                    data = response.json()
+            except (httpx.HTTPError, ValueError, KeyError) as exc:
+                logger.debug('PyPI query failed for %s: %s', pkg_ref.name, exc)
+                continue
+
+            if params.include_prereleases:
+                # Scan all release keys for the highest version
+                releases = data.get('releases', {})
+                best: Version | None = None
+                for ver_str in releases:
+                    try:
+                        ver = Version(ver_str)
+                    except InvalidVersion:
+                        continue
+                    if best is None or ver > best:
+                        best = ver
+                if best is not None:
+                    results.append(Package(name=pkg_ref.name, version=str(best)))
+            else:
+                # Stable-only: use info.version
+                version_str = data.get('info', {}).get('version')
+                if version_str:
+                    results.append(Package(name=pkg_ref.name, version=version_str))
+
+        return results
+
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for available updates by querying PyPI.
+
+        Default implementation for all Python-ecosystem plugins.
+        Subclasses can override to use native tooling (e.g.
+        ``pip list --outdated``) and fall back to this via ``super()``.
+
+        Args:
+            params: The check parameters including which packages to check.
+
+        Returns:
+            A list of packages that have updates available.
+        """
+        return self._check_pypi_updates(params)

@@ -11,8 +11,6 @@ The protocol follows the same mixin pattern used by
 plugin management is available.
 """
 
-from __future__ import annotations
-
 import logging
 import subprocess
 from abc import abstractmethod

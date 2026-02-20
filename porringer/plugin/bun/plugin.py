@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -40,6 +40,24 @@ class BunEnvironment(Environment):
         """Returns the CLI command to upgrade a package via Bun."""
         # Bun has no per-package global update; re-add at latest
         return ['bun', 'add', '-g', f'{package.name}@latest']
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for available updates by querying the npm registry.
+
+        Bun uses the npm registry; delegates to the shared
+        ``_check_npm_registry`` helper.
+
+        Args:
+            params: The check parameters.
+
+        Returns:
+            A list of packages with their latest available version.
+        """
+        return self._check_npm_registry(
+            params.packages,
+            include_prereleases=params.include_prereleases,
+        )
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:

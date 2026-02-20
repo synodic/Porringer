@@ -1,7 +1,5 @@
 """Tests for runtime propagation across phase transitions and venv scoping."""
 
-from __future__ import annotations
-
 import inspect
 import os
 from collections.abc import Iterator
@@ -14,7 +12,7 @@ from packaging.version import Version
 
 from porringer.backend.command.core.action_builder import PHASE_ORDER
 from porringer.backend.command.core.execution import ExecutionState, execute_single
-from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
@@ -80,6 +78,10 @@ class _MockRuntimeProvider(Environment):
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:
+        return []
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         return []
 
 
@@ -155,6 +157,10 @@ class _MockNodeConsumer(Environment, RuntimeConsumer):
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:
+        return []
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         return []
 
 

@@ -4,8 +4,6 @@ Checks whether packages are already installed so the sync engine can
 skip redundant operations.
 """
 
-from __future__ import annotations
-
 import logging
 from pathlib import Path
 

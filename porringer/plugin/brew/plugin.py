@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
+    CheckUpdatesParameters,
     Environment,
     PackageParameters,
 )
@@ -58,6 +59,45 @@ class BrewEnvironment(Environment):
     def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a package via brew."""
         return ['brew', 'upgrade', package.name]
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for available formula updates via ``brew outdated``.
+
+        Uses ``brew outdated --json`` to discover formulas with
+        available updates, then resolves the latest upstream version
+        via ``brew info --json=v2``.
+
+        Args:
+            params: The check parameters.
+
+        Returns:
+            A list of packages with their latest available version.
+        """
+        outdated = self._run_json_command(['brew', 'outdated', '--json'])
+        if not isinstance(outdated, list):
+            return []
+
+        requested = {p.name.lower() for p in params.packages} if params.packages else None
+        results: list[Package] = []
+        for entry in outdated:
+            name = entry.get('name', '')
+            if requested is not None and name.lower() not in requested:
+                continue
+            # Resolve latest upstream version via brew info
+            info = self._run_json_command(['brew', 'info', name, '--json=v2'])
+            if isinstance(info, dict):
+                formulas = info.get('formulae', [])
+                if formulas:
+                    latest = formulas[0].get('versions', {}).get('stable')
+                    if latest:
+                        results.append(Package(name=name, version=latest))
+                        continue
+            # Fallback: use current_version from outdated entry
+            current = entry.get('current_version')
+            if current:
+                results.append(Package(name=name, version=current))
+        return results
 
     @override
     async def async_install(self, params: PackageParameters) -> Package | None:

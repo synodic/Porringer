@@ -15,8 +15,6 @@ Supports three modes:
 Extracted from the monolithic ``sync`` module for clarity.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import tomllib

@@ -10,8 +10,6 @@ The pattern mirrors ``RuntimeProvider`` / ``RuntimeConsumer`` in
 protocol with a single classmethod.
 """
 
-from __future__ import annotations
-
 from typing import Protocol, runtime_checkable
 
 from porringer.core.schema import ManifestContribution

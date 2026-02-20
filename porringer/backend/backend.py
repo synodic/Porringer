@@ -6,8 +6,6 @@ The `BackendResolver` determines which plugin should handle each
 on availability and user preferences.
 """
 
-from __future__ import annotations
-
 import logging
 from collections import defaultdict
 from collections.abc import Mapping

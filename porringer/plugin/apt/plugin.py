@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
+    CheckUpdatesParameters,
     Environment,
     PackageParameters,
 )
@@ -74,6 +75,34 @@ class AptEnvironment(Environment):
                 f'{package.name}={package.constraint}',
             ]
         return ['apt', 'install', '--only-upgrade', package.name]
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for available updates via ``apt-cache policy``.
+
+        For each requested package, parses the ``Candidate:`` line
+        from ``apt-cache policy`` to determine the latest available
+        version in the configured repositories.
+
+        Args:
+            params: The check parameters.
+
+        Returns:
+            A list of packages with their latest available version.
+        """
+        results: list[Package] = []
+        for pkg_ref in params.packages:
+            output = self._run_text_command(['apt-cache', 'policy', pkg_ref.name])
+            if output is None:
+                continue
+            for line in output.splitlines():
+                stripped = line.strip()
+                if stripped.startswith('Candidate:'):
+                    version = stripped.split(':', 1)[1].strip()
+                    if version and version != '(none)':
+                        results.append(Package(name=pkg_ref.name, version=version))
+                    break
+        return results
 
     @override
     async def async_install(self, params: PackageParameters) -> Package | None:

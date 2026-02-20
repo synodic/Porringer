@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -39,6 +39,24 @@ class PnpmEnvironment(Environment):
         if package.constraint:
             return ['pnpm', 'update', '-g', f'{package.name}@{package.constraint}']
         return ['pnpm', 'update', '-g', '--latest', package.name]
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for available updates by querying the npm registry.
+
+        pnpm uses the same npm registry; delegates to the shared
+        ``_check_npm_registry`` helper.
+
+        Args:
+            params: The check parameters.
+
+        Returns:
+            A list of packages with their latest available version.
+        """
+        return self._check_npm_registry(
+            params.packages,
+            include_prereleases=params.include_prereleases,
+        )
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:

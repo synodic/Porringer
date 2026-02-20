@@ -5,8 +5,6 @@ on ``SetupActionResult``, and the ``detect_updates`` flag on
 ``SetupParameters``.
 """
 
-from __future__ import annotations
-
 from unittest.mock import MagicMock, patch
 
 from porringer.backend.command.core.presence import (

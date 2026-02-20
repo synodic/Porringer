@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import (
+    CheckUpdatesParameters,
     PackageParameters,
 )
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
@@ -301,6 +302,53 @@ class PipEnvironment(PythonEnvironment):
                 )
             )
             return
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for available updates using ``pip list --outdated``.
+
+        Uses the native ``pip list --outdated --format=json`` command
+        when possible for best compatibility with configured indexes
+        and mirrors.  Falls back to the PyPI JSON API if the pip
+        module is unavailable.
+
+        When *params.include_prereleases* is ``True``, the ``--pre``
+        flag is passed to include pre-release versions.
+
+        Args:
+            params: The check parameters including which packages to check.
+
+        Returns:
+            A list of packages that have updates available.
+        """
+        logger = logging.getLogger('porringer.pip.check_updates')
+
+        cmd = [self.python_command, '-m', 'pip', 'list', '--outdated', '--format=json']
+        if params.include_prereleases:
+            cmd.append('--pre')
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60,
+            )
+            entries: list[dict[str, str]] = json.loads(result.stdout)
+        except (subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError) as exc:
+            logger.debug('pip list --outdated failed, falling back to PyPI: %s', exc)
+            return self._check_pypi_updates(params)
+
+        # Filter to requested packages if specified
+        requested = {p.name.lower() for p in params.packages} if params.packages else None
+        results: list[Package] = []
+        for entry in entries:
+            name = entry.get('name', '')
+            latest = entry.get('latest_version')
+            if latest and (requested is None or name.lower() in requested):
+                results.append(Package(name=name, version=latest))
+        return results
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:
