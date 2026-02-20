@@ -619,9 +619,9 @@ class TestPluginUpdateCommand:
 
     @staticmethod
     def test_pdm_update_includes_pip_upgrade_flag() -> None:
-        """PDM update must pass --pip-args --upgrade so pip actually upgrades.
+        """PDM update must pass --pip-args=--upgrade so pip actually upgrades.
 
-        Without --pip-args --upgrade, ``pdm self add <pkg>`` delegates to
+        Without --pip-args=--upgrade, ``pdm self add <pkg>`` delegates to
         ``pip install <pkg>`` which is a no-op when the package is already
         installed — pip sees the requirement satisfied and skips the upgrade.
         This test reproduces the bug where ``pdm self add cppython`` reported
@@ -634,12 +634,10 @@ class TestPluginUpdateCommand:
         update_cmd = plugin.plugin_update_command(ref)
 
         # add intentionally omits the upgrade flag (first install)
-        assert '--pip-args' not in add_cmd
-        assert '--upgrade' not in add_cmd
+        assert not any('--pip-args' in arg for arg in add_cmd)
 
-        # update MUST include the flag so pip pulls a newer version
-        assert '--pip-args' in update_cmd
-        assert '--upgrade' in update_cmd
+        # update MUST include --pip-args=--upgrade so pip pulls a newer version
+        assert any('--pip-args' in arg and '--upgrade' in arg for arg in update_cmd)
 
         # The two commands must not be identical
         assert add_cmd != update_cmd
