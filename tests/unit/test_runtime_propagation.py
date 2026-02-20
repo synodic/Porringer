@@ -1,7 +1,5 @@
 """Tests for runtime propagation across phase transitions and venv scoping."""
 
-from __future__ import annotations
-
 import inspect
 import os
 from collections.abc import Iterator

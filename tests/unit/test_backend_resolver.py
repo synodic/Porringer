@@ -5,8 +5,6 @@ The resolver selects a plugin per (PluginKind, ecosystem) pair using:
 2. Alphabetical ordering among supported & available candidates.
 """
 
-from __future__ import annotations
-
 from packaging.version import Version
 
 from porringer.backend.backend import BackendResolver

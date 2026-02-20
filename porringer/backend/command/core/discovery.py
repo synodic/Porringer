@@ -6,8 +6,6 @@ the sync module so that both `manifest` and `execution` can import
 it without circular dependencies.
 """
 
-from __future__ import annotations
-
 import importlib
 from typing import NamedTuple
 

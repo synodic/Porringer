@@ -6,7 +6,9 @@ import sys
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import Environment
+from packaging.version import InvalidVersion, Version
+
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
 
@@ -113,6 +115,51 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     # ------------------------------------------------------------------
     # Environment
     # ------------------------------------------------------------------
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for newer Python versions via ``pyenv install --list``.
+
+        Parses the available versions from ``pyenv install --list`` and
+        finds the highest version matching each requested package's
+        major.minor prefix.
+
+        Args:
+            params: The check parameters.
+
+        Returns:
+            A list of packages with their latest available version.
+        """
+        output = self._run_text_command(['pyenv', 'install', '--list'])
+        if output is None:
+            return []
+
+        available: list[tuple[Version, str]] = []
+        for line in output.splitlines():
+            ver_str = line.strip()
+            if not ver_str:
+                continue
+            try:
+                ver = Version(ver_str)
+            except InvalidVersion:
+                continue
+            # Skip pre-releases unless requested
+            if ver.is_prerelease and not params.include_prereleases:
+                continue
+            available.append((ver, ver_str))
+
+        results: list[Package] = []
+        for pkg_ref in params.packages:
+            # Match by prefix (e.g. "3.12" matches "3.12.x")
+            best: Version | None = None
+            best_str: str = ''
+            for ver, ver_str in available:
+                if (ver_str.startswith(pkg_ref.name) or pkg_ref.name == ver_str) and (best is None or ver > best):
+                    best = ver
+                    best_str = ver_str
+            if best is not None:
+                results.append(Package(name=pkg_ref.name, version=best_str))
+        return results
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:

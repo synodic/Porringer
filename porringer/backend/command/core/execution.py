@@ -5,8 +5,6 @@ project-sync → SCM → post-sync commands.  Each phase ensures its
 prerequisites are met before proceeding.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

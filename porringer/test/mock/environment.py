@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.schema import Package, PackageRef
 
 
@@ -30,4 +30,10 @@ class MockEnvironment(Environment):
         Returns:
             A list of packages
         """
+        return []
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Mock update check — always returns empty."""
+        del params
         return []

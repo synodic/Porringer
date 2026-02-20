@@ -1153,12 +1153,10 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps(
-                    {
-                        'name': 'my-project',
-                        'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
-                    }
-                )
+                json.dumps({
+                    'name': 'my-project',
+                    'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
+                })
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1173,11 +1171,9 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             deno_json = Path(tmpdir) / 'deno.json'
             deno_json.write_text(
-                json.dumps(
-                    {
-                        'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
-                    }
-                )
+                json.dumps({
+                    'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
+                })
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1234,12 +1230,10 @@ class TestManifestDiscovery:
 
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps(
-                    {
-                        'name': 'my-project',
-                        'porringer': {'manifest': 'config/porringer.json'},
-                    }
-                )
+                json.dumps({
+                    'name': 'my-project',
+                    'porringer': {'manifest': 'config/porringer.json'},
+                })
             )
 
             result = find_manifest(Path(tmpdir))

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginDependency, PluginKind
 
@@ -128,6 +128,37 @@ class PimEnvironment(Environment, RuntimeProvider):
     def upgrade_command(self, package: PackageRef) -> list[str]:
         """Returns the CLI command to upgrade a Python runtime via pymanager."""
         return ['py', 'install', '--update', package.name]
+
+    @override
+    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+        """Checks for newer Python runtimes via ``py list --online``.
+
+        Queries the Python Install Manager's online listing and finds
+        the highest available version for each requested tag.
+
+        Args:
+            params: The check parameters.
+
+        Returns:
+            A list of packages with their latest available version.
+        """
+        data = self._run_json_command(['py', 'list', '--online', '-f', 'json'])
+        if not isinstance(data, dict):
+            return []
+
+        results: list[Package] = []
+        for pkg_ref in params.packages:
+            best_version: str | None = None
+            for runtime in data.get('versions', []):
+                tag = runtime.get('tag', '')
+                version = runtime.get('sort-version') or tag
+                if (tag.startswith(pkg_ref.name) or pkg_ref.name == tag) and (
+                    best_version is None or version > best_version
+                ):
+                    best_version = version
+            if best_version is not None:
+                results.append(Package(name=pkg_ref.name, version=best_version))
+        return results
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:

@@ -1,7 +1,5 @@
 """Tests for the PluginManager protocol and native plugin management routing."""
 
-from __future__ import annotations
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 

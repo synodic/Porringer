@@ -5,6 +5,7 @@ from abc import abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 
+import httpx
 from pydantic import Field
 
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
@@ -272,22 +273,77 @@ class Environment(ToolBasedPlugin):
         """
         raise NotImplementedError
 
+    @abstractmethod
     def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
-        """Checks for available updates using the plugin's native tooling.
+        """Check for available updates using the plugin's native tooling.
 
-        This method is optional. Plugins that don't support update checking
-        can use the default implementation which returns an empty list.
+        Every ``Environment`` subclass **must** implement this method.
+        Plugins that genuinely cannot check for updates should return
+        an empty list.
 
-        Implementations can access instance state (e.g. `tool_name()`,
-        `runtime_executable`) which was not possible when this was a
-        static method.
+        Use the shared helpers ``_check_npm_registry()`` or
+        ``PythonEnvironment._check_pypi_updates()`` where applicable.
 
         Args:
             params: The check parameters including which packages to check.
 
         Returns:
-            A list of packages that have updates available. Each Package should
-            have its 'version' field set to the latest available version.
+            A list of packages that have updates available. Each Package
+            should have its ``version`` field set to the latest
+            available version.
         """
-        del self, params  # Base no-op; subclasses override with real checks.
-        return []
+        ...
+
+    @staticmethod
+    def _check_npm_registry(
+        packages: list[PackageRef],
+        *,
+        include_prereleases: bool = False,
+        logger: logging.Logger | None = None,
+    ) -> list[Package]:
+        """Query the npm registry for the latest versions of the given packages.
+
+        Shared helper for plugins that install from the npm registry
+        (npm, pnpm, bun, and the npm branch of deno).
+
+        For each package, fetches
+        ``https://registry.npmjs.org/{name}`` and extracts:
+
+        * **stable** — ``dist-tags.latest``
+        * **pre-release** — the last key in ``versions`` (highest semver)
+
+        Args:
+            packages: Package references to look up.
+            include_prereleases: When ``True``, return pre-release versions.
+            logger: Optional logger for debug messages. Falls back to
+                ``logging.getLogger('porringer.npm_registry')``.
+
+        Returns:
+            A list of packages with their latest available version.
+        """
+        if logger is None:
+            logger = logging.getLogger('porringer.npm_registry')
+
+        results: list[Package] = []
+        for pkg_ref in packages:
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.get(f'https://registry.npmjs.org/{pkg_ref.name}')
+                    response.raise_for_status()
+                    data = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.debug('npm registry query failed for %s: %s', pkg_ref.name, exc)
+                continue
+
+            if include_prereleases:
+                versions = data.get('versions', {})
+                if versions:
+                    latest = list(versions.keys())[-1]
+                    results.append(Package(name=pkg_ref.name, version=latest))
+            else:
+                dist_tags = data.get('dist-tags', {})
+                latest = dist_tags.get('latest')
+                if latest:
+                    results.append(Package(name=pkg_ref.name, version=latest))
+
+        return results

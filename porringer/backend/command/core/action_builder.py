@@ -5,8 +5,6 @@ resolved plugins.  Also contains the preview/parse entry point that
 loads a manifest and returns a `SetupResults` without executing.
 """
 
-from __future__ import annotations
-
 import logging
 import shlex
 from pathlib import Path

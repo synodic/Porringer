@@ -11,8 +11,6 @@ in the sibling modules:
 * `.discovery`      — plugin entry-point discovery
 """
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import logging
