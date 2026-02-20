@@ -42,13 +42,14 @@ class PdmProjectEnvironment(ProjectEnvironment, PluginManager):
 
     @override
     def plugin_update_command(self, plugin: PackageRef) -> list[str]:
-        """Return ``pdm self add <plugin>``.
+        """Return ``pdm self add --pip-args --upgrade <plugin>``.
 
         PDM's ``self update`` updates PDM itself and does not accept a
-        package argument.  ``self add`` is idempotent and also upgrades
-        an already-installed plugin to the latest allowed version.
+        package argument.  ``self add`` without extra flags is a no-op
+        when the plugin is already installed, so ``--pip-args --upgrade``
+        is required to force pip to pull a newer version.
         """
-        return self.plugin_add_command(plugin)
+        return ['pdm', 'self', 'add', '--pip-args', '--upgrade', plugin.specifier]
 
     @override
     def plugin_list_command(self) -> list[str]:

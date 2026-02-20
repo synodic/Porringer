@@ -84,7 +84,7 @@ class PluginManager(Protocol):
 
         Returns:
             A list of command arguments
-            (e.g. ``['pdm', 'self', 'update', 'cppython']``).
+            (e.g. ``['pdm', 'self', 'add', '--pip-args', '--upgrade', 'cppython']``).
         """
         ...
 

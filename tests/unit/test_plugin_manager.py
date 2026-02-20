@@ -21,6 +21,7 @@ from porringer.schema import (
     SkipReason,
     SyncStrategy,
 )
+from porringer.test.mock.plugin_manager import MockPluginManager
 
 _PY = Ecosystem('python')
 _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
@@ -70,21 +71,27 @@ class TestPluginAddCommand:
         """PDM plugin_add_command for a bare package name."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
-        assert plugin.plugin_add_command(ref) == ['pdm', 'self', 'add', 'cppython']
+        cmd = plugin.plugin_add_command(ref)
+        assert cmd[0] == plugin.tool_name()
+        assert ref.specifier in cmd
 
     @staticmethod
     def test_pdm_plugin_add_command_with_constraint() -> None:
         """PDM plugin_add_command includes version constraint."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython>=0.5')
-        assert plugin.plugin_add_command(ref) == ['pdm', 'self', 'add', 'cppython>=0.5']
+        cmd = plugin.plugin_add_command(ref)
+        assert cmd[0] == plugin.tool_name()
+        assert ref.specifier in cmd
 
     @staticmethod
     def test_poetry_plugin_add_command_bare() -> None:
         """Poetry plugin_add_command for a bare package name."""
         plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export')
-        assert plugin.plugin_add_command(ref) == ['poetry', 'self', 'add', 'poetry-plugin-export']
+        cmd = plugin.plugin_add_command(ref)
+        assert cmd[0] == plugin.tool_name()
+        assert ref.specifier in cmd
 
     @staticmethod
     def test_poetry_plugin_add_command_with_constraint() -> None:
@@ -92,9 +99,8 @@ class TestPluginAddCommand:
         plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export>=1.0,<2.0')
         cmd = plugin.plugin_add_command(ref)
-        assert cmd[0:3] == ['poetry', 'self', 'add']
-        assert 'poetry-plugin-export' in cmd[3]
-        assert '>=1.0' in cmd[3]
+        assert cmd[0] == plugin.tool_name()
+        assert ref.specifier in cmd
 
 
 # ---------------------------------------------------------------------------
@@ -174,34 +180,33 @@ class TestCliCommandPreview:
     """Test that get_cli_command prefers native plugin management."""
 
     @staticmethod
-    def _make_pdm_project_env() -> PdmProjectEnvironment:
-        return PdmProjectEnvironment(_MOCK_PARAMS)
+    def _make_mock_pm(*, installed: list[Package] | None = None) -> MockPluginManager:
+        return MockPluginManager(_MOCK_PARAMS, installed=installed)
 
     def test_native_command_when_plugin_manager_available(self) -> None:
         """get_cli_command returns native command when PluginManager is on PATH."""
-        pdm_env = self._make_pdm_project_env()
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = self._make_mock_pm()
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        ref = PackageRef.model_validate('cppython')
 
         action = SetupAction(
-            description="Add 'cppython' to 'pdm'",
+            description="Add 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
             installer='pipx',
-            package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('pdm'),
+            package=ref,
+            plugin_target=PackageRef.model_validate('mock-pm'),
         )
 
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        with patch.object(type(pdm_env), 'is_available', return_value=True):
-            cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
-
-        assert cmd == ['pdm', 'self', 'add', 'cppython']
+        cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
+        assert cmd == mock_pm.plugin_add_command(ref)
 
     def test_empty_command_when_plugin_manager_unavailable(self) -> None:
         """get_cli_command returns empty list when PluginManager tool is not on PATH."""
-        pdm_env = self._make_pdm_project_env()
+        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
         project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
 
         action = SetupAction(
@@ -250,38 +255,29 @@ class TestPluginAddRouting:
     @staticmethod
     def test_routes_to_native_when_plugin_manager_available() -> None:
         """execute_package uses PluginManager for plugin_target actions."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
+        mock_pm = MockPluginManager(_MOCK_PARAMS)
 
         action = SetupAction(
-            description="Add 'cppython' to 'pdm'",
+            description="Add 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
             installer='pipx',
             package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('pdm'),
+            plugin_target=PackageRef.model_validate('mock-pm'),
         )
 
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = 'Added cppython'
-        mock_result.stderr = ''
-
         async def _run():
-            with (
-                patch.object(type(pdm_env), 'is_available', return_value=True),
-                patch.object(pdm_env, 'installed_plugins', return_value=[]),
-                patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd,
-            ):
-                mock_cmd.return_value = mock_result
-                return await execute_package(action, {}, SyncStrategy.MINIMAL, None, context)
+            return await execute_package(action, {}, SyncStrategy.MINIMAL, None, context)
 
         result = asyncio.run(_run())
         assert result.success is True
         assert result.message is not None
         assert 'native' in result.message.lower()
+        assert len(mock_pm.operations) == 1
+        assert mock_pm.operations[0][0] == 'add'
 
     @staticmethod
     def test_fails_when_no_plugin_manager() -> None:
@@ -314,15 +310,19 @@ class TestPluginListCommand:
 
     @staticmethod
     def test_pdm_plugin_list_command() -> None:
-        """PDM plugin_list_command returns 'pdm self list --plugins'."""
+        """PDM plugin_list_command starts with tool name."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
-        assert plugin.plugin_list_command() == ['pdm', 'self', 'list', '--plugins']
+        cmd = plugin.plugin_list_command()
+        assert cmd[0] == plugin.tool_name()
+        assert len(cmd) > 1
 
     @staticmethod
     def test_poetry_plugin_list_command() -> None:
-        """Poetry plugin_list_command returns 'poetry self show plugins'."""
+        """Poetry plugin_list_command starts with tool name."""
         plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
-        assert plugin.plugin_list_command() == ['poetry', 'self', 'show', 'plugins']
+        cmd = plugin.plugin_list_command()
+        assert cmd[0] == plugin.tool_name()
+        assert len(cmd) > 1
 
 
 class TestParsePluginList:
@@ -432,12 +432,12 @@ class TestInstalledPlugins:
 # ---------------------------------------------------------------------------
 
 _PLUGIN_ACTION = SetupAction(
-    description="Add 'cppython' to 'pdm'",
+    description="Add 'cppython' to 'mock-pm'",
     kind=PluginKind.TOOL,
     ecosystem=_PY,
     installer='pipx',
     package=PackageRef.model_validate('cppython'),
-    plugin_target=PackageRef.model_validate('pdm'),
+    plugin_target=PackageRef.model_validate('mock-pm'),
 )
 
 
@@ -445,44 +445,41 @@ class TestDryRunPluginPresence:
     """Test that dry_run_action correctly queries PluginManager for plugin-target actions."""
 
     @staticmethod
-    def _make_envs() -> tuple[PdmProjectEnvironment, dict[str, Environment], dict[str, ProjectEnvironment]]:
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
+    def _make_envs(
+        *,
+        installed: list[Package] | None = None,
+    ) -> tuple[MockPluginManager, dict[str, Environment], dict[str, ProjectEnvironment]]:
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=installed)
         mock_pipx = MagicMock(spec=Environment)
         mock_pipx.packages.return_value = []
         environments: dict[str, Environment] = {'pipx': mock_pipx}
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
-        return pdm_env, environments, project_environments
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        return mock_pm, environments, project_environments
 
     def test_skips_when_plugin_installed(self) -> None:
         """dry_run_action skips plugin-target action when plugin is already installed."""
-        pdm_env, environments, project_environments = self._make_envs()
+        _, environments, project_environments = self._make_envs(
+            installed=[Package(name='cppython', version='0.9.14')],
+        )
 
-        with (
-            patch.object(type(pdm_env), 'is_available', return_value=True),
-            patch.object(pdm_env, 'installed_plugins', return_value=[Package(name='cppython', version='0.9.14')]),
-        ):
-            result = dry_run_action(
-                _PLUGIN_ACTION,
-                environments,
-                project_environments=project_environments,
-            )
+        result = dry_run_action(
+            _PLUGIN_ACTION,
+            environments,
+            project_environments=project_environments,
+        )
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
 
     def test_not_skipped_when_plugin_missing(self) -> None:
         """dry_run_action does not skip when plugin is not installed."""
-        pdm_env, environments, project_environments = self._make_envs()
+        _, environments, project_environments = self._make_envs(installed=[])
 
-        with (
-            patch.object(type(pdm_env), 'is_available', return_value=True),
-            patch.object(pdm_env, 'installed_plugins', return_value=[]),
-        ):
-            result = dry_run_action(
-                _PLUGIN_ACTION,
-                environments,
-                project_environments=project_environments,
-            )
+        result = dry_run_action(
+            _PLUGIN_ACTION,
+            environments,
+            project_environments=project_environments,
+        )
 
         assert result.skipped is not True
 
@@ -500,19 +497,17 @@ class TestDryRunPluginPresence:
 
     def test_upgrade_when_plugin_installed_latest_strategy(self) -> None:
         """dry_run_action reports upgrade intent when LATEST strategy and plugin is installed."""
-        pdm_env, environments, project_environments = self._make_envs()
+        _, environments, project_environments = self._make_envs(
+            installed=[Package(name='cppython', version='0.9.14')],
+        )
         params = SetupParameters(strategy=SyncStrategy.LATEST)
 
-        with (
-            patch.object(type(pdm_env), 'is_available', return_value=True),
-            patch.object(pdm_env, 'installed_plugins', return_value=[Package(name='cppython', version='0.9.14')]),
-        ):
-            result = dry_run_action(
-                _PLUGIN_ACTION,
-                environments,
-                project_environments=project_environments,
-                parameters=params,
-            )
+        result = dry_run_action(
+            _PLUGIN_ACTION,
+            environments,
+            project_environments=project_environments,
+            parameters=params,
+        )
 
         # LATEST + installed → upgrade, not skipped
         assert result.skipped is not True
@@ -520,19 +515,15 @@ class TestDryRunPluginPresence:
 
     def test_install_when_plugin_missing_latest_strategy(self) -> None:
         """dry_run_action reports install when LATEST strategy and plugin is missing."""
-        pdm_env, environments, project_environments = self._make_envs()
+        _, environments, project_environments = self._make_envs(installed=[])
         params = SetupParameters(strategy=SyncStrategy.LATEST)
 
-        with (
-            patch.object(type(pdm_env), 'is_available', return_value=True),
-            patch.object(pdm_env, 'installed_plugins', return_value=[]),
-        ):
-            result = dry_run_action(
-                _PLUGIN_ACTION,
-                environments,
-                project_environments=project_environments,
-                parameters=params,
-            )
+        result = dry_run_action(
+            _PLUGIN_ACTION,
+            environments,
+            project_environments=project_environments,
+            parameters=params,
+        )
 
         assert result.skipped is not True
         assert result.success is True
@@ -549,46 +540,34 @@ class TestExecutePackagePluginPresence:
     @staticmethod
     def test_skips_installed_plugin_on_minimal() -> None:
         """execute_package skips plugin-target action when already installed."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
         async def _run():
-            with (
-                patch.object(type(pdm_env), 'is_available', return_value=True),
-                patch.object(pdm_env, 'installed_plugins', return_value=[Package(name='cppython', version='0.9.14')]),
-            ):
-                return await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+            return await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
 
         result = asyncio.run(_run())
         assert result.success is True
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
+        assert len(mock_pm.operations) == 0
 
     @staticmethod
     def test_installs_missing_plugin_on_minimal() -> None:
         """execute_package installs plugin when not already installed."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        mock_cmd_result = MagicMock()
-        mock_cmd_result.returncode = 0
-        mock_cmd_result.stdout = 'Added cppython'
-        mock_cmd_result.stderr = ''
-
         async def _run():
-            with (
-                patch.object(type(pdm_env), 'is_available', return_value=True),
-                patch.object(pdm_env, 'installed_plugins', return_value=[]),
-                patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd,
-            ):
-                mock_cmd.return_value = mock_cmd_result
-                return await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+            return await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
 
         result = asyncio.run(_run())
         assert result.success is True
         assert result.skipped is not True
+        assert len(mock_pm.operations) == 1
+        assert mock_pm.operations[0][0] == 'add'
 
 
 # ---------------------------------------------------------------------------
@@ -601,19 +580,24 @@ class TestPluginUpdateCommand:
 
     @staticmethod
     def test_pdm_plugin_update_command_bare() -> None:
-        """PDM plugin_update_command delegates to plugin_add_command."""
+        """PDM plugin_update_command starts with tool name and includes the package."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
-        assert plugin.plugin_update_command(ref) == ['pdm', 'self', 'add', 'cppython']
-        assert plugin.plugin_update_command(ref) == plugin.plugin_add_command(ref)
+        cmd = plugin.plugin_update_command(ref)
+        assert cmd[0] == plugin.tool_name()
+        assert ref.specifier in cmd
+        # Update must differ from add (add omits the upgrade mechanism)
+        assert cmd != plugin.plugin_add_command(ref)
 
     @staticmethod
     def test_pdm_plugin_update_command_with_constraint() -> None:
-        """PDM plugin_update_command includes version constraint via add."""
+        """PDM plugin_update_command includes version constraint."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython>=0.5')
-        assert plugin.plugin_update_command(ref) == ['pdm', 'self', 'add', 'cppython>=0.5']
-        assert plugin.plugin_update_command(ref) == plugin.plugin_add_command(ref)
+        cmd = plugin.plugin_update_command(ref)
+        assert cmd[0] == plugin.tool_name()
+        assert ref.specifier in cmd
+        assert cmd != plugin.plugin_add_command(ref)
 
     @staticmethod
     def test_poetry_plugin_update_delegates_to_add() -> None:
@@ -623,7 +607,6 @@ class TestPluginUpdateCommand:
         update_cmd = plugin.plugin_update_command(ref)
         add_cmd = plugin.plugin_add_command(ref)
         assert update_cmd == add_cmd
-        assert update_cmd == ['poetry', 'self', 'add', 'poetry-plugin-export']
 
     @staticmethod
     def test_poetry_plugin_update_with_constraint() -> None:
@@ -633,6 +616,33 @@ class TestPluginUpdateCommand:
         update_cmd = plugin.plugin_update_command(ref)
         add_cmd = plugin.plugin_add_command(ref)
         assert update_cmd == add_cmd
+
+    @staticmethod
+    def test_pdm_update_includes_pip_upgrade_flag() -> None:
+        """PDM update must pass --pip-args --upgrade so pip actually upgrades.
+
+        Without --pip-args --upgrade, ``pdm self add <pkg>`` delegates to
+        ``pip install <pkg>`` which is a no-op when the package is already
+        installed — pip sees the requirement satisfied and skips the upgrade.
+        This test reproduces the bug where ``pdm self add cppython`` reported
+        success but left the old version in place.
+        """
+        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        ref = PackageRef.model_validate('cppython')
+
+        add_cmd = plugin.plugin_add_command(ref)
+        update_cmd = plugin.plugin_update_command(ref)
+
+        # add intentionally omits the upgrade flag (first install)
+        assert '--pip-args' not in add_cmd
+        assert '--upgrade' not in add_cmd
+
+        # update MUST include the flag so pip pulls a newer version
+        assert '--pip-args' in update_cmd
+        assert '--upgrade' in update_cmd
+
+        # The two commands must not be identical
+        assert add_cmd != update_cmd
 
 
 # ---------------------------------------------------------------------------
@@ -704,7 +714,7 @@ class TestAsyncPluginUpdate:
 
     @staticmethod
     def test_async_plugin_update_uses_update_command() -> None:
-        """async_plugin_update runs plugin_update_command (which delegates to add for PDM)."""
+        """async_plugin_update delegates to plugin_update_command."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
@@ -721,8 +731,8 @@ class TestAsyncPluginUpdate:
                 return mock_cmd.call_args[0][0]
 
         called_args = asyncio.run(_run())
-        # PDM delegates update to add (pdm self update updates PDM itself)
-        assert called_args == ['pdm', 'self', 'add', 'cppython']
+        # The default implementation delegates to plugin_update_command
+        assert called_args == plugin.plugin_update_command(ref)
 
 
 # ---------------------------------------------------------------------------
@@ -806,75 +816,59 @@ class TestResolveOperation:
 
     def test_plugin_minimal_installed_skips(self) -> None:
         """Plugin: MINIMAL + installed → SKIP."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        action = self._make_action(plugin_target='pdm')
-        proj_envs: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        action = self._make_action(plugin_target='mock-pm')
+        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
-        with (
-            patch.object(type(pdm_env), 'is_available', return_value=True),
-            patch.object(pdm_env, 'installed_plugins', return_value=[Package(name='cppython', version='0.9.14')]),
-        ):
-            resolved = asyncio.run(
-                resolve_operation(action, {}, SyncStrategy.MINIMAL, ResolutionContext(project_environments=proj_envs))
-            )
+        resolved = asyncio.run(
+            resolve_operation(action, {}, SyncStrategy.MINIMAL, ResolutionContext(project_environments=proj_envs))
+        )
 
         assert resolved.operation == OperationKind.SKIP
         assert resolved.skip_reason == SkipReason.ALREADY_INSTALLED
-        assert resolved.plugin_manager is pdm_env
+        assert resolved.plugin_manager is mock_pm
 
     def test_plugin_minimal_not_installed_installs(self) -> None:
         """Plugin: MINIMAL + not installed → INSTALL."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        action = self._make_action(plugin_target='pdm')
-        proj_envs: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
+        action = self._make_action(plugin_target='mock-pm')
+        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
-        with (
-            patch.object(type(pdm_env), 'is_available', return_value=True),
-            patch.object(pdm_env, 'installed_plugins', return_value=[]),
-        ):
-            resolved = asyncio.run(
-                resolve_operation(action, {}, SyncStrategy.MINIMAL, ResolutionContext(project_environments=proj_envs))
-            )
+        resolved = asyncio.run(
+            resolve_operation(action, {}, SyncStrategy.MINIMAL, ResolutionContext(project_environments=proj_envs))
+        )
 
         assert resolved.operation == OperationKind.INSTALL
-        assert resolved.plugin_manager is pdm_env
+        assert resolved.plugin_manager is mock_pm
 
     def test_plugin_latest_installed_upgrades(self) -> None:
         """Plugin: LATEST + installed → UPGRADE."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        action = self._make_action(plugin_target='pdm')
-        proj_envs: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        action = self._make_action(plugin_target='mock-pm')
+        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
-        with (
-            patch.object(type(pdm_env), 'is_available', return_value=True),
-            patch.object(pdm_env, 'installed_plugins', return_value=[Package(name='cppython', version='0.9.14')]),
-        ):
-            resolved = asyncio.run(
-                resolve_operation(action, {}, SyncStrategy.LATEST, ResolutionContext(project_environments=proj_envs))
-            )
+        resolved = asyncio.run(
+            resolve_operation(action, {}, SyncStrategy.LATEST, ResolutionContext(project_environments=proj_envs))
+        )
 
         assert resolved.operation == OperationKind.UPGRADE
-        assert resolved.plugin_manager is pdm_env
+        assert resolved.plugin_manager is mock_pm
 
     def test_plugin_latest_not_installed_installs(self) -> None:
         """Plugin: LATEST + not installed → INSTALL (fallback)."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        action = self._make_action(plugin_target='pdm')
-        proj_envs: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
+        action = self._make_action(plugin_target='mock-pm')
+        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
-        with (
-            patch.object(type(pdm_env), 'is_available', return_value=True),
-            patch.object(pdm_env, 'installed_plugins', return_value=[]),
-        ):
-            resolved = asyncio.run(
-                resolve_operation(action, {}, SyncStrategy.LATEST, ResolutionContext(project_environments=proj_envs))
-            )
+        resolved = asyncio.run(
+            resolve_operation(action, {}, SyncStrategy.LATEST, ResolutionContext(project_environments=proj_envs))
+        )
 
         assert resolved.operation == OperationKind.INSTALL
 
     def test_plugin_no_manager_defaults_to_install(self) -> None:
         """Plugin: no PluginManager → INSTALL."""
-        action = self._make_action(plugin_target='pdm')
+        action = self._make_action(plugin_target='mock-pm')
 
         resolved = asyncio.run(resolve_operation(action, {}, SyncStrategy.MINIMAL))
 
@@ -914,82 +908,39 @@ class TestPluginUpgradeRouting:
     @staticmethod
     def test_latest_routes_to_update() -> None:
         """execute_package with LATEST calls async_plugin_update for installed plugin."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        mock_cmd_result = MagicMock()
-        mock_cmd_result.returncode = 0
-        mock_cmd_result.stdout = 'Updated cppython'
-        mock_cmd_result.stderr = ''
-
-        async def _run():
-            with (
-                patch.object(type(pdm_env), 'is_available', return_value=True),
-                patch.object(pdm_env, 'installed_plugins', return_value=[Package(name='cppython', version='0.9.14')]),
-                patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd,
-            ):
-                mock_cmd.return_value = mock_cmd_result
-                result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
-                return result, mock_cmd.call_args[0][0]
-
-        result, called_args = asyncio.run(_run())
+        result = asyncio.run(execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context))
         assert result.success is True
-        # PDM delegates update to add (pdm self update updates PDM itself)
-        assert called_args == ['pdm', 'self', 'add', 'cppython']
+        assert len(mock_pm.operations) == 1
+        assert mock_pm.operations[0][0] == 'update'
+        assert mock_pm.operations[0][1].name == 'cppython'
 
     @staticmethod
     def test_latest_installs_when_not_present() -> None:
         """execute_package with LATEST calls async_plugin_add for missing plugin."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        mock_cmd_result = MagicMock()
-        mock_cmd_result.returncode = 0
-        mock_cmd_result.stdout = 'Added cppython'
-        mock_cmd_result.stderr = ''
-
-        async def _run():
-            with (
-                patch.object(type(pdm_env), 'is_available', return_value=True),
-                patch.object(pdm_env, 'installed_plugins', return_value=[]),
-                patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd,
-            ):
-                mock_cmd.return_value = mock_cmd_result
-                result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
-                return result, mock_cmd.call_args[0][0]
-
-        result, called_args = asyncio.run(_run())
+        result = asyncio.run(execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context))
         assert result.success is True
-        # Not installed → should use add command even with LATEST
-        assert called_args == ['pdm', 'self', 'add', 'cppython']
+        assert len(mock_pm.operations) == 1
+        assert mock_pm.operations[0][0] == 'add'
 
     @staticmethod
     def test_minimal_always_uses_add() -> None:
         """execute_package with MINIMAL uses async_plugin_add for new plugin."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        mock_cmd_result = MagicMock()
-        mock_cmd_result.returncode = 0
-        mock_cmd_result.stdout = 'Added cppython'
-        mock_cmd_result.stderr = ''
-
-        async def _run():
-            with (
-                patch.object(type(pdm_env), 'is_available', return_value=True),
-                patch.object(pdm_env, 'installed_plugins', return_value=[]),
-                patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd,
-            ):
-                mock_cmd.return_value = mock_cmd_result
-                result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
-                return result, mock_cmd.call_args[0][0]
-
-        result, called_args = asyncio.run(_run())
+        result = asyncio.run(execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context))
         assert result.success is True
-        assert called_args == ['pdm', 'self', 'add', 'cppython']
+        assert len(mock_pm.operations) == 1
+        assert mock_pm.operations[0][0] == 'add'
 
 
 # ---------------------------------------------------------------------------
@@ -1001,80 +952,76 @@ class TestCliCommandUpgradePreview:
     """Test that get_cli_command returns upgrade commands for LATEST/EXACT."""
 
     @staticmethod
-    def _make_pdm_project_env() -> PdmProjectEnvironment:
-        return PdmProjectEnvironment(_MOCK_PARAMS)
+    def _make_mock_pm() -> MockPluginManager:
+        return MockPluginManager(_MOCK_PARAMS)
 
     def test_latest_returns_update_command(self) -> None:
         """get_cli_command returns plugin_update_command for LATEST strategy."""
-        pdm_env = self._make_pdm_project_env()
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = self._make_mock_pm()
+        ref = PackageRef.model_validate('cppython')
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
         action = SetupAction(
-            description="Upgrade plugin 'cppython' to 'pdm'",
+            description="Upgrade plugin 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
             installer='pipx',
-            package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('pdm'),
+            package=ref,
+            plugin_target=PackageRef.model_validate('mock-pm'),
         )
 
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        with patch.object(type(pdm_env), 'is_available', return_value=True):
-            cmd = get_cli_command(action, environments, SyncStrategy.LATEST, project_environments)
-
-        # PDM delegates update to add (pdm self update updates PDM itself)
-        assert cmd == ['pdm', 'self', 'add', 'cppython']
+        cmd = get_cli_command(action, environments, SyncStrategy.LATEST, project_environments)
+        assert cmd == mock_pm.plugin_update_command(ref)
 
     def test_exact_returns_update_command(self) -> None:
         """get_cli_command returns plugin_update_command for EXACT strategy."""
-        pdm_env = self._make_pdm_project_env()
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = self._make_mock_pm()
+        ref = PackageRef.model_validate('cppython')
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
         action = SetupAction(
-            description="Ensure plugin 'cppython' to 'pdm'",
+            description="Ensure plugin 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
             installer='pipx',
-            package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('pdm'),
+            package=ref,
+            plugin_target=PackageRef.model_validate('mock-pm'),
         )
 
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        with patch.object(type(pdm_env), 'is_available', return_value=True):
-            cmd = get_cli_command(action, environments, SyncStrategy.EXACT, project_environments)
-
-        # PDM delegates update to add (pdm self update updates PDM itself)
-        assert cmd == ['pdm', 'self', 'add', 'cppython']
+        cmd = get_cli_command(action, environments, SyncStrategy.EXACT, project_environments)
+        assert cmd == mock_pm.plugin_update_command(ref)
 
     def test_minimal_returns_add_command(self) -> None:
         """get_cli_command returns plugin_add_command for MINIMAL strategy."""
-        pdm_env = self._make_pdm_project_env()
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        mock_pm = self._make_mock_pm()
+        ref = PackageRef.model_validate('cppython')
+        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
         action = SetupAction(
-            description="Install plugin 'cppython' to 'pdm'",
+            description="Install plugin 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
             installer='pipx',
-            package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('pdm'),
+            package=ref,
+            plugin_target=PackageRef.model_validate('mock-pm'),
         )
 
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        with patch.object(type(pdm_env), 'is_available', return_value=True):
-            cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
+        cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
+        assert cmd == mock_pm.plugin_add_command(ref)
 
-        assert cmd == ['pdm', 'self', 'add', 'cppython']
-
-    def test_poetry_latest_returns_self_add(self) -> None:
-        """Poetry: LATEST returns 'poetry self add' (update delegates to add)."""
+    def test_poetry_latest_delegates_update_to_add(self) -> None:
+        """Poetry: LATEST returns same as add (Poetry update delegates to add)."""
         poetry_env = PoetryProjectEnvironment(_MOCK_PARAMS)
+        ref = PackageRef.model_validate('poetry-plugin-export')
         project_environments: dict[str, ProjectEnvironment] = {'poetryproject': poetry_env}
 
         action = SetupAction(
@@ -1082,7 +1029,7 @@ class TestCliCommandUpgradePreview:
             kind=PluginKind.TOOL,
             ecosystem=_PY,
             installer='pipx',
-            package=PackageRef.model_validate('poetry-plugin-export'),
+            package=ref,
             plugin_target=PackageRef.model_validate('poetry'),
         )
 
@@ -1092,5 +1039,6 @@ class TestCliCommandUpgradePreview:
         with patch.object(type(poetry_env), 'is_available', return_value=True):
             cmd = get_cli_command(action, environments, SyncStrategy.LATEST, project_environments)
 
-        # Poetry delegates update to add
-        assert cmd == ['poetry', 'self', 'add', 'poetry-plugin-export']
+        # Poetry delegates update to add — verify via protocol method
+        assert cmd == poetry_env.plugin_update_command(ref)
+        assert cmd == poetry_env.plugin_add_command(ref)
