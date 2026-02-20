@@ -601,17 +601,19 @@ class TestPluginUpdateCommand:
 
     @staticmethod
     def test_pdm_plugin_update_command_bare() -> None:
-        """PDM plugin_update_command returns 'pdm self update <pkg>'."""
+        """PDM plugin_update_command delegates to plugin_add_command."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
-        assert plugin.plugin_update_command(ref) == ['pdm', 'self', 'update', 'cppython']
+        assert plugin.plugin_update_command(ref) == ['pdm', 'self', 'add', 'cppython']
+        assert plugin.plugin_update_command(ref) == plugin.plugin_add_command(ref)
 
     @staticmethod
     def test_pdm_plugin_update_command_with_constraint() -> None:
-        """PDM plugin_update_command includes version constraint."""
+        """PDM plugin_update_command includes version constraint via add."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython>=0.5')
-        assert plugin.plugin_update_command(ref) == ['pdm', 'self', 'update', 'cppython>=0.5']
+        assert plugin.plugin_update_command(ref) == ['pdm', 'self', 'add', 'cppython>=0.5']
+        assert plugin.plugin_update_command(ref) == plugin.plugin_add_command(ref)
 
     @staticmethod
     def test_poetry_plugin_update_delegates_to_add() -> None:
@@ -702,7 +704,7 @@ class TestAsyncPluginUpdate:
 
     @staticmethod
     def test_async_plugin_update_uses_update_command() -> None:
-        """async_plugin_update runs plugin_update_command, not plugin_add_command."""
+        """async_plugin_update runs plugin_update_command (which delegates to add for PDM)."""
         plugin = PdmProjectEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
@@ -719,7 +721,8 @@ class TestAsyncPluginUpdate:
                 return mock_cmd.call_args[0][0]
 
         called_args = asyncio.run(_run())
-        assert called_args == ['pdm', 'self', 'update', 'cppython']
+        # PDM delegates update to add (pdm self update updates PDM itself)
+        assert called_args == ['pdm', 'self', 'add', 'cppython']
 
 
 # ---------------------------------------------------------------------------
@@ -932,8 +935,8 @@ class TestPluginUpgradeRouting:
 
         result, called_args = asyncio.run(_run())
         assert result.success is True
-        # Should have called the update command, not the add command
-        assert called_args == ['pdm', 'self', 'update', 'cppython']
+        # PDM delegates update to add (pdm self update updates PDM itself)
+        assert called_args == ['pdm', 'self', 'add', 'cppython']
 
     @staticmethod
     def test_latest_installs_when_not_present() -> None:
@@ -1021,7 +1024,8 @@ class TestCliCommandUpgradePreview:
         with patch.object(type(pdm_env), 'is_available', return_value=True):
             cmd = get_cli_command(action, environments, SyncStrategy.LATEST, project_environments)
 
-        assert cmd == ['pdm', 'self', 'update', 'cppython']
+        # PDM delegates update to add (pdm self update updates PDM itself)
+        assert cmd == ['pdm', 'self', 'add', 'cppython']
 
     def test_exact_returns_update_command(self) -> None:
         """get_cli_command returns plugin_update_command for EXACT strategy."""
@@ -1043,7 +1047,8 @@ class TestCliCommandUpgradePreview:
         with patch.object(type(pdm_env), 'is_available', return_value=True):
             cmd = get_cli_command(action, environments, SyncStrategy.EXACT, project_environments)
 
-        assert cmd == ['pdm', 'self', 'update', 'cppython']
+        # PDM delegates update to add (pdm self update updates PDM itself)
+        assert cmd == ['pdm', 'self', 'add', 'cppython']
 
     def test_minimal_returns_add_command(self) -> None:
         """get_cli_command returns plugin_add_command for MINIMAL strategy."""
