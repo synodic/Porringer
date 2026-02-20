@@ -53,14 +53,20 @@ class PipxEnvironment(PythonEnvironment):
         return 'pipx'
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to install a package via pipx."""
-        return ['pipx', 'install', package.specifier]
+        cmd = ['pipx', 'install', package.specifier]
+        if include_prereleases:
+            cmd.extend(['--pip-args=--pre'])
+        return cmd
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to upgrade a package via pipx."""
-        return ['pipx', 'upgrade', package.specifier]
+        cmd = ['pipx', 'upgrade', package.specifier]
+        if include_prereleases:
+            cmd.extend(['--pip-args=--pre'])
+        return cmd
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:

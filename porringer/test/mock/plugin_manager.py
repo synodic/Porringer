@@ -56,11 +56,11 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
     # -- command builders (never executed, only used by get_cli_command) ------
 
     @override
-    def plugin_add_command(self, plugin: PackageRef) -> list[str]:
+    def plugin_add_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return ['mock-pm', 'add', plugin.specifier]
 
     @override
-    def plugin_update_command(self, plugin: PackageRef) -> list[str]:
+    def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return ['mock-pm', 'update', plugin.specifier]
 
     @override

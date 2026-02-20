@@ -27,14 +27,14 @@ class PnpmEnvironment(Environment):
         return 'pnpm'
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to install a package via pnpm."""
         if package.constraint:
             return ['pnpm', 'add', '-g', f'{package.name}@{package.constraint}']
         return ['pnpm', 'add', '-g', package.name]
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to upgrade a package via pnpm."""
         if package.constraint:
             return ['pnpm', 'update', '-g', f'{package.name}@{package.constraint}']

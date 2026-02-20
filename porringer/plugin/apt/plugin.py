@@ -57,7 +57,7 @@ class AptEnvironment(Environment):
         return 'apt'
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to install a package via apt."""
         # apt uses name=version for exact pinning
         if package.constraint:
@@ -65,7 +65,7 @@ class AptEnvironment(Environment):
         return ['apt', 'install', package.name]
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to upgrade a package via apt."""
         if package.constraint:
             return [

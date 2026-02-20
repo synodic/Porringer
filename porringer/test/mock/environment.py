@@ -11,12 +11,12 @@ class MockEnvironment(Environment):
     """Mocked environment plugin"""
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to install a package."""
         return ['mock', 'install', str(package)]
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to upgrade a package."""
         return ['mock', 'upgrade', str(package)]
 

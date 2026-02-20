@@ -29,14 +29,14 @@ class BunEnvironment(Environment):
         return 'bun'
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to install a package via Bun."""
         if package.constraint:
             return ['bun', 'add', '-g', f'{package.name}@{package.constraint}']
         return ['bun', 'add', '-g', package.name]
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to upgrade a package via Bun."""
         # Bun has no per-package global update; re-add at latest
         return ['bun', 'add', '-g', f'{package.name}@latest']

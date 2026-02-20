@@ -36,12 +36,21 @@ class PdmProjectEnvironment(ProjectEnvironment, PluginManager):
         return 'pdm'
 
     @override
-    def plugin_add_command(self, plugin: PackageRef) -> list[str]:
-        """Return ``pdm self add <plugin>``."""
-        return ['pdm', 'self', 'add', plugin.specifier]
+    def plugin_add_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+        """Return ``pdm self add <plugin>``.
+
+        When *include_prereleases* is ``True``, appends
+        ``--pip-args=--pre`` so that pip considers pre-release
+        versions.
+        """
+        cmd = ['pdm', 'self', 'add']
+        if include_prereleases:
+            cmd.append('--pip-args=--pre')
+        cmd.append(plugin.specifier)
+        return cmd
 
     @override
-    def plugin_update_command(self, plugin: PackageRef) -> list[str]:
+    def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return ``pdm self add --pip-args=--upgrade <plugin>``.
 
         PDM's ``self update`` updates PDM itself and does not accept a
@@ -49,10 +58,17 @@ class PdmProjectEnvironment(ProjectEnvironment, PluginManager):
         when the plugin is already installed, so ``--pip-args=--upgrade``
         is required to force pip to pull a newer version.
 
+        When *include_prereleases* is ``True``, ``--pip-args=--pre`` is
+        appended so that pip considers pre-release versions.
+
         The ``=`` syntax is mandatory because ``--upgrade`` starts with
         ``--`` and argparse would otherwise treat it as a separate flag.
         """
-        return ['pdm', 'self', 'add', '--pip-args=--upgrade', plugin.specifier]
+        cmd = ['pdm', 'self', 'add', '--pip-args=--upgrade']
+        if include_prereleases:
+            cmd.append('--pip-args=--pre')
+        cmd.append(plugin.specifier)
+        return cmd
 
     @override
     def plugin_list_command(self) -> list[str]:

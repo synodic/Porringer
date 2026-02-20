@@ -106,8 +106,8 @@ def _get_plugin_cli_command(
     if manager is None or action.package is None:
         return []
     if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
-        return manager.plugin_update_command(action.package)
-    return manager.plugin_add_command(action.package)
+        return manager.plugin_update_command(action.package, include_prereleases=action.include_prereleases)
+    return manager.plugin_add_command(action.package, include_prereleases=action.include_prereleases)
 
 
 def get_cli_command(
@@ -137,9 +137,9 @@ def get_cli_command(
                 if action.plugin_target is not None:
                     cmd = _get_plugin_cli_command(action, strategy, project_environments)
                 elif strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
-                    cmd = env.upgrade_command(action.package)
+                    cmd = env.upgrade_command(action.package, include_prereleases=action.include_prereleases)
                 else:
-                    cmd = env.install_command(action.package)
+                    cmd = env.install_command(action.package, include_prereleases=action.include_prereleases)
         case PluginKind.PROJECT:
             proj_envs = project_environments or {}
             if action.installer and action.installer in proj_envs:

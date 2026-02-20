@@ -37,14 +37,17 @@ class UvEnvironment(PythonEnvironment):
         return 'uv'
 
     @override
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to install a package via uv."""
-        return ['uv', 'pip', 'install', *self._python_args(), package.specifier]
+        cmd = ['uv', 'pip', 'install', *self._python_args(), package.specifier]
+        if include_prereleases:
+            cmd.append('--prerelease=allow')
+        return cmd
 
     @override
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command to upgrade a package via uv."""
-        return [
+        cmd = [
             'uv',
             'pip',
             'install',
@@ -52,6 +55,9 @@ class UvEnvironment(PythonEnvironment):
             *self._python_args(),
             package.specifier,
         ]
+        if include_prereleases:
+            cmd.append('--prerelease=allow')
+        return cmd
 
     @override
     def packages(self, *, project_path: Path | None = None) -> list[Package]:

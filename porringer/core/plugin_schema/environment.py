@@ -26,6 +26,10 @@ class PackageParameters(PorringerModel):
     dry: bool = Field(
         default=False, description='If True, rehearses the operation without modifying what is actually installed'
     )
+    include_prereleases: bool = Field(
+        default=False,
+        description='When True, allow pre-release versions during install/upgrade',
+    )
     progress_callback: Callable[[SubActionProgress], None] | None = Field(
         default=None,
         exclude=True,
@@ -62,7 +66,7 @@ class Environment(ToolBasedPlugin):
         self.runtime_executable = None
 
     @abstractmethod
-    def install_command(self, package: PackageRef) -> list[str]:
+    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command that would install a package.
 
         Override this method to provide the actual command line arguments
@@ -72,6 +76,8 @@ class Environment(ToolBasedPlugin):
 
         Args:
             package: The package reference (may include a version constraint).
+            include_prereleases: When ``True``, allow pre-release versions
+                (e.g. append ``--pre`` for pip-based tools).
 
         Returns:
             A list of command arguments (e.g., ['pip', 'install', 'requests>=1.0']).
@@ -79,7 +85,7 @@ class Environment(ToolBasedPlugin):
         ...
 
     @abstractmethod
-    def upgrade_command(self, package: PackageRef) -> list[str]:
+    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Returns the CLI command that would upgrade a package.
 
         Override this method to provide the actual command line arguments
@@ -89,6 +95,8 @@ class Environment(ToolBasedPlugin):
 
         Args:
             package: The package reference (may include a version constraint).
+            include_prereleases: When ``True``, allow pre-release versions
+                (e.g. append ``--pre`` for pip-based tools).
 
         Returns:
             A list of command arguments (e.g., ['pip', 'install', '--upgrade', 'requests']).
@@ -125,7 +133,7 @@ class Environment(ToolBasedPlugin):
         Returns:
             The package, or None if installation failed
         """
-        args = list(self.install_command(params.package))
+        args = list(self.install_command(params.package, include_prereleases=params.include_prereleases))
         if params.progress_callback is not None:
             return await self._stream_command(args=args, params=params, phase='installing', verb='install')
         return await self._run_command(args=args, params=params, verb='install')
@@ -147,7 +155,7 @@ class Environment(ToolBasedPlugin):
         Returns:
             The package, or None if the upgrade failed.
         """
-        args = list(self.upgrade_command(params.package))
+        args = list(self.upgrade_command(params.package, include_prereleases=params.include_prereleases))
         if params.progress_callback is not None:
             return await self._stream_command(args=args, params=params, phase='upgrading', verb='upgrade')
         return await self._run_command(args=args, params=params, verb='upgrade')
