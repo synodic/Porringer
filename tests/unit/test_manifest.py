@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from porringer.api import API
 from porringer.backend.command.core.action_builder import build_actions
@@ -23,6 +24,7 @@ from porringer.schema import (
     SkipReason,
     SyncStrategy,
 )
+from porringer.schema.manifest import PluginSpec
 from porringer.utility.exception import ManifestError
 
 # Test constants
@@ -861,8 +863,8 @@ class TestPackageSpecPlugins:
         """PackageSpec accepts a plugins list of package refs"""
         spec = PackageSpec.model_validate({'name': 'pdm', 'plugins': ['cppython', 'pdm-bump']})
         assert len(spec.plugins) == 2
-        assert spec.plugins[0].name == 'cppython'
-        assert spec.plugins[1].name == 'pdm-bump'
+        assert spec.plugins[0].name.name == 'cppython'
+        assert spec.plugins[1].name.name == 'pdm-bump'
 
     @staticmethod
     def test_string_coercion_has_empty_plugins() -> None:
@@ -877,7 +879,7 @@ class TestPackageSpecPlugins:
         pkgs = manifest.tools[_PY]
         assert len(pkgs) == 2
         assert len(pkgs[0].plugins) == 1
-        assert pkgs[0].plugins[0].name == 'cppython'
+        assert pkgs[0].plugins[0].name.name == 'cppython'
         assert len(pkgs[1].plugins) == 0
 
     @staticmethod
@@ -945,17 +947,108 @@ class TestPackageSpecPlugins:
         }
         manifest = SetupManifest.model_validate(data)
         spec = manifest.tools[_PY][0]
-        assert spec.plugins[0].name == 'cppython'
-        assert spec.plugins[0].constraint == '>=0.5'
+        assert spec.plugins[0].name.name == 'cppython'
+        assert spec.plugins[0].name.constraint == '>=0.5'
 
     @staticmethod
     def test_package_spec_plugins_with_version_constraint() -> None:
         """Plugin refs support version constraints"""
         spec = PackageSpec.model_validate({'name': 'pdm', 'plugins': ['cppython>=1.0,<2.0']})
-        assert spec.plugins[0].name == 'cppython'
-        assert spec.plugins[0].constraint is not None
-        assert '>=1.0' in spec.plugins[0].constraint
-        assert '<2.0' in spec.plugins[0].constraint
+        assert spec.plugins[0].name.name == 'cppython'
+        assert spec.plugins[0].name.constraint is not None
+        assert '>=1.0' in spec.plugins[0].name.constraint
+        assert '<2.0' in spec.plugins[0].name.constraint
+
+
+class TestStrictFieldValidation:
+    """Tests that unknown/misspelled fields are rejected by manifest models.
+
+    All manifest models use ``extra='forbid'`` so that typos in field
+    names surface immediately rather than being silently ignored.
+    """
+
+    @staticmethod
+    def test_setup_manifest_rejects_unknown_top_level_field() -> None:
+        """SetupManifest raises ValidationError for unrecognised top-level keys"""
+        with pytest.raises(ValidationError, match='Extra inputs are not permitted'):
+            SetupManifest.model_validate({'version': '1', 'packges': {'python': ['requests']}})
+
+    @staticmethod
+    def test_setup_manifest_rejects_multiple_unknown_fields() -> None:
+        """SetupManifest reports all unknown fields, not just the first"""
+        with pytest.raises(ValidationError, match='Extra inputs are not permitted'):
+            SetupManifest.model_validate({'version': '1', 'nme': 'test', 'descrption': 'oops'})
+
+    @staticmethod
+    def test_package_spec_rejects_unknown_field() -> None:
+        """PackageSpec raises ValidationError for unknown keys"""
+        with pytest.raises(ValidationError, match='Extra inputs are not permitted'):
+            PackageSpec.model_validate({'name': 'requests', 'vrsion': '1.0'})
+
+    @staticmethod
+    def test_plugin_spec_rejects_unknown_field() -> None:
+        """PluginSpec raises ValidationError for unknown keys"""
+        with pytest.raises(ValidationError, match='Extra inputs are not permitted'):
+            PluginSpec.model_validate({'name': 'cppython', 'inclde_prereleases': True})
+
+    @staticmethod
+    def test_nested_plugin_spec_unknown_field_in_manifest() -> None:
+        """Unknown fields inside nested PluginSpec entries are rejected"""
+        data = {
+            'version': '1',
+            'tools': {
+                'python': [
+                    {
+                        'name': 'pdm',
+                        'plugins': [{'name': 'cppython', 'unknown_option': True}],
+                    }
+                ]
+            },
+        }
+        with pytest.raises(ValidationError, match='Extra inputs are not permitted'):
+            SetupManifest.model_validate(data)
+
+    @staticmethod
+    def test_nested_package_spec_unknown_field_in_manifest() -> None:
+        """Unknown fields inside nested PackageSpec entries are rejected"""
+        data = {
+            'version': '1',
+            'packages': {
+                'python': [
+                    {'name': 'requests', 'unknwon_key': 'value'},
+                ]
+            },
+        }
+        with pytest.raises(ValidationError, match='Extra inputs are not permitted'):
+            SetupManifest.model_validate(data)
+
+    @staticmethod
+    def test_valid_manifest_still_accepted() -> None:
+        """A well-formed manifest with only known fields parses successfully"""
+        data = {
+            'version': '1',
+            'name': 'Test',
+            'description': 'A test manifest',
+            'packages': {'python': ['requests']},
+            'tools': {'python': [{'name': 'pdm', 'plugins': ['cppython']}]},
+            'post_sync': ['echo done'],
+        }
+        manifest = SetupManifest.model_validate(data)
+        assert manifest.name == 'Test'
+        assert len(manifest.packages[_PY]) == 1
+
+    @staticmethod
+    def test_loader_wraps_unknown_field_as_manifest_error() -> None:
+        """_load_native_manifest wraps ValidationError into ManifestError"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / 'porringer.json'
+            manifest_data = {'version': '1', 'packges': {'python': ['requests']}}
+            manifest_path.write_text(json.dumps(manifest_data))
+
+            with pytest.raises(ManifestError) as exc_info:
+                find_manifest(manifest_path)
+
+            assert exc_info.value.code == ManifestValidationCode.SCHEMA_INVALID
 
 
 class TestManifestContributor:
@@ -1060,10 +1153,12 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1078,9 +1173,11 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             deno_json = Path(tmpdir) / 'deno.json'
             deno_json.write_text(
-                json.dumps({
-                    'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
-                })
+                json.dumps(
+                    {
+                        'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1137,10 +1234,12 @@ class TestManifestDiscovery:
 
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'manifest': 'config/porringer.json'},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'manifest': 'config/porringer.json'},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))

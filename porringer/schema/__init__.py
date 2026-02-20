@@ -23,6 +23,7 @@ from porringer.schema.manifest import (
     ManifestMetadata,
     ManifestValidationResult,
     PackageSpec,
+    PluginSpec,
     SetupManifest,
 )
 from porringer.schema.plugin import PluginInfo, PluginOperationResult
@@ -50,6 +51,7 @@ __all__ = [
     'PackageUpdateInfo',
     'PluginInfo',
     'PluginOperationResult',
+    'PluginSpec',
     'ProgressCallback',
     'ProgressEvent',
     'ProgressEventKind',

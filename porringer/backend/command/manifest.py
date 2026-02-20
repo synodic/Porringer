@@ -26,6 +26,7 @@ from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
+from pydantic import ValidationError
 
 from porringer.backend.backend import BackendResolver
 from porringer.backend.builder import Builder
@@ -119,6 +120,11 @@ def _load_native_manifest(path: Path) -> SetupManifest:
         return SetupManifest.model_validate(data)
     except json.JSONDecodeError as e:
         raise ManifestError(f'Invalid JSON in manifest {path}: {e}', code=ManifestValidationCode.SYNTAX_ERROR) from e
+    except ValidationError as e:
+        raise ManifestError(
+            f'Schema validation failed for manifest {path}: {e}',
+            code=ManifestValidationCode.SCHEMA_INVALID,
+        ) from e
     except Exception as e:
         raise ManifestError(f'Failed to load manifest {path}: {e}', code=ManifestValidationCode.LOAD_FAILED) from e
 
@@ -234,10 +240,15 @@ def _load_embedded_manifest(
     # Inline mode: the section *is* the manifest
     try:
         manifest = SetupManifest.model_validate(section)
+    except ValidationError as e:
+        raise ManifestError(
+            f'Schema validation failed for manifest in {path}: {e}',
+            code=ManifestValidationCode.SCHEMA_INVALID,
+        ) from e
     except Exception as e:
         raise ManifestError(
             f'Invalid manifest in {path}: {e}',
-            code=ManifestValidationCode.SCHEMA_INVALID,
+            code=ManifestValidationCode.LOAD_FAILED,
         ) from e
 
     return ManifestResult(

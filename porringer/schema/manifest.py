@@ -8,9 +8,9 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import Field, HttpUrl, model_validator
 
-from porringer.core.schema import Ecosystem, PackageRef, PlatformScoped, PluginKind
+from porringer.core.schema import Ecosystem, PackageRef, PlatformScoped, PluginKind, PorringerModel
 
 if TYPE_CHECKING:
     from porringer.utility.exception import ManifestValidationCode
@@ -66,6 +66,33 @@ class ManifestValidationResult:
         return [d for d in self.diagnostics if d.severity == ManifestDiagnosticSeverity.WARNING]
 
 
+class PluginSpec(PorringerModel):
+    """A plugin sub-package entry with optional metadata.
+
+    Supports both string shorthand (just a package specifier) and object form
+    with per-plugin options::
+
+        "cppython"  # string shorthand
+
+        {'name': 'cppython', 'include_prereleases': true}  # object form
+    """
+
+    name: PackageRef = Field(description='The plugin package reference (name with optional version constraint)')
+    description: str | None = Field(default=None, description='Human-readable description of this plugin')
+    include_prereleases: bool = Field(
+        default=False,
+        description='Include pre-release versions when checking this plugin for updates',
+    )
+
+    @model_validator(mode='before')
+    @classmethod
+    def _coerce_string(cls, data: Any) -> Any:
+        """Allow plain strings as shorthand for `{"name": "..."}`."""
+        if isinstance(data, str):
+            return {'name': data}
+        return data
+
+
 class PackageSpec(PlatformScoped):
     """A package entry with optional display metadata.
 
@@ -79,6 +106,7 @@ class PackageSpec(PlatformScoped):
     is executed automatically::
 
         {'name': 'pdm', 'plugins': ['cppython']}
+        {'name': 'pdm', 'plugins': [{'name': 'cppython', 'include_prereleases': true}]}
 
     The field is generic — any tool whose project-environment plugin
     implements ``PluginManager`` can use it.
@@ -90,7 +118,7 @@ class PackageSpec(PlatformScoped):
         default=False,
         description='Include pre-release versions when checking this package for updates',
     )
-    plugins: list[PackageRef] = Field(
+    plugins: list[PluginSpec] = Field(
         default_factory=list,
         description="Sub-packages to add via this tool's native plugin management after installation",
     )
@@ -104,7 +132,7 @@ class PackageSpec(PlatformScoped):
         return data
 
 
-class SetupManifest(BaseModel):
+class SetupManifest(PorringerModel):
     """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer].
 
     Manifest entries are grouped by **kind** (`packages`, `tools`,

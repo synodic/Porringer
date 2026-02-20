@@ -23,6 +23,7 @@ from porringer.schema import (
     SetupParameters,
     SkipReason,
 )
+from porringer.schema.manifest import PackageSpec, PluginSpec
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -457,7 +458,7 @@ class TestPrereleasePackagesOverride:
     def test_override_sets_include_prereleases() -> None:
         """An action whose package is in prerelease_packages gets include_prereleases=True."""
         action = _make_action(name='ruff')
-        assert action.include_prereleases is False
+        assert not action.include_prereleases
 
         env = _make_env(
             installed=[Package(name='ruff', version='0.8.0')],
@@ -472,7 +473,7 @@ class TestPrereleasePackagesOverride:
             if action.package is not None and action.package.name.lower() in overrides:
                 action.include_prereleases = True
 
-        assert action.include_prereleases is True
+        assert action.include_prereleases
 
         result = _dry_run_package_action(action, envs, parameters=params)
 
@@ -541,3 +542,74 @@ class TestPrereleasePackagesOverride:
         assert check_params.include_prereleases is True
         assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
         assert result.available_version == '0.9.0a1'
+
+
+# ---------------------------------------------------------------------------
+# PluginSpec — manifest-level per-plugin include_prereleases
+# ---------------------------------------------------------------------------
+
+
+class TestPluginSpec:
+    """Verify that PluginSpec allows per-plugin include_prereleases in manifests."""
+
+    @staticmethod
+    def test_string_shorthand() -> None:
+        """A plain string coerces to PluginSpec with defaults."""
+        spec = PluginSpec.model_validate('cppython')
+        assert spec.name.name == 'cppython'
+        assert spec.include_prereleases is False
+        assert spec.description is None
+
+    @staticmethod
+    def test_object_form_with_prereleases() -> None:
+        """An object with include_prereleases=true is parsed correctly."""
+        spec = PluginSpec.model_validate({'name': 'cppython', 'include_prereleases': True})
+        assert spec.name.name == 'cppython'
+        assert spec.include_prereleases is True
+
+    @staticmethod
+    def test_object_form_with_constraint() -> None:
+        """An object with a versioned name is parsed correctly."""
+        spec = PluginSpec.model_validate({'name': 'cppython>=1.0'})
+        assert spec.name.name == 'cppython'
+        assert spec.name.constraint == '>=1.0'
+        assert spec.include_prereleases is False
+
+    @staticmethod
+    def test_package_spec_plugins_accepts_mixed() -> None:
+        """PackageSpec.plugins accepts a mix of strings and objects."""
+        spec = PackageSpec.model_validate({
+            'name': 'pdm',
+            'plugins': [
+                'cppython',
+                {'name': 'another-plugin', 'include_prereleases': True},
+            ],
+        })
+        assert len(spec.plugins) == 2
+        assert spec.plugins[0].name.name == 'cppython'
+        assert spec.plugins[0].include_prereleases is False
+        assert spec.plugins[1].name.name == 'another-plugin'
+        assert spec.plugins[1].include_prereleases is True
+
+    @staticmethod
+    def test_plugin_prereleases_independent_of_parent() -> None:
+        """Plugin include_prereleases does not inherit from the parent PackageSpec."""
+        spec = PackageSpec.model_validate({
+            'name': 'pdm',
+            'include_prereleases': True,
+            'plugins': ['cppython'],
+        })
+        # Parent has include_prereleases=True, but the plugin string shorthand defaults to False
+        assert spec.include_prereleases is True
+        assert spec.plugins[0].include_prereleases is False
+
+    @staticmethod
+    def test_action_builder_uses_plugin_prereleases() -> None:
+        """The action builder reads include_prereleases from the PluginSpec, not the parent."""
+        # Build a plugin action with include_prereleases=True on the plugin
+        action = _make_plugin_action(include_prereleases=True)
+        assert action.include_prereleases is True
+
+        # Build one without — defaults to False
+        action2 = _make_plugin_action(include_prereleases=False)
+        assert action2.include_prereleases is False

@@ -234,22 +234,22 @@ def build_actions(
             )
 
             # Emit plugin-management actions for declared plugins
-            for plugin_ref in package.plugins:
+            for plugin_spec in package.plugins:
                 actions.append(
                     SetupAction(
                         description=action_description(
                             kind,
                             verb,
                             installer,
-                            package=plugin_ref,
+                            package=plugin_spec.name,
                             plugin_target=package.name,
                         ),
                         kind=kind,
                         ecosystem=ecosystem,
                         installer=installer,
-                        package=plugin_ref,
+                        package=plugin_spec.name,
                         plugin_target=package.name,
-                        include_prereleases=package.include_prereleases,
+                        include_prereleases=plugin_spec.include_prereleases,
                     )
                 )
 
