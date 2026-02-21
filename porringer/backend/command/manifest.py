@@ -117,14 +117,20 @@ def _load_native_manifest(path: Path) -> SetupManifest:
             data = json.load(f)
         return SetupManifest.model_validate(data)
     except json.JSONDecodeError as e:
-        raise ManifestError(f'Invalid JSON in manifest {path}: {e}', code=ManifestValidationCode.SYNTAX_ERROR) from e
+        raise ManifestError(
+            f'Invalid JSON in manifest {path}: {e}',
+            code=ManifestValidationCode.SYNTAX_ERROR,
+        ) from e
     except ValidationError as e:
         raise ManifestError(
             f'Schema validation failed for manifest {path}: {e}',
             code=ManifestValidationCode.SCHEMA_INVALID,
         ) from e
     except Exception as e:
-        raise ManifestError(f'Failed to load manifest {path}: {e}', code=ManifestValidationCode.LOAD_FAILED) from e
+        raise ManifestError(
+            f'Failed to load manifest {path}: {e}',
+            code=ManifestValidationCode.LOAD_FAILED,
+        ) from e
 
 
 def _read_file(path: Path, file_format: str) -> dict:
@@ -149,7 +155,8 @@ def _read_file(path: Path, file_format: str) -> dict:
                 return json.load(f)
     except (json.JSONDecodeError, tomllib.TOMLDecodeError) as e:
         raise ManifestError(
-            f'Invalid {file_format.upper()} in {path}: {e}', code=ManifestValidationCode.SYNTAX_ERROR
+            f'Invalid {file_format.upper()} in {path}: {e}',
+            code=ManifestValidationCode.SYNTAX_ERROR,
         ) from e
     except Exception as e:
         raise ManifestError(f'Failed to read {path}: {e}', code=ManifestValidationCode.LOAD_FAILED) from e
@@ -405,7 +412,7 @@ def validate_manifest(path: Path) -> ManifestValidationResult:
 
     _validate_schema_version(manifest, _error)
 
-    plugins = discover_all_plugins()
+    plugins = discover_all_plugins(use_cache=True)
     all_plugins: dict[str, Plugin] = {
         **plugins.environments,
         **plugins.project_environments,
@@ -426,7 +433,11 @@ def _load_manifest_for_validation(
 ) -> SetupManifest | None:
     """Load a manifest for validation or record diagnostics."""
     if not path.exists():
-        error_callback('path', f'Path does not exist: {path}', ManifestValidationCode.PATH_NOT_FOUND)
+        error_callback(
+            'path',
+            f'Path does not exist: {path}',
+            ManifestValidationCode.PATH_NOT_FOUND,
+        )
         return None
 
     try:

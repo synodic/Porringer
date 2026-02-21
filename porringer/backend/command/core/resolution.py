@@ -185,17 +185,18 @@ async def _resolve_plugin_operation(
             message='PluginManager not available for query',
         )
 
-    # Query installed plugins
+    # Query installed plugins (subprocess — run off the event loop)
     presence = _PresenceResult(
         env_for_updates=environments.get(action.installer) if action.installer else None,
     )
     try:
-        installed = manager.installed_plugins()
+        loop = asyncio.get_running_loop()
+        installed = await loop.run_in_executor(None, manager.installed_plugins)
         presence.is_installed, presence.detail, presence.matched = is_package_installed(action.package, installed)
     except Exception as e:
         logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
 
-    return _apply_strategy(
+    return await _apply_strategy(
         action=action,
         strategy=strategy,
         presence=presence,
@@ -238,7 +239,7 @@ async def _resolve_package_operation(
     except Exception as e:
         logger.debug('Could not check installed packages for %s: %s', action.installer, e)
 
-    return _apply_strategy(
+    return await _apply_strategy(
         action=action,
         strategy=strategy,
         presence=presence,
@@ -257,7 +258,7 @@ class _PresenceResult:
     """Environment plugin to use for upstream update checks."""
 
 
-def _apply_strategy(
+async def _apply_strategy(
     *,
     action: SetupAction,
     strategy: SyncStrategy,
@@ -282,13 +283,13 @@ def _apply_strategy(
 
             if detect_updates and presence.env_for_updates is not None:
                 try:
-                    newer = _check_for_newer_version(
+                    newer = await check_for_newer_version(
                         presence.env_for_updates,
                         action.package,
                         installed_ver,
                         include_prereleases=action.include_prereleases,
                     )
-                except _UpdateCheckError:
+                except UpdateCheckError:
                     newer = None
 
                 if newer is not None:
@@ -322,13 +323,13 @@ def _apply_strategy(
         # can skip the no-op upgrade entirely.
         if presence.env_for_updates is not None:
             try:
-                newer = _check_for_newer_version(
+                newer = await check_for_newer_version(
                     presence.env_for_updates,
                     action.package,
                     installed_ver,
                     include_prereleases=action.include_prereleases,
                 )
-            except _UpdateCheckError:
+            except UpdateCheckError:
                 pass  # Fall through to unconditional upgrade
             else:
                 if newer is not None:
@@ -369,7 +370,7 @@ def _apply_strategy(
     )
 
 
-class _UpdateCheckError(Exception):
+class UpdateCheckError(Exception):
     """The update check could not be performed.
 
     The caller should fall back to a conservative action
@@ -377,7 +378,7 @@ class _UpdateCheckError(Exception):
     """
 
 
-def _check_for_newer_version(
+async def check_for_newer_version(
     env: Environment,
     package: PackageRef | None,
     installed_version: str | None,
@@ -386,26 +387,29 @@ def _check_for_newer_version(
 ) -> str | None:
     """Query the plugin for a newer upstream version.
 
+    Runs the plugin's ``check_updates()`` in a thread executor so
+    the event loop is never blocked by subprocess or HTTP calls.
+
     Returns the newer version string when one is available, or ``None``
     when the installed version is confirmed up-to-date.
 
     Raises:
-        _UpdateCheckError: When the check cannot complete (network
+        UpdateCheckError: When the check cannot complete (network
             error, missing package, etc.).
     """
     if package is None:
-        raise _UpdateCheckError('no package reference')
+        raise UpdateCheckError('no package reference')
 
     try:
-        updates = env.check_updates(
-            CheckUpdatesParameters(
-                packages=[package],
-                include_prereleases=include_prereleases,
-            )
+        loop = asyncio.get_running_loop()
+        params = CheckUpdatesParameters(
+            packages=[package],
+            include_prereleases=include_prereleases,
         )
+        updates = await loop.run_in_executor(None, env.check_updates, params)
     except Exception as e:
         logger.debug('check_updates failed for %s via %s: %s', package, env.tool_name(), e)
-        raise _UpdateCheckError(str(e)) from e
+        raise UpdateCheckError(str(e)) from e
 
     if not updates or updates[0].version is None:
         # Plugin responded but reported no updates — confirmed up-to-date.

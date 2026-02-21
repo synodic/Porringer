@@ -5,6 +5,7 @@ on ``SetupActionResult``, and the ``detect_updates`` flag on
 ``SetupParameters``.
 """
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,8 +14,8 @@ from porringer.backend.command.core.presence import (
     dry_run_action,
 )
 from porringer.backend.command.core.resolution import (
-    _UpdateCheckError,  # noqa: PLC2701
-    _check_for_newer_version,  # noqa: PLC2701
+    UpdateCheckError,
+    check_for_newer_version,
     is_package_installed,
 )
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
@@ -89,7 +90,7 @@ class TestIsPackageInstalledReturnsTuple3:
 
 
 # ---------------------------------------------------------------------------
-# _check_for_newer_version
+# check_for_newer_version
 # ---------------------------------------------------------------------------
 
 
@@ -99,32 +100,32 @@ class TestCheckForNewerVersion:
     @staticmethod
     def test_returns_newer_version() -> None:
         env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
-        result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
+        result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
         assert result == '0.9.0'
 
     @staticmethod
     def test_returns_none_when_up_to_date() -> None:
         env = _make_env(updates=[Package(name='ruff', version='0.8.0')])
-        result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
+        result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
         assert result is None
 
     @staticmethod
     def test_returns_none_when_plugin_has_no_updates() -> None:
         env = _make_env(updates=[])
-        result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
+        result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
         assert result is None
 
     @staticmethod
     def test_raises_when_plugin_raises() -> None:
         env = _make_env()
         env.check_updates.side_effect = RuntimeError('boom')
-        with pytest.raises(_UpdateCheckError):
-            _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
+        with pytest.raises(UpdateCheckError):
+            asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
 
     @staticmethod
     def test_forwards_include_prereleases() -> None:
         env = _make_env(updates=[Package(name='ruff', version='0.9.0a1')])
-        _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True)
+        asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True))
         call_args = env.check_updates.call_args
         params: CheckUpdatesParameters = call_args[0][0]
         assert params.include_prereleases is True
@@ -132,15 +133,17 @@ class TestCheckForNewerVersion:
     @staticmethod
     def test_returns_newer_prerelease() -> None:
         env = _make_env(updates=[Package(name='ruff', version='0.9.0a1')])
-        result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True)
+        result = asyncio.run(
+            check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True)
+        )
         assert result == '0.9.0a1'
 
     @staticmethod
     def test_rejects_prerelease_when_not_opted_in() -> None:
         """When include_prereleases=False and the plugin leaks a prerelease, filter it out."""
         env = _make_env(updates=[Package(name='cppython', version='0.9.15.dev3')])
-        result = _check_for_newer_version(
-            env, PackageRef.model_validate('cppython'), '0.9.14', include_prereleases=False
+        result = asyncio.run(
+            check_for_newer_version(env, PackageRef.model_validate('cppython'), '0.9.14', include_prereleases=False)
         )
         assert result is None
 
@@ -148,15 +151,17 @@ class TestCheckForNewerVersion:
     def test_accepts_stable_when_not_opted_in() -> None:
         """When include_prereleases=False and the plugin returns a stable version, accept it."""
         env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
-        result = _check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=False)
+        result = asyncio.run(
+            check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=False)
+        )
         assert result == '0.9.0'
 
     @staticmethod
     def test_rejects_devrelease_when_not_opted_in() -> None:
         """Dev releases like 1.0.0.dev1 are also filtered when include_prereleases=False."""
         env = _make_env(updates=[Package(name='foo', version='1.0.0.dev1')])
-        result = _check_for_newer_version(
-            env, PackageRef.model_validate('foo'), '0.9.0', include_prereleases=False
+        result = asyncio.run(
+            check_for_newer_version(env, PackageRef.model_validate('foo'), '0.9.0', include_prereleases=False)
         )
         assert result is None
 

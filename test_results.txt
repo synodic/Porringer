@@ -1,0 +1,169 @@
+﻿
+tests/integration/plugins/git/test_scm.py::TestGitScm::test_group_name PASSED [  4%]
+tests/integration/plugins/pip/test_environment.py::TestEnvironment::test_group_name PASSED [  9%]
+tests/integration/plugins/pipx/test_environment.py::TestEnvironment::test_group_name PASSED [ 14%]
+tests/integration/plugins/winget/test_environment.py::TestEnvironment::test_group_name PASSED [ 19%]
+tests/integration/plugins/winget/test_environment.py::TestEnvironment::test_is_available PASSED [ 23%]
+tests/integration/test_bootstrap_presence.py::TestBootstrapPresence::test_all_manifest_sections_produce_results 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 28%]
+tests/integration/test_bootstrap_presence.py::TestBootstrapPresence::test_dry_run_actions_succeed 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 33%]
+tests/integration/test_bootstrap_presence.py::TestBootstrapPresence::test_skipped_actions_have_reason 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 38%]
+tests/integration/test_bootstrap_presence.py::TestBootstrapPresence::test_already_installed_skip_reason 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 42%]
+tests/integration/test_bootstrap_presence.py::TestBootstrapPresence::test_pipx_skipped_when_installed 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 47%]
+tests/integration/test_bootstrap_presence.py::TestBootstrapPresence::test_scm_action_present 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 52%]
+tests/integration/test_bootstrap_presence.py::TestBootstrapPresence::test_command_present 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 57%]
+tests/integration/test_example_bootstrap.py::TestBootstrapPreview::test_manifest_loads 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 61%]
+tests/integration/test_example_bootstrap.py::TestBootstrapPreview::test_runtime_action_present 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 66%]
+tests/integration/test_example_bootstrap.py::TestBootstrapPreview::test_package_actions_present 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 71%]
+tests/integration/test_example_bootstrap.py::TestBootstrapPreview::test_tool_actions_present 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 76%]
+tests/integration/test_example_bootstrap.py::TestBootstrapPreview::test_post_sync_command_present 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 80%]
+tests/integration/test_example_bootstrap.py::TestBootstrapPreview::test_scm_action_present 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 85%]
+tests/integration/test_example_bootstrap.py::TestBootstrapPreview::test_action_order_matches_phases 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [ 90%]
+tests/integration/test_example_presence.py::TestExamplePresence::test_expected_packages_detected_as_present 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+FAILED                                                                   [ 95%]
+tests/integration/test_example_presence.py::TestExamplePresence::test_all_pip_actions_succeed 
+------------------------------- live log setup --------------------------------
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'bun-project' differs from canonical name 'bunproject' for BunProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'deno-project' differs from canonical name 'denoproject' for DenoProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'npm-project' differs from canonical name 'npmproject' for NpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pdm' differs from canonical name 'pdmproject' for PdmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'pnpm-project' differs from canonical name 'pnpmproject' for PnpmProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'poetry' differs from canonical name 'poetryproject' for PoetryProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'uv-project' differs from canonical name 'uvproject' for UvProjectEnvironment
+WARNING  porringer.backend.builder:builder.py:77 Entry-point name 'yarn-project' differs from canonical name 'yarnproject' for YarnProjectEnvironment
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+PASSED                                                                   [100%]
+
+================================== FAILURES ===================================
+E   AssertionError: Expected packages not detected as installed: ['pytest-asyncio', 'pytest-mock']. Ensure the dev dependencies are installed in the active environment.
+    assert not ['pytest-asyncio', 'pytest-mock']
+----------------------------- Captured log setup ------------------------------
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (packages, 'deno')
+WARNING  porringer.backend.backend:backend.py:119 No available plugin for (projects, 'deno')
+d:\Projects\Synodic\Porringer\tests\integration\test_example_presence.py:59: AssertionError: Expected packages not detected as installed: ['pytest-asyncio', 'pytest-mock']. Ensure the dev dependencies are installed in the active environment.
+=========================== short test summary info ===========================
+FAILED tests/integration/test_example_presence.py::TestExamplePresence::test_expected_packages_detected_as_present
+======================== 1 failed, 20 passed in 16.26s ========================

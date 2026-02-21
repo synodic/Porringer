@@ -23,7 +23,27 @@ from packaging.version import InvalidVersion, Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
-from porringer.core.schema import Ecosystem, Package
+from porringer.core.schema import Ecosystem, Package, PackageRef
+
+
+def _pick_highest_version(releases: dict[str, object], *, stable_only: bool) -> Version | None:
+    """Return the highest ``Version`` from *releases* keys, or ``None``.
+
+    Args:
+        releases: The ``releases`` dict from PyPI's JSON API.
+        stable_only: When ``True``, skip pre-release and dev versions.
+    """
+    best: Version | None = None
+    for ver_str in releases:
+        try:
+            ver = Version(ver_str)
+        except InvalidVersion:
+            continue
+        if stable_only and (ver.is_prerelease or ver.is_devrelease):
+            continue
+        if best is None or ver > best:
+            best = ver
+    return best
 
 
 class PythonEnvironment(Environment, RuntimeConsumer):
@@ -98,6 +118,9 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         returned.  When ``True``, the highest version across all
         ``releases`` keys is selected (including dev/alpha/beta/rc).
 
+        Uses a single ``httpx.Client`` session for all packages in the
+        batch so that TCP connections / TLS sessions are reused.
+
         This helper is shared by pip, uv, and pipx plugins.
 
         Args:
@@ -111,60 +134,48 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         logger = logging.getLogger(f'porringer.{self.tool_name()}.check_pypi')
         results: list[Package] = []
 
-        for pkg_ref in params.packages:
-            try:
-                with httpx.Client(timeout=10.0) as client:
-                    response = client.get(f'https://pypi.org/pypi/{pkg_ref.name}/json')
-                    response.raise_for_status()
-                    data = response.json()
-            except (httpx.HTTPError, ValueError, KeyError) as exc:
-                logger.debug('PyPI query failed for %s: %s', pkg_ref.name, exc)
-                continue
-
-            if params.include_prereleases:
-                # Scan all release keys for the highest version
-                releases = data.get('releases', {})
-                best: Version | None = None
-                for ver_str in releases:
-                    try:
-                        ver = Version(ver_str)
-                    except InvalidVersion:
-                        continue
-                    if best is None or ver > best:
-                        best = ver
-                if best is not None:
-                    results.append(Package(name=pkg_ref.name, version=str(best)))
-            else:
-                # Stable-only: use info.version, but verify it isn't
-                # a pre-release (PyPI's info.version reflects whatever
-                # the maintainer uploaded last, which may be a dev/rc).
-                version_str = data.get('info', {}).get('version')
-                if version_str:
-                    try:
-                        if not Version(version_str).is_prerelease:
-                            results.append(Package(name=pkg_ref.name, version=version_str))
-                            continue
-                    except InvalidVersion:
-                        results.append(Package(name=pkg_ref.name, version=version_str))
-                        continue
-
-                # info.version was a pre-release or missing — scan
-                # releases for the highest stable version.
-                releases = data.get('releases', {})
-                best_stable: Version | None = None
-                for ver_str in releases:
-                    try:
-                        ver = Version(ver_str)
-                    except InvalidVersion:
-                        continue
-                    if ver.is_prerelease or ver.is_devrelease:
-                        continue
-                    if best_stable is None or ver > best_stable:
-                        best_stable = ver
-                if best_stable is not None:
-                    results.append(Package(name=pkg_ref.name, version=str(best_stable)))
+        with httpx.Client(timeout=10.0) as client:
+            for pkg_ref in params.packages:
+                pkg = self._check_single_pypi_package(client, pkg_ref, params.include_prereleases, logger)
+                if pkg is not None:
+                    results.append(pkg)
 
         return results
+
+    @staticmethod
+    def _check_single_pypi_package(
+        client: httpx.Client,
+        pkg_ref: PackageRef,
+        include_prereleases: bool,
+        logger: logging.Logger,
+    ) -> Package | None:
+        """Fetch one package from PyPI and return the latest version, or ``None``."""
+        try:
+            response = client.get(f'https://pypi.org/pypi/{pkg_ref.name}/json')
+            response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            logger.debug('PyPI query failed for %s: %s', pkg_ref.name, exc)
+            return None
+
+        if include_prereleases:
+            best = _pick_highest_version(data.get('releases', {}), stable_only=False)
+            return Package(name=pkg_ref.name, version=str(best)) if best is not None else None
+
+        # Stable-only: prefer info.version when it is itself stable.
+        version_str = data.get('info', {}).get('version')
+        if version_str:
+            try:
+                if not Version(version_str).is_prerelease:
+                    return Package(name=pkg_ref.name, version=version_str)
+            except InvalidVersion:
+                return Package(name=pkg_ref.name, version=version_str)
+
+        # info.version was a pre-release or missing — scan releases.
+        best_stable = _pick_highest_version(data.get('releases', {}), stable_only=True)
+        if best_stable is not None:
+            return Package(name=pkg_ref.name, version=str(best_stable))
+        return None
 
     def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying PyPI.
