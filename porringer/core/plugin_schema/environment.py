@@ -333,25 +333,25 @@ class Environment(ToolBasedPlugin):
             logger = logging.getLogger('porringer.npm_registry')
 
         results: list[Package] = []
-        for pkg_ref in packages:
-            try:
-                with httpx.Client(timeout=10.0) as client:
+        with httpx.Client(timeout=10.0) as client:
+            for pkg_ref in packages:
+                try:
                     response = client.get(f'https://registry.npmjs.org/{pkg_ref.name}')
                     response.raise_for_status()
                     data = response.json()
-            except (httpx.HTTPError, ValueError) as exc:
-                logger.debug('npm registry query failed for %s: %s', pkg_ref.name, exc)
-                continue
+                except (httpx.HTTPError, ValueError) as exc:
+                    logger.debug('npm registry query failed for %s: %s', pkg_ref.name, exc)
+                    continue
 
-            if include_prereleases:
-                versions = data.get('versions', {})
-                if versions:
-                    latest = list(versions.keys())[-1]
-                    results.append(Package(name=pkg_ref.name, version=latest))
-            else:
-                dist_tags = data.get('dist-tags', {})
-                latest = dist_tags.get('latest')
-                if latest:
-                    results.append(Package(name=pkg_ref.name, version=latest))
+                if include_prereleases:
+                    versions = data.get('versions', {})
+                    if versions:
+                        latest = list(versions.keys())[-1]
+                        results.append(Package(name=pkg_ref.name, version=latest))
+                else:
+                    dist_tags = data.get('dist-tags', {})
+                    latest = dist_tags.get('latest')
+                    if latest:
+                        results.append(Package(name=pkg_ref.name, version=latest))
 
         return results

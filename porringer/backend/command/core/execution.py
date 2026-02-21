@@ -18,8 +18,14 @@ from typing import cast
 
 from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
-from porringer.core.plugin_schema.plugin_manager import PluginManager, find_plugin_manager
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectSyncParameters
+from porringer.core.plugin_schema.plugin_manager import (
+    PluginManager,
+    find_plugin_manager,
+)
+from porringer.core.plugin_schema.project_environment import (
+    ProjectEnvironment,
+    ProjectSyncParameters,
+)
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Package, PluginKind
@@ -36,11 +42,27 @@ from porringer.schema import (
     SyncStrategy,
 )
 from porringer.utility.exception import PluginError
+from porringer.utility.utility import StreamProgress, stream_command
 
-from .action_builder import PHASE_ORDER, STRATEGY_VERB, action_description, get_cli_command
-from .discovery import discover_all_plugins, discover_plugins
+from .action_builder import (
+    PHASE_ORDER,
+    STRATEGY_VERB,
+    action_description,
+    get_cli_command,
+)
+from .discovery import (
+    DiscoveredPlugins,
+    discover_all_plugins,
+    discover_plugins,
+    invalidate_plugin_cache,
+)
 from .presence import async_dry_run_action
-from .resolution import OperationKind, ResolutionContext, resolve_operation, resolved_to_result
+from .resolution import (
+    OperationKind,
+    ResolutionContext,
+    resolve_operation,
+    resolved_to_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +114,7 @@ class ExecutionState:
         re-propagated to newly-created consumer instances.
         """
         refresh_path()
+        invalidate_plugin_cache()
         self.environments = discover_plugins('environment', Environment, check_dependencies=True)
         self._apply_resolved_runtime()
 
@@ -149,7 +172,10 @@ class ExecutionState:
             return
         kind, executable = self._resolved_runtime
         proj_envs: dict[str, ProjectEnvironment] = self.project_environments or {}
-        all_plugins: dict[str, Environment | ProjectEnvironment] = {**self.environments, **proj_envs}
+        all_plugins: dict[str, Environment | ProjectEnvironment] = {
+            **self.environments,
+            **proj_envs,
+        }
         for name, plugin in all_plugins.items():
             if isinstance(plugin, RuntimeConsumer):
                 consumer_type = cast(type[RuntimeConsumer], type(plugin))
@@ -158,6 +184,11 @@ class ExecutionState:
                     logger.debug('Re-applied runtime_executable on %s to %s', name, executable)
 
     # -- result helpers ------------------------------------------------
+
+    def emit(self, event: ProgressEvent) -> None:
+        """Put *event* on the event queue if one is attached."""
+        if self.event_queue is not None:
+            self.event_queue.put_nowait(event)
 
     @property
     def plugin_context(self) -> PluginContext:
@@ -257,13 +288,23 @@ def inject_runtime_path(executable: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def execute_run_command(action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
-    """Executes a post-install command.
+async def execute_run_command(
+    action: SetupAction,
+    working_dir: Path,
+    timeout: int,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+) -> SetupActionResult:
+    """Execute a post-install command with real-time output streaming.
+
+    Uses ``asyncio.create_subprocess_exec`` so the event loop is never
+    blocked, and streams stdout/stderr line-by-line as
+    ``SUB_ACTION_PROGRESS`` events when an *event_queue* is provided.
 
     Args:
         action: The command action.
         working_dir: Working directory for the command.
         timeout: Timeout in seconds.
+        event_queue: Optional queue to emit sub-action progress into.
 
     Returns:
         The result of the command execution.
@@ -272,6 +313,60 @@ def execute_run_command(action: SetupAction, working_dir: Path, timeout: int) ->
         return SetupActionResult(action=action, success=False, message='No command specified')
 
     logger.info(f'Running command: {" ".join(action.command)}')
+
+    if event_queue is not None:
+        # Streaming path — line-by-line output via stream_command
+        _eq = event_queue  # bind for closure type-narrowing
+
+        def _progress_cb(update: SubActionProgress) -> None:
+            _eq.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.SUB_ACTION_PROGRESS,
+                    action=action,
+                    sub_action=update,
+                )
+            )
+
+        progress = StreamProgress(
+            action=action,
+            callback=_progress_cb,
+            phase='command',
+        )
+
+        try:
+            result = await stream_command(
+                action.command,
+                progress=progress,
+                timeout=float(timeout),
+            )
+            if result.returncode == 0:
+                return SetupActionResult(action=action, success=True)
+            stderr = result.stderr.strip() if result.stderr else 'Unknown error'
+            return SetupActionResult(
+                action=action,
+                success=False,
+                message=f'Exit code {result.returncode}: {stderr}',
+            )
+        except TimeoutError:
+            message = f'Command timed out after {timeout} seconds'
+            logger.error(message)
+            return SetupActionResult(action=action, success=False, message=message)
+        except Exception as e:
+            message = f'Command not found: {action.command[0]}' if isinstance(e, FileNotFoundError) else str(e)
+            return SetupActionResult(action=action, success=False, message=message)
+    else:
+        # Non-streaming path — run in executor to avoid blocking the loop
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run_command_sync, action, working_dir, timeout)
+
+
+def _run_command_sync(action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
+    """Synchronous subprocess helper for post-sync commands.
+
+    Runs the command with ``subprocess.run`` and returns a result.
+    Called via ``run_in_executor`` so the event loop stays unblocked.
+    """
+    assert action.command is not None  # guaranteed by caller guard
 
     try:
         result = subprocess.run(
@@ -287,7 +382,11 @@ def execute_run_command(action: SetupAction, working_dir: Path, timeout: int) ->
             return SetupActionResult(action=action, success=True)
         else:
             stderr = result.stderr.strip() if result.stderr else 'Unknown error'
-            return SetupActionResult(action=action, success=False, message=f'Exit code {result.returncode}: {stderr}')
+            return SetupActionResult(
+                action=action,
+                success=False,
+                message=f'Exit code {result.returncode}: {stderr}',
+            )
     except subprocess.TimeoutExpired:
         message = f'Command timed out after {timeout} seconds'
         logger.error(message)
@@ -509,7 +608,13 @@ async def _attempt_operation(
         eq = event_queue
 
         def sub_action_cb(update: SubActionProgress) -> None:
-            eq.put_nowait(ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=action, sub_action=update))
+            eq.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.SUB_ACTION_PROGRESS,
+                    action=action,
+                    sub_action=update,
+                )
+            )
 
     try:
         if action.package is None:
@@ -609,22 +714,63 @@ async def _dry_run_package_actions(
     plugin_context: PluginContext | None = None,
     parameters: SetupParameters | None = None,
 ) -> list[SetupActionResult]:
-    """Execute dry-run for package actions."""
+    """Execute dry-run for package actions in parallel.
+
+    All actions are dispatched concurrently via ``asyncio.TaskGroup``.
+    Results are emitted in the original action order regardless of
+    which checks finish first, preserving deterministic card ordering
+    for GUI consumers.
+    """
     project_path = plugin_context.project_path if plugin_context else None
     project_environments = plugin_context.project_environments if plugin_context else None
-    results: list[SetupActionResult] = []
-    for action in package_actions:
-        result = await async_dry_run_action(
-            action,
-            environments,
-            project_path=project_path,
-            project_environments=project_environments,
-            parameters=parameters,
-        )
-        results.append(result)
+
+    result_slots: list[SetupActionResult | None] = [None] * len(package_actions)
+
+    async def _check(index: int, action: SetupAction) -> None:
+        # Emit ACTION_STARTED *before* the check so GUI clients can
+        # show a spinner while the dry-run is in progress.
         if event_queue is not None:
             event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+        try:
+            result = await async_dry_run_action(
+                action,
+                environments,
+                project_path=project_path,
+                project_environments=project_environments,
+                parameters=parameters,
+            )
+        except Exception as exc:
+            logger.debug('Dry-run check failed for %s: %s', action.description, exc)
+            result = SetupActionResult(action=action, success=False, message=str(exc))
+        result_slots[index] = result
+        if event_queue is not None:
+            event_queue.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_COMPLETED,
+                    action=action,
+                    result=result,
+                )
+            )
+
+    async with asyncio.TaskGroup() as tg:
+        for i, action in enumerate(package_actions):
+            tg.create_task(_check(i, action))
+
+    # All tasks completed — return results in original order.
+    # Replace any unfilled slots (e.g. from cancellation) with
+    # explicit failure results so callers always get a 1:1 mapping.
+    results: list[SetupActionResult] = []
+    for i, maybe in enumerate(result_slots):
+        if maybe is not None:
+            results.append(maybe)
+        else:
+            results.append(
+                SetupActionResult(
+                    action=package_actions[i],
+                    success=False,
+                    message='Task did not complete',
+                )
+            )
     return results
 
 
@@ -669,7 +815,13 @@ async def _run_sequential_packages(
         )
         results.append(result)
         if event_queue is not None:
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+            event_queue.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_COMPLETED,
+                    action=action,
+                    result=result,
+                )
+            )
         if not result.success and not result.skipped and parameters.fail_fast:
             logger.error(f'Action failed: {action.description} - {result.message}')
             return results, False
@@ -708,7 +860,13 @@ async def _run_parallel_packages(
         except Exception as e:
             result = SetupActionResult(action=action, success=False, message=str(e))
         if event_queue is not None:
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+            event_queue.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_COMPLETED,
+                    action=action,
+                    result=result,
+                )
+            )
         results[action_indices[id(action)]] = result
 
     try:
@@ -751,6 +909,9 @@ async def execute_command_actions(
     """Execute RUN_COMMAND actions sequentially."""
     results: list[SetupActionResult] = []
     for action in command_actions:
+        if state.event_queue is not None:
+            state.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+
         if state.parameters.dry_run:
             result = await async_dry_run_action(
                 action,
@@ -758,12 +919,20 @@ async def execute_command_actions(
                 parameters=state.parameters,
             )
         else:
-            result = execute_run_command(action, state.fallback_dir, state.parameters.timeout)
+            result = await execute_run_command(
+                action,
+                state.fallback_dir,
+                state.parameters.timeout,
+                event_queue=state.event_queue,
+            )
         results.append(result)
         if state.event_queue is not None:
-            state.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
             state.event_queue.put_nowait(
-                ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_COMPLETED,
+                    action=action,
+                    result=result,
+                )
             )
         if not result.success and not result.skipped:
             logger.error(f'Action failed: {action.description} - {result.message}')
@@ -825,10 +994,33 @@ async def handle_project_phase(
 # ---------------------------------------------------------------------------
 
 
+def _plugins_discovered_event(plugins: DiscoveredPlugins) -> ProgressEvent:
+    """Build a ``PLUGINS_DISCOVERED`` progress event.
+
+    Collects ``is_available()`` for every discovered plugin and
+    returns a single ``ProgressEvent`` that GUI clients can use to
+    render availability badges.
+    """
+    plugin_availability: dict[str, bool] = {}
+    for name, env in plugins.environments.items():
+        plugin_availability[name] = env.is_available()
+    for name, proj in plugins.project_environments.items():
+        plugin_availability[name] = proj.is_available()
+    for name, scm in plugins.scm_environments.items():
+        plugin_availability[name] = scm.is_available()
+    return ProgressEvent(
+        kind=ProgressEventKind.PLUGINS_DISCOVERED,
+        plugin_names=sorted(plugin_availability.keys()),
+        plugin_availability=plugin_availability,
+    )
+
+
 async def execute_single(
     preview: SetupResults,
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    *,
+    plugins: DiscoveredPlugins | None = None,
 ) -> SetupResults:
     """Execute setup actions for a single path with parallel support.
 
@@ -852,6 +1044,9 @@ async def execute_single(
             ``root_directory``, ``manifest_path``, and ``metadata``.
         parameters: The setup parameters.
         event_queue: Optional queue to emit ``ProgressEvent`` items into.
+        plugins: Pre-discovered plugins.  When provided, plugin
+            discovery is skipped entirely (useful when the caller has
+            already discovered plugins for a batch of manifests).
 
     Returns:
         SetupResults containing the results of each action.
@@ -862,14 +1057,29 @@ async def execute_single(
 
     logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
 
-    plugins = discover_all_plugins()
+    # Use pre-discovered plugins when available; otherwise discover.
+    plugins_discovered_here = plugins is None
+    if plugins is None:
+        if not parameters.dry_run:
+            invalidate_plugin_cache()
+        plugins = discover_all_plugins(use_cache=parameters.dry_run)
+
+    # Emit PLUGINS_DISCOVERED only when we performed discovery ourselves.
+    # Batch callers (execute_stream / run) pre-discover and emit the
+    # event once for the entire batch, so we skip it here to avoid
+    # sending duplicate events.
+    if plugins_discovered_here and event_queue is not None:
+        event_queue.put_nowait(_plugins_discovered_event(plugins))
 
     state = ExecutionState(
         actions=actions,
         phases=group_actions_by_phase(actions),
-        environments=plugins.environments,
-        project_environments=plugins.project_environments,
-        scm_environments=plugins.scm_environments,
+        # Shallow-copy the plugin dicts so that mutations (e.g.
+        # runtime_executable propagation) don't leak back into
+        # the caller's shared DiscoveredPlugins object.
+        environments=dict(plugins.environments),
+        project_environments=(dict(plugins.project_environments) if plugins.project_environments else None),
+        scm_environments=(dict(plugins.scm_environments) if plugins.scm_environments else None),
         parameters=parameters,
         event_queue=event_queue,
         manifest_directory=root_directory,
@@ -880,14 +1090,15 @@ async def execute_single(
     )
 
     # Populate CLI commands for all resolved actions
-    for action in actions:
-        action.cli_command = get_cli_command(
-            action,
-            state.environments,
-            state.strategy,
-            state.project_environments,
-            state.scm_environments,
+    _populate_cli_commands(actions, state)
+
+    # Emit MANIFEST_LOADED — the fully-resolved preview with CLI commands.
+    state.emit(
+        ProgressEvent(
+            kind=ProgressEventKind.MANIFEST_LOADED,
+            manifest=preview,
         )
+    )
 
     # --- Phase 1: runtime-provider actions (pim / pyenv) ---------------
     if state.phases[PluginKind.RUNTIME]:
@@ -993,6 +1204,18 @@ def group_actions_by_phase(
     return phases
 
 
+def _populate_cli_commands(actions: list[SetupAction], state: ExecutionState) -> None:
+    """Set ``cli_command`` on every action from the current plugin state."""
+    for action in actions:
+        action.cli_command = get_cli_command(
+            action,
+            state.environments,
+            state.strategy,
+            state.project_environments,
+            state.scm_environments,
+        )
+
+
 def _propagate_runtime(
     runtime_actions: list[SetupAction],
     environments: dict[str, Environment],
@@ -1024,7 +1247,11 @@ def _propagate_runtime(
         tag = action.package.name
         executable = env.resolve_executable(tag)
         if executable is None:
-            logger.debug('RuntimeProvider %s could not resolve executable for tag %s', action.installer, tag)
+            logger.debug(
+                'RuntimeProvider %s could not resolve executable for tag %s',
+                action.installer,
+                tag,
+            )
             continue
 
         logger.info('Runtime resolved: %s -> %s', tag, executable)
@@ -1036,7 +1263,10 @@ def _propagate_runtime(
         inject_runtime_path(executable)
 
         # Propagate to all plugins (environment + project-environment) that consume this runtime kind
-        all_plugins: dict[str, Environment | ProjectEnvironment] = {**environments, **proj_envs}
+        all_plugins: dict[str, Environment | ProjectEnvironment] = {
+            **environments,
+            **proj_envs,
+        }
         for name, downstream in all_plugins.items():
             if isinstance(downstream, RuntimeConsumer):
                 downstream_type = cast(type[RuntimeConsumer], type(downstream))
@@ -1113,11 +1343,23 @@ def skip_actions(
     results: list[SetupActionResult] = []
     for action in actions:
         logger.warning("Skipping '%s': %s", action.description, message)
-        result = SetupActionResult(action=action, success=True, skipped=True, skip_reason=skip_reason, message=message)
+        result = SetupActionResult(
+            action=action,
+            success=True,
+            skipped=True,
+            skip_reason=skip_reason,
+            message=message,
+        )
         results.append(result)
         if event_queue is not None:
             event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+            event_queue.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_COMPLETED,
+                    action=action,
+                    result=result,
+                )
+            )
     return results
 
 
@@ -1159,11 +1401,23 @@ async def _execute_project_sync_actions(
         if event_queue is not None:
             event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
 
-        result = await _execute_project_sync(action, project_environments, manifest_directory, parameters)
+        result = await _execute_project_sync(
+            action,
+            project_environments,
+            manifest_directory,
+            parameters,
+            event_queue=event_queue,
+        )
 
         results.append(result)
         if event_queue is not None:
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+            event_queue.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_COMPLETED,
+                    action=action,
+                    result=result,
+                )
+            )
         if not result.success and parameters.fail_fast:
             logger.error(f'Project sync failed: {action.description} - {result.message}')
             break
@@ -1176,8 +1430,16 @@ async def _execute_project_sync(
     project_environments: dict[str, ProjectEnvironment] | None,
     manifest_directory: Path,
     parameters: SetupParameters,
+    *,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
 ) -> SetupActionResult:
     """Execute a single PROJECT_SYNC action.
+
+    When an *event_queue* is provided the sync command is run via
+    ``stream_command`` so that stdout/stderr lines are emitted as
+    ``SUB_ACTION_PROGRESS`` events in real time.  Otherwise the
+    plugin's synchronous ``sync()`` method is called via
+    ``run_in_executor``.
 
     When `parameters.project_directory` is an explicit `Path`
     it is used unconditionally.  Otherwise the plugin's
@@ -1191,6 +1453,7 @@ async def _execute_project_sync(
         project_environments: Dict of project-environment plugins.
         manifest_directory: Directory containing the manifest file.
         parameters: Setup parameters.
+        event_queue: Optional queue for streaming progress events.
 
     Returns:
         The result of the sync operation.
@@ -1198,7 +1461,9 @@ async def _execute_project_sync(
     proj_envs = project_environments or {}
     if action.installer is None or action.installer not in proj_envs:
         return SetupActionResult(
-            action=action, success=False, message=f"Project environment '{action.installer}' is not available"
+            action=action,
+            success=False,
+            message=f"Project environment '{action.installer}' is not available",
         )
 
     proj_env = proj_envs[action.installer]
@@ -1234,11 +1499,48 @@ async def _execute_project_sync(
     params = ProjectSyncParameters(directory=effective_dir, dry=parameters.dry_run)
 
     try:
-        loop = asyncio.get_running_loop()
-        success = await loop.run_in_executor(None, proj_env.sync, params)
+        if event_queue is not None:
+            # Streaming path — build the CLI args from the plugin and
+            # run them via stream_command for line-by-line output.
+            args = list(proj_env.sync_command())
+            if params.dry:
+                args.append('--dry-run')
+
+            _eq = event_queue  # bind for closure type-narrowing
+
+            def _progress_cb(update: SubActionProgress) -> None:
+                _eq.put_nowait(
+                    ProgressEvent(
+                        kind=ProgressEventKind.SUB_ACTION_PROGRESS,
+                        action=action,
+                        sub_action=update,
+                    )
+                )
+
+            progress = StreamProgress(
+                action=action,
+                callback=_progress_cb,
+                phase='sync',
+            )
+
+            cmd_result = await stream_command(args, progress=progress, timeout=300.0)
+            success = cmd_result.returncode == 0
+        else:
+            # Non-streaming — delegate to the plugin's synchronous sync()
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(None, proj_env.sync, params)
+
         if success:
-            return SetupActionResult(action=action, success=True, message=f'Synced project via {action.installer}')
-        return SetupActionResult(action=action, success=False, message=f'Project sync failed via {action.installer}')
+            return SetupActionResult(
+                action=action,
+                success=True,
+                message=f'Synced project via {action.installer}',
+            )
+        return SetupActionResult(
+            action=action,
+            success=False,
+            message=f'Project sync failed via {action.installer}',
+        )
     except Exception as e:
         return SetupActionResult(action=action, success=False, message=str(e))
 
@@ -1276,11 +1578,23 @@ async def _execute_scm_actions(
         if event_queue is not None:
             event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
 
-        result = await _execute_scm_clone(action, scm_environments, working_dir, parameters)
+        result = await _execute_scm_clone(
+            action,
+            scm_environments,
+            working_dir,
+            parameters,
+            event_queue=event_queue,
+        )
 
         results.append(result)
         if event_queue is not None:
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result))
+            event_queue.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_COMPLETED,
+                    action=action,
+                    result=result,
+                )
+            )
         if not result.success and not result.skipped and parameters.fail_fast:
             logger.error(f'SCM clone failed: {action.description} - {result.message}')
             break
@@ -1293,14 +1607,23 @@ async def _execute_scm_clone(
     scm_environments: dict[str, ScmEnvironment] | None,
     working_dir: Path,
     parameters: SetupParameters,
+    *,
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
 ) -> SetupActionResult:
     """Execute a single SCM_CLONE action.
+
+    When an *event_queue* is provided and the tool is ``git``, the
+    clone is run via ``stream_command`` with ``--progress`` so that
+    stderr progress lines (``Receiving objects: 42%``) are emitted
+    as ``SUB_ACTION_PROGRESS`` events in real time.  Otherwise the
+    plugin's synchronous ``clone()`` is called via ``run_in_executor``.
 
     Args:
         action: The SCM clone action.
         scm_environments: Dict of SCM-environment plugins.
         working_dir: Working directory (manifest location).
         parameters: Setup parameters.
+        event_queue: Optional queue for streaming progress events.
 
     Returns:
         The result of the clone operation.
@@ -1308,7 +1631,9 @@ async def _execute_scm_clone(
     scm_envs = scm_environments or {}
     if action.installer is None or action.installer not in scm_envs:
         return SetupActionResult(
-            action=action, success=False, message=f"SCM environment '{action.installer}' is not available"
+            action=action,
+            success=False,
+            message=f"SCM environment '{action.installer}' is not available",
         )
 
     if action.package is None:
@@ -1330,13 +1655,52 @@ async def _execute_scm_clone(
             message=f"Repository already cloned at '{destination}'",
         )
 
+    if parameters.dry_run:
+        # Dry-run — no-op
+        try:
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(None, lambda: scm_env.clone(url, destination, dry=True))
+            message = None
+        except Exception as e:
+            success = False
+            message = str(e)
+        return SetupActionResult(action=action, success=success, message=message)
+
     try:
-        loop = asyncio.get_running_loop()
-        success = await loop.run_in_executor(None, lambda: scm_env.clone(url, destination, dry=parameters.dry_run))
-        if success:
-            return SetupActionResult(action=action, success=True, message=f"Cloned '{url}' via {action.installer}")
-        return SetupActionResult(
-            action=action, success=False, message=f"Clone failed for '{url}' via {action.installer}"
+        if event_queue is not None and scm_env.tool_name() == 'git':
+            # Streaming path for git — use --progress to get real-time
+            # progress on stderr ("Receiving objects: 42%").
+            _eq = event_queue  # bind for closure type-narrowing
+
+            def _progress_cb(update: SubActionProgress) -> None:
+                _eq.put_nowait(
+                    ProgressEvent(
+                        kind=ProgressEventKind.SUB_ACTION_PROGRESS,
+                        action=action,
+                        sub_action=update,
+                    )
+                )
+
+            progress = StreamProgress(
+                action=action,
+                callback=_progress_cb,
+                phase='cloning',
+            )
+
+            cmd_result = await stream_command(
+                ['git', 'clone', '--progress', url, str(destination)],
+                progress=progress,
+                timeout=600.0,
+            )
+            success = cmd_result.returncode == 0
+        else:
+            # Non-streaming fallback
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(None, lambda: scm_env.clone(url, destination, dry=False))
+
+        message = (
+            f"Cloned '{url}' via {action.installer}" if success else f"Clone failed for '{url}' via {action.installer}"
         )
+        return SetupActionResult(action=action, success=success, message=message)
     except Exception as e:
         return SetupActionResult(action=action, success=False, message=str(e))

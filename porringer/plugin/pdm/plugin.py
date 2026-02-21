@@ -51,22 +51,26 @@ class PdmProjectEnvironment(ProjectEnvironment, PluginManager):
 
     @override
     def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
-        """Return ``pdm self add --pip-args=--upgrade <plugin>``.
+        """Return ``pdm self add --pip-args="--upgrade [--pre]" <plugin>``.
 
         PDM's ``self update`` updates PDM itself and does not accept a
         package argument.  ``self add`` without extra flags is a no-op
         when the plugin is already installed, so ``--pip-args=--upgrade``
         is required to force pip to pull a newer version.
 
-        When *include_prereleases* is ``True``, ``--pip-args=--pre`` is
-        appended so that pip considers pre-release versions.
+        When *include_prereleases* is ``True``, ``--pre`` is included in
+        the same ``--pip-args`` value so that pip considers pre-release
+        versions.  All pip arguments must be passed in a single
+        ``--pip-args`` value because PDM does not combine multiple
+        ``--pip-args`` flags — only the last one takes effect.
 
         The ``=`` syntax is mandatory because ``--upgrade`` starts with
         ``--`` and argparse would otherwise treat it as a separate flag.
         """
-        cmd = ['pdm', 'self', 'add', '--pip-args=--upgrade']
+        pip_args = '--upgrade'
         if include_prereleases:
-            cmd.append('--pip-args=--pre')
+            pip_args += ' --pre'
+        cmd = ['pdm', 'self', 'add', f'--pip-args={pip_args}']
         cmd.append(plugin.specifier)
         return cmd
 

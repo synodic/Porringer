@@ -29,8 +29,9 @@ from porringer.schema import (
 )
 from porringer.utility.exception import ManifestError
 
-from .core.action_builder import parse_manifest
-from .core.execution import execute_single
+from .core.action_builder import load_manifest, parse_manifest
+from .core.discovery import discover_all_plugins, invalidate_plugin_cache
+from .core.execution import _plugins_discovered_event, execute_single
 from .manifest import has_manifest as _has_manifest
 from .manifest import manifest_filenames as _manifest_filenames
 from .manifest import manifest_schema, validate_manifest
@@ -106,6 +107,16 @@ class SyncCommands:
         """
         return parse_manifest(path, strategy)
 
+    @staticmethod
+    def load_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
+        """Load a manifest quickly using cached plugin discovery.
+
+        Delegates to `action_builder.load_manifest` — the fast path
+        for GUI preview.  Actions whose installer cannot be resolved
+        from cached plugins will have ``installer=None``.
+        """
+        return load_manifest(path, strategy)
+
     # --- Path resolution ---
 
     def _resolve_paths(self, parameters: SetupParameters) -> list[Path]:
@@ -156,7 +167,7 @@ class SyncCommands:
 
         for path in paths:
             try:
-                preview = parse_manifest(path, strategy=parameters.strategy)
+                preview = load_manifest(path, strategy=parameters.strategy)
             except ManifestError as e:
                 logger.warning(f'Failed to load manifest at {path}: {e.error}')
                 failed_paths.append((path, str(e.error)))
@@ -190,9 +201,17 @@ class SyncCommands:
         """Stream progress events while executing setup actions.
 
         Resolves paths, parses manifests, and executes (or dry-runs) in a
-        single call.  A `ProgressEventKind.MANIFEST_LOADED` event is
-        emitted for each successfully parsed manifest before its actions
-        begin executing.
+        single call.  Events are emitted in three stages:
+
+        1. ``MANIFEST_PARSED`` — emitted immediately after the manifest
+           JSON is loaded and actions are built.  GUI clients can use
+           this to populate cards before dry-run checks begin.
+        2. ``MANIFEST_LOADED`` — emitted after plugin discovery
+           completes and CLI commands are populated on each action.
+           This is the fully-resolved preview.
+        3. ``ACTION_STARTED`` / ``ACTION_COMPLETED`` /
+           ``SUB_ACTION_PROGRESS`` — per-action lifecycle events during
+           dry-run or real execution.
 
         Yields `ProgressEvent` items as manifests are loaded, actions
         start, complete, and report sub-action detail.  Cancellation is
@@ -221,17 +240,34 @@ class SyncCommands:
                     )
 
                 for preview in previews:
+                    # Stage 1: fast preview — cards can be shown immediately
                     queue.put_nowait(
                         ProgressEvent(
-                            kind=ProgressEventKind.MANIFEST_LOADED,
+                            kind=ProgressEventKind.MANIFEST_PARSED,
                             manifest=preview,
                         )
                     )
 
+                # Pre-discover plugins once for the entire batch.
+                # For real execution, invalidate first; for dry-run use
+                # the cache to avoid redundant entry-point scanning.
+                if not parameters.dry_run:
+                    invalidate_plugin_cache()
+                shared_plugins = discover_all_plugins(use_cache=parameters.dry_run)
+
+                # Emit PLUGINS_DISCOVERED once for the batch — before
+                # any per-manifest work so the GUI gets the availability
+                # map as early as possible.
+                queue.put_nowait(_plugins_discovered_event(shared_plugins))
+
+                for preview in previews:
+                    # Stage 2 + 3: execute_single populates CLI commands,
+                    # emits MANIFEST_LOADED, then streams ACTION_* events.
                     await execute_single(
                         preview,
                         parameters,
                         event_queue=queue,
+                        plugins=shared_plugins,
                     )
             finally:
                 # Sentinel signals the generator to stop
@@ -265,8 +301,11 @@ class SyncCommands:
         if previews:
 
             async def _execute_all() -> None:
+                if not parameters.dry_run:
+                    invalidate_plugin_cache()
+                shared_plugins = discover_all_plugins(use_cache=parameters.dry_run)
                 for preview in previews:
-                    sr = await execute_single(preview, parameters)
+                    sr = await execute_single(preview, parameters, plugins=shared_plugins)
                     manifest_results.append(sr)
 
             asyncio.run(_execute_all())

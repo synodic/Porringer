@@ -284,6 +284,57 @@ def build_actions(
     return actions
 
 
+def _build_preview(
+    path: Path,
+    strategy: SyncStrategy,
+    *,
+    use_cache: bool,
+    log_label: str,
+) -> SetupResults:
+    """Shared implementation for :func:`parse_manifest` and :func:`load_manifest`.
+
+    Finds and parses the manifest, optionally uses cached plugin
+    discovery to resolve installer names, builds the action list,
+    and returns a :class:`SetupResults` preview.
+
+    Args:
+        path: Path to manifest file or directory containing one.
+        strategy: The sync strategy.
+        use_cache: Forwarded to :func:`discover_all_plugins`.
+        log_label: Human-readable label for the log message.
+
+    Returns:
+        SetupResults containing the action plan.
+
+    Raises:
+        ManifestError: If the manifest cannot be found or parsed.
+    """
+    logger.info(f'{log_label} from: {path}')
+
+    result = find_manifest(path)
+    plugins = discover_all_plugins(use_cache=use_cache)
+    actions = build_actions(
+        result.manifest,
+        plugins.environments,
+        strategy,
+        plugins.project_environments,
+        plugins.scm_environments,
+    )
+    metadata = ManifestMetadata(
+        name=result.manifest.name,
+        description=result.manifest.description,
+        author=result.manifest.author,
+        url=str(result.manifest.url) if result.manifest.url else None,
+    )
+
+    return SetupResults(
+        actions=actions,
+        manifest_path=result.manifest_path,
+        root_directory=result.root_directory,
+        metadata=metadata,
+    )
+
+
 def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
     """Parse a manifest and build the action plan without executing.
 
@@ -309,27 +360,32 @@ def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) ->
     Raises:
         ManifestError: If the manifest cannot be found or parsed.
     """
-    logger.info(f'Parsing manifest from: {path}')
+    return _build_preview(path, strategy, use_cache=True, log_label='Parsing manifest')
 
-    result = find_manifest(path)
-    plugins = discover_all_plugins()
-    actions = build_actions(
-        result.manifest,
-        plugins.environments,
-        strategy,
-        plugins.project_environments,
-        plugins.scm_environments,
-    )
-    metadata = ManifestMetadata(
-        name=result.manifest.name,
-        description=result.manifest.description,
-        author=result.manifest.author,
-        url=str(result.manifest.url) if result.manifest.url else None,
-    )
 
-    return SetupResults(
-        actions=actions,
-        manifest_path=result.manifest_path,
-        root_directory=result.root_directory,
-        metadata=metadata,
-    )
+def load_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
+    """Load a manifest using cached plugin knowledge.
+
+    This is the fast path for GUI clients: it reads JSON, builds
+    ``SetupAction`` objects using cached plugin knowledge, and
+    returns immediately.  On a warm cache the only I/O is the
+    manifest file read.  Actions whose ``installer`` cannot be
+    resolved from cached plugins will have ``installer=None``
+    (deferred) — the execution engine resolves them at phase
+    boundaries.
+
+    Use :func:`parse_manifest` when you need a fully-resolved preview
+    with populated CLI commands.
+
+    Args:
+        path: Path to manifest file or directory containing one.
+        strategy: The sync strategy.
+
+    Returns:
+        SetupResults containing the action plan.  Actions with
+        unresolvable installers have ``installer=None``.
+
+    Raises:
+        ManifestError: If the manifest cannot be found or parsed.
+    """
+    return _build_preview(path, strategy, use_cache=True, log_label='Loading manifest (fast)')

@@ -7,6 +7,9 @@ it without circular dependencies.
 """
 
 import importlib
+import threading
+import time
+from dataclasses import dataclass, field
 from typing import NamedTuple
 
 from porringer.backend.builder import Builder
@@ -23,6 +26,37 @@ class DiscoveredPlugins(NamedTuple):
     environments: dict[str, Environment]
     project_environments: dict[str, ProjectEnvironment]
     scm_environments: dict[str, ScmEnvironment]
+
+
+# ---------------------------------------------------------------------------
+# Plugin cache
+# ---------------------------------------------------------------------------
+
+CACHE_TTL: float = 30.0  # seconds
+
+
+@dataclass
+class _PluginCache:
+    """Mutable container for the in-memory plugin cache."""
+
+    plugins: DiscoveredPlugins | None = None
+    timestamp: float = 0.0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+_cache = _PluginCache()
+
+
+def invalidate_plugin_cache() -> None:
+    """Clear the in-memory plugin cache.
+
+    Call this when the process environment changes (e.g. after
+    installing a new backend) so that the next
+    :func:`discover_all_plugins` call performs a fresh scan.
+    """
+    with _cache.lock:
+        _cache.plugins = None
+        _cache.timestamp = 0.0
 
 
 def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> dict[str, T]:
@@ -50,19 +84,36 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
     return {canonicalize_type(type(inst)).name: inst for inst in instances}
 
 
-def discover_all_plugins() -> DiscoveredPlugins:
+def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
     """Discover all three plugin groups in one call.
 
     Convenience wrapper that discovers environments (with dependency
     checking), project environments, and SCM environments, returning
     them as a :class:`DiscoveredPlugins` named tuple.
 
+    Args:
+        use_cache: When ``True``, return a cached result if one exists
+            and is younger than :data:`CACHE_TTL` seconds.  Callers
+            on the hot path (preview, dry-run) set this to ``True``.
+            Callers that need freshness after installing packages
+            (execution phase transitions) leave it ``False``.
+
     Returns:
         A ``DiscoveredPlugins`` with ``environments``,
         ``project_environments``, and ``scm_environments``.
     """
-    return DiscoveredPlugins(
+    with _cache.lock:
+        if use_cache and _cache.plugins is not None and (time.monotonic() - _cache.timestamp) < CACHE_TTL:
+            return _cache.plugins
+
+    result = DiscoveredPlugins(
         environments=discover_plugins('environment', Environment, check_dependencies=True),
         project_environments=discover_plugins('project_environment', ProjectEnvironment),
         scm_environments=discover_plugins('scm', ScmEnvironment),
     )
+
+    with _cache.lock:
+        _cache.plugins = result
+        _cache.timestamp = time.monotonic()
+
+    return result

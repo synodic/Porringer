@@ -14,6 +14,8 @@ class ProgressEventKind(Enum):
 
     MANIFEST_LOADED = auto()
     MANIFEST_FAILED = auto()
+    PLUGINS_DISCOVERED = auto()
+    MANIFEST_PARSED = auto()
     ACTION_STARTED = auto()
     ACTION_COMPLETED = auto()
     SUB_ACTION_PROGRESS = auto()
@@ -52,11 +54,16 @@ class ProgressEvent:
 
     Args:
         kind: What this event represents.
-        action: The setup action this event relates to (`None` for `MANIFEST_LOADED` / `MANIFEST_FAILED`).
-        result: Action result (set only for `ACTION_COMPLETED`).
-        sub_action: Sub-action detail (set only for `SUB_ACTION_PROGRESS`).
-        manifest: Per-manifest preview (set only for `MANIFEST_LOADED`).
-        failed_path: Path and error message (set only for `MANIFEST_FAILED`).
+        action: The setup action this event relates to (``None`` for manifest-level events).
+        result: Action result (set only for ``ACTION_COMPLETED``).
+        sub_action: Sub-action detail (set only for ``SUB_ACTION_PROGRESS``).
+        manifest: Per-manifest preview (set for ``MANIFEST_LOADED`` and ``MANIFEST_PARSED``).
+        failed_path: Path and error message (set only for ``MANIFEST_FAILED``).
+        plugin_names: Discovered plugin names (set only for ``PLUGINS_DISCOVERED``).
+        plugin_availability: Plugin name → is-available mapping (set only
+            for ``PLUGINS_DISCOVERED``).  ``True`` means the tool binary
+            is on PATH; ``False`` means the plugin package is installed
+            but the tool is not found.
     """
 
     kind: ProgressEventKind
@@ -65,6 +72,8 @@ class ProgressEvent:
     sub_action: SubActionProgress | None = None
     manifest: SetupResults | None = None
     failed_path: tuple[Path, str] | None = None
+    plugin_names: list[str] | None = None
+    plugin_availability: dict[str, bool] | None = None
 
 
 @dataclass
