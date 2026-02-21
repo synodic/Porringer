@@ -135,10 +135,34 @@ class PythonEnvironment(Environment, RuntimeConsumer):
                 if best is not None:
                     results.append(Package(name=pkg_ref.name, version=str(best)))
             else:
-                # Stable-only: use info.version
+                # Stable-only: use info.version, but verify it isn't
+                # a pre-release (PyPI's info.version reflects whatever
+                # the maintainer uploaded last, which may be a dev/rc).
                 version_str = data.get('info', {}).get('version')
                 if version_str:
-                    results.append(Package(name=pkg_ref.name, version=version_str))
+                    try:
+                        if not Version(version_str).is_prerelease:
+                            results.append(Package(name=pkg_ref.name, version=version_str))
+                            continue
+                    except InvalidVersion:
+                        results.append(Package(name=pkg_ref.name, version=version_str))
+                        continue
+
+                # info.version was a pre-release or missing — scan
+                # releases for the highest stable version.
+                releases = data.get('releases', {})
+                best_stable: Version | None = None
+                for ver_str in releases:
+                    try:
+                        ver = Version(ver_str)
+                    except InvalidVersion:
+                        continue
+                    if ver.is_prerelease or ver.is_devrelease:
+                        continue
+                    if best_stable is None or ver > best_stable:
+                        best_stable = ver
+                if best_stable is not None:
+                    results.append(Package(name=pkg_ref.name, version=str(best_stable)))
 
         return results
 

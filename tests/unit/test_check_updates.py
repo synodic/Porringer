@@ -133,6 +133,75 @@ class TestCheckPypiUpdates:
         assert result[0].version == '2.0.0'
         assert result[1].version == '3.0.0'
 
+    @staticmethod
+    def test_prerelease_info_version_falls_back_to_stable_release() -> None:
+        """When info.version is a pre-release and include_prereleases=False, scan releases for stable."""
+        env = PipxEnvironment(_MOCK_PARAMS)
+        pypi_data = {
+            'info': {'version': '0.9.15.dev3'},
+            'releases': {
+                '0.9.14': [],
+                '0.9.15.dev3': [],
+                '0.9.13': [],
+            },
+        }
+        response = MagicMock()
+        response.json.return_value = pypi_data
+        response.raise_for_status = MagicMock()
+
+        with patch('httpx.Client') as mock_client:
+            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
+            mock_client.return_value.__exit__ = MagicMock(return_value=False)
+            result = env._check_pypi_updates(_make_params(['cppython']))
+
+        assert len(result) == 1
+        assert result[0].version == '0.9.14'
+
+    @staticmethod
+    def test_prerelease_info_version_with_no_stable_releases() -> None:
+        """When info.version is a pre-release and no stable releases exist, return empty."""
+        env = PipxEnvironment(_MOCK_PARAMS)
+        pypi_data = {
+            'info': {'version': '1.0.0a1'},
+            'releases': {
+                '1.0.0a1': [],
+                '1.0.0.dev1': [],
+            },
+        }
+        response = MagicMock()
+        response.json.return_value = pypi_data
+        response.raise_for_status = MagicMock()
+
+        with patch('httpx.Client') as mock_client:
+            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
+            mock_client.return_value.__exit__ = MagicMock(return_value=False)
+            result = env._check_pypi_updates(_make_params(['some-package']))
+
+        assert result == []
+
+    @staticmethod
+    def test_stable_info_version_not_affected() -> None:
+        """When info.version is stable and include_prereleases=False, return it directly."""
+        env = PipxEnvironment(_MOCK_PARAMS)
+        pypi_data = {
+            'info': {'version': '2.0.0'},
+            'releases': {
+                '2.0.0': [],
+                '2.1.0.dev1': [],
+            },
+        }
+        response = MagicMock()
+        response.json.return_value = pypi_data
+        response.raise_for_status = MagicMock()
+
+        with patch('httpx.Client') as mock_client:
+            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
+            mock_client.return_value.__exit__ = MagicMock(return_value=False)
+            result = env._check_pypi_updates(_make_params(['some-package']))
+
+        assert len(result) == 1
+        assert result[0].version == '2.0.0'
+
 
 # =========================================================================
 # PipxEnvironment / UvEnvironment — inherit from PythonEnvironment

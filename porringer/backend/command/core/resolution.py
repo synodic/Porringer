@@ -281,15 +281,19 @@ def _apply_strategy(
             msg: str | None = presence.detail
 
             if detect_updates and presence.env_for_updates is not None:
-                check = _check_for_newer_version(
-                    presence.env_for_updates,
-                    action.package,
-                    installed_ver,
-                    include_prereleases=action.include_prereleases,
-                )
-                if check.newer_version is not None:
+                try:
+                    newer = _check_for_newer_version(
+                        presence.env_for_updates,
+                        action.package,
+                        installed_ver,
+                        include_prereleases=action.include_prereleases,
+                    )
+                except _UpdateCheckError:
+                    newer = None
+
+                if newer is not None:
                     skip_reason = SkipReason.UPDATE_AVAILABLE
-                    available_ver = check.newer_version
+                    available_ver = newer
                     pkg_name = action.package.name if action.package else ''
                     msg = f'{pkg_name} {installed_ver} → {available_ver}'
 
@@ -317,24 +321,26 @@ def _apply_strategy(
         # confirms the package is already at its latest version we
         # can skip the no-op upgrade entirely.
         if presence.env_for_updates is not None:
-            check = _check_for_newer_version(
-                presence.env_for_updates,
-                action.package,
-                installed_ver,
-                include_prereleases=action.include_prereleases,
-            )
-            if not check.error:
-                if check.newer_version is not None:
+            try:
+                newer = _check_for_newer_version(
+                    presence.env_for_updates,
+                    action.package,
+                    installed_ver,
+                    include_prereleases=action.include_prereleases,
+                )
+            except _UpdateCheckError:
+                pass  # Fall through to unconditional upgrade
+            else:
+                if newer is not None:
                     pkg_name = action.package.name if action.package else ''
                     return ResolvedOperation(
                         action=action,
                         operation=OperationKind.UPGRADE,
-                        message=f'{pkg_name} {installed_ver} → {check.newer_version}',
+                        message=f'{pkg_name} {installed_ver} → {newer}',
                         installed_version=installed_ver,
-                        available_version=check.newer_version,
+                        available_version=newer,
                         plugin_manager=plugin_manager,
                     )
-                # Confirmed up-to-date — skip.
                 return ResolvedOperation(
                     action=action,
                     operation=OperationKind.SKIP,
@@ -343,8 +349,6 @@ def _apply_strategy(
                     installed_version=installed_ver,
                     plugin_manager=plugin_manager,
                 )
-            # Could not determine upstream state — fall through
-            # to attempt the upgrade conservatively.
 
         # No environment for update checks, or check failed — upgrade
         # unconditionally.
@@ -365,22 +369,12 @@ def _apply_strategy(
     )
 
 
-@dataclass(slots=True)
-class _UpdateCheckResult:
-    """Result of a newer-version check.
+class _UpdateCheckError(Exception):
+    """The update check could not be performed.
 
-    Distinguishes three outcomes:
-
-    * **newer version found** — ``newer_version`` is a string.
-    * **confirmed up-to-date** — ``newer_version`` is ``None`` and
-      ``error`` is ``False``.
-    * **check failed** — ``newer_version`` is ``None`` and ``error``
-      is ``True``.  The caller should fall back to a conservative
-      action (e.g. attempt the upgrade anyway).
+    The caller should fall back to a conservative action
+    (e.g. attempt the upgrade anyway).
     """
-
-    newer_version: str | None = None
-    error: bool = False
 
 
 def _check_for_newer_version(
@@ -389,14 +383,18 @@ def _check_for_newer_version(
     installed_version: str | None,
     *,
     include_prereleases: bool = False,
-) -> _UpdateCheckResult:
+) -> str | None:
     """Query the plugin for a newer upstream version.
 
-    Returns an :class:`_UpdateCheckResult` that distinguishes *newer
-    version found*, *confirmed up-to-date*, and *check failed*.
+    Returns the newer version string when one is available, or ``None``
+    when the installed version is confirmed up-to-date.
+
+    Raises:
+        _UpdateCheckError: When the check cannot complete (network
+            error, missing package, etc.).
     """
     if package is None:
-        return _UpdateCheckResult(error=True)
+        raise _UpdateCheckError('no package reference')
 
     try:
         updates = env.check_updates(
@@ -407,24 +405,33 @@ def _check_for_newer_version(
         )
     except Exception as e:
         logger.debug('check_updates failed for %s via %s: %s', package, env.tool_name(), e)
-        return _UpdateCheckResult(error=True)
+        raise _UpdateCheckError(str(e)) from e
 
     if not updates or updates[0].version is None:
         # Plugin responded but reported no updates — confirmed up-to-date.
-        return _UpdateCheckResult()
+        return None
 
     latest_ver = updates[0].version
+
+    # Defense-in-depth: reject pre-release versions when the caller
+    # did not opt in, even if the plugin failed to filter them.
+    if not include_prereleases:
+        try:
+            if Version(latest_ver).is_prerelease:
+                return None
+        except InvalidVersion:
+            pass  # Non-PEP-440 version string — let the comparison below decide
 
     # Compare versions when possible to avoid false positives
     if installed_version is not None:
         try:
             if Version(latest_ver) <= Version(installed_version):
-                return _UpdateCheckResult()
+                return None
         except InvalidVersion:
             if latest_ver == installed_version:
-                return _UpdateCheckResult()
+                return None
 
-    return _UpdateCheckResult(newer_version=latest_ver)
+    return latest_ver
 
 
 # ---------------------------------------------------------------------------
