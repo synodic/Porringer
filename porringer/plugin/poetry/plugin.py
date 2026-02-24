@@ -11,7 +11,7 @@ from porringer.core.plugin_schema.project_environment import (
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
-class PoetryProjectEnvironment(ProjectEnvironment, PluginManager):
+class PoetryEnvironment(ProjectEnvironment, PluginManager):
     """Project environment managed by Poetry.
 
     Delegates venv creation, dependency resolution, and lock-file

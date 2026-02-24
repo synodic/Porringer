@@ -11,22 +11,22 @@ import pytest
 from packaging.version import Version
 
 from porringer.core.schema import Distribution, Package, PluginParameters
-from porringer.plugin.pip.plugin import PipEnvironment
+from porringer.plugin.pip.plugin import PIPEnvironment
 from porringer.test.pytest.tests import EnvironmentUnitTests
 
 
-class TestEnvironment(EnvironmentUnitTests[PipEnvironment]):
+class TestEnvironment(EnvironmentUnitTests[PIPEnvironment]):
     """The tests for the pip environment plugin"""
 
     @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')
-    def fixture_plugin_type() -> type[PipEnvironment]:
+    def fixture_plugin_type() -> type[PIPEnvironment]:
         """A required testing hook that allows type generation
 
         Returns:
             The type of the Environment
         """
-        return PipEnvironment
+        return PIPEnvironment
 
 
 # ---------------------------------------------------------------------------
@@ -41,10 +41,10 @@ _SAMPLE_PACKAGES = [
 """Simulated package list shared across scenarios."""
 
 
-def _make_env() -> PipEnvironment:
-    """Create a fresh PipEnvironment for testing (no cached packages)."""
+def _make_env() -> PIPEnvironment:
+    """Create a fresh PIPEnvironment for testing (no cached packages)."""
     params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-    return PipEnvironment(params)
+    return PIPEnvironment(params)
 
 
 def _ok(stdout: str) -> subprocess.CompletedProcess[str]:
@@ -215,7 +215,7 @@ class TestCaching:
 
     @staticmethod
     def test_separate_instances_not_shared(monkeypatch: pytest.MonkeyPatch) -> None:
-        """Each PipEnvironment instance has its own cache."""
+        """Each PIPEnvironment instance has its own cache."""
         call_count = 0
 
         def run(*a: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
@@ -286,6 +286,6 @@ class TestLivePackages:
         expected = {'pytest', 'packaging'}
         missing = expected - installed
         assert not missing, (
-            f'Dev-dependencies not visible to PipEnvironment.packages(): {missing}. '
+            f'Dev-dependencies not visible to PIPEnvironment.packages(): {missing}. '
             f'python_command={env.python_command!r}'
         )

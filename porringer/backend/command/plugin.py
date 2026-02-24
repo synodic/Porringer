@@ -7,6 +7,8 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
+from packaging.utils import canonicalize_name
+
 from porringer.backend.builder import Builder
 from porringer.backend.resolver import build_plugin_info
 from porringer.core.plugin_schema.environment import Environment
@@ -15,7 +17,7 @@ from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Package, Plugin, PluginKind
 from porringer.schema import PluginInfo, PluginOperationResult
 from porringer.utility.exception import PluginError
-from porringer.utility.utility import canonicalize_type, is_pipx_installation
+from porringer.utility.utility import is_pipx_installation
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +31,15 @@ class PluginCommands:
     """
 
     @staticmethod
-    def _discover_environments() -> builtins.list[Environment]:
+    def _discover_environments() -> dict[str, Environment]:
         """Discover and build all environment plugins.
 
         Returns:
-            Instantiated environment plugins with dependencies resolved.
+            Name-keyed dict of environment plugins with dependencies resolved.
         """
         environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
-        return Builder.build_plugins(environment_types)
+        instances = Builder.build_plugins(environment_types)
+        return {info.name: inst for info, inst in zip(environment_types, instances, strict=True)}
 
     @staticmethod
     def list(*, kinds: builtins.list[PluginKind] | None = None) -> builtins.list[PluginInfo]:
@@ -58,13 +61,15 @@ class PluginCommands:
 
         # Project-environment plugins (project sync)
         project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
-        projects = Builder.build_plugins(project_types)
+        project_instances = Builder.build_plugins(project_types)
+        projects = {info.name: inst for info, inst in zip(project_types, project_instances, strict=True)}
 
         # SCM plugins (source control)
         scm_types = Builder.find_plugins('scm', ScmEnvironment)
-        scm_plugins = Builder.build_plugins(scm_types)
+        scm_instances = Builder.build_plugins(scm_types)
+        scm_plugins = {info.name: inst for info, inst in zip(scm_types, scm_instances, strict=True)}
 
-        all_plugins: builtins.list[Plugin] = [*environments, *projects, *scm_plugins]
+        all_plugins: dict[str, Plugin] = {**environments, **projects, **scm_plugins}
 
         return build_plugin_info(all_plugins, kinds=kinds)
 
@@ -95,16 +100,16 @@ class PluginCommands:
         logger.info(f'Listing packages for plugin: {plugin_name}')
 
         environments = PluginCommands._discover_environments()
+        normalized = str(canonicalize_name(plugin_name))
 
-        for env in environments:
-            canonicalized = canonicalize_type(type(env))
-            if canonicalized.name == plugin_name:
+        for name, env in environments.items():
+            if str(canonicalize_name(name)) == normalized:
                 if not type(env).is_available():
                     raise PluginError(f"Plugin '{plugin_name}' is not available on this system")
                 return env.packages(project_path=project_path)
 
-        available = [canonicalize_type(type(e)).name for e in environments]
-        raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(sorted(available))}")
+        available = sorted(environments.keys())
+        raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(available)}")
 
     _PLUGIN_GROUPS = (
         'porringer.environment',

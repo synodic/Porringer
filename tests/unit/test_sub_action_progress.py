@@ -11,7 +11,7 @@ import pytest
 from porringer.backend.command.sync import SyncCommands
 from porringer.core.plugin_schema.environment import PackageParameters
 from porringer.core.schema import Ecosystem, PackageRef, PluginKind
-from porringer.plugin.pip.plugin import PipEnvironment
+from porringer.plugin.pip.plugin import PIPEnvironment
 from porringer.schema import (
     ProgressEvent,
     ProgressEventKind,
@@ -144,7 +144,7 @@ class TestPackageParametersProgressCallback:
 
 
 class TestPipProgressLineParsing:
-    """Tests for PipEnvironment._parse_progress_line."""
+    """Tests for PIPEnvironment._parse_progress_line."""
 
     @staticmethod
     def test_downloading_line() -> None:
@@ -152,7 +152,7 @@ class TestPipProgressLineParsing:
         action = _make_action()
         collected: list[SubActionProgress] = []
 
-        PipEnvironment._parse_progress_line(
+        PIPEnvironment._parse_progress_line(
             'Downloading https://files.pythonhosted.org/ruff-0.8.0-py3-none-any.whl (2.1 MB)',
             action,
             collected.append,
@@ -169,7 +169,7 @@ class TestPipProgressLineParsing:
         action = _make_action()
         collected: list[SubActionProgress] = []
 
-        PipEnvironment._parse_progress_line(
+        PIPEnvironment._parse_progress_line(
             '   1.5 MB 50%',
             action,
             collected.append,
@@ -185,7 +185,7 @@ class TestPipProgressLineParsing:
         action = _make_action()
         collected: list[SubActionProgress] = []
 
-        PipEnvironment._parse_progress_line(
+        PIPEnvironment._parse_progress_line(
             'Installing collected packages: requests, urllib3',
             action,
             collected.append,
@@ -201,7 +201,7 @@ class TestPipProgressLineParsing:
         action = _make_action()
         collected: list[SubActionProgress] = []
 
-        PipEnvironment._parse_progress_line(
+        PIPEnvironment._parse_progress_line(
             'Requirement already satisfied: requests in /usr/lib/python3.12/site-packages',
             action,
             collected.append,
@@ -217,7 +217,7 @@ class TestPipProgressLineParsing:
         action = _make_action()
         collected: list[SubActionProgress] = []
 
-        PipEnvironment._parse_progress_line(
+        PIPEnvironment._parse_progress_line(
             'Using cached requests-2.31.0.tar.gz',
             action,
             collected.append,
@@ -243,7 +243,7 @@ class TestPipProgressLineParsing:
         ]
 
         for line in lines:
-            PipEnvironment._parse_progress_line(line, action, collected.append)
+            PIPEnvironment._parse_progress_line(line, action, collected.append)
 
         phases = [u.phase for u in collected]
         assert 'downloading' in phases

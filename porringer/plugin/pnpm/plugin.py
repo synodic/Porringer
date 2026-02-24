@@ -7,7 +7,7 @@ from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Env
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
-class PnpmEnvironment(Environment):
+class PNPMEnvironment(Environment):
     """Represents a Node.js environment managed by pnpm.
 
     Provides methods to install, search, uninstall, upgrade, and list

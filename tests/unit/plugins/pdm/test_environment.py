@@ -2,15 +2,15 @@
 
 import pytest
 
-from porringer.plugin.pdm.plugin import PdmProjectEnvironment
+from porringer.plugin.pdm.plugin import PDMEnvironment
 from porringer.test.pytest.tests import ProjectEnvironmentUnitTests
 
 
-class TestEnvironment(ProjectEnvironmentUnitTests[PdmProjectEnvironment]):
+class TestEnvironment(ProjectEnvironmentUnitTests[PDMEnvironment]):
     """Unit tests for the PDM project environment plugin."""
 
     @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')
-    def fixture_plugin_type() -> type[PdmProjectEnvironment]:
+    def fixture_plugin_type() -> type[PDMEnvironment]:
         """Returns the PDM project environment type."""
-        return PdmProjectEnvironment
+        return PDMEnvironment

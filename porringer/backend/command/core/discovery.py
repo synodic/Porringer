@@ -17,7 +17,6 @@ from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin
-from porringer.utility.utility import canonicalize_type
 
 
 class DiscoveredPlugins(NamedTuple):
@@ -81,7 +80,7 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
 
     infos = Builder.find_plugins(group, base_class, **kwargs)
     instances = Builder.build_plugins(infos)
-    return {canonicalize_type(type(inst)).name: inst for inst in instances}
+    return {info.name: inst for info, inst in zip(infos, instances, strict=True)}
 
 
 def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:

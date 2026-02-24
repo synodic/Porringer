@@ -4,7 +4,6 @@ from porringer.backend.schema import GlobalConfiguration, ResolvedDirectories
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Plugin, PluginKind
 from porringer.schema import LocalConfiguration, PluginInfo
-from porringer.utility.utility import canonicalize_type
 
 
 def resolve_configuration(
@@ -32,7 +31,7 @@ def resolve_configuration(
 
 
 def build_plugin_info(
-    plugins: list[Plugin],
+    plugins: dict[str, Plugin] | list[Plugin],
     kinds: list[PluginKind] | None = None,
 ) -> list[PluginInfo]:
     """Build metadata for discovered plugins, optionally filtered by kind.
@@ -42,7 +41,8 @@ def build_plugin_info(
     `ToolBasedPlugin` that reports itself as available.
 
     Args:
-        plugins: Discovered plugin instances from all groups.
+        plugins: Discovered plugin instances, either as a name-keyed dict
+            or a flat list (names taken from the dict keys when available).
         kinds: Only include plugins matching these kinds.  `None` returns all.
 
     Returns:
@@ -50,23 +50,31 @@ def build_plugin_info(
     """
     results: list[PluginInfo] = []
 
-    for plugin in plugins:
+    items: list[tuple[str | None, Plugin]]
+    if isinstance(plugins, dict):
+        items = [(name, plugin) for name, plugin in plugins.items()]
+    else:
+        items = [(None, plugin) for plugin in plugins]
+
+    for name, plugin in items:
         plugin_type = type(plugin)
         kind = plugin_type.plugin_kind()
 
         if kinds and kind not in kinds:
             continue
 
-        canonicalized = canonicalize_type(plugin_type)
         installed = plugin.is_available()
 
         tool_version = None
         if installed and isinstance(plugin, ToolBasedPlugin):
             tool_version = plugin.tool_version()
 
+        # Use the entry-point name when available; fall back to empty string
+        plugin_name = name if name is not None else ''
+
         results.append(
             PluginInfo(
-                name=canonicalized.name,
+                name=plugin_name,
                 kind=kind,
                 version=plugin.distribution.version,
                 installed=installed,

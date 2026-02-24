@@ -6,7 +6,7 @@ from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import Ecosystem
 
 
-class NpmProjectEnvironment(ProjectEnvironment):
+class NPMProjectEnvironment(ProjectEnvironment):
     """Project environment managed by npm.
 
     Delegates dependency resolution and lock-file synchronisation to

@@ -7,7 +7,7 @@ from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Env
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
-class NpmEnvironment(Environment):
+class NPMEnvironment(Environment):
     """Represents a Node.js environment managed by npm.
 
     Provides methods to install, search, uninstall, upgrade, and list Node.js packages using npm

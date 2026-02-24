@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from importlib import metadata
 from importlib.metadata import Distribution as MetadataDistribution
 
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from porringer.core.schema import Distribution, Plugin, PluginDependency, PluginParameters
 from porringer.utility.exception import PluginDependencyError
-from porringer.utility.utility import canonicalize_type
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ class PluginInformation[P]:
 
     type: type[P]
     distribution: MetadataDistribution
+    name: str
 
 
 class Builder:
@@ -64,30 +65,19 @@ class Builder:
                 logger.warning(f"Plugin '{entry_point.name}' could not be loaded: {e}. Skipping")
                 continue
 
-            canonicalized = canonicalize_type(loaded_type)
+            plugin_name = str(canonicalize_name(entry_point.name))
 
             if entry_point.dist is None:
-                logger.error(f"Plugin '{canonicalized.name}' is not installed. Skipping")
+                logger.error(f"Plugin '{plugin_name}' is not installed. Skipping")
                 continue
-
-            # Warn when the entry-point name diverges from the canonical
-            # name derived from the class.  This helps catch mismatches
-            # that would make preferences or plugin filters fail silently.
-            if entry_point.name != canonicalized.name:
-                logger.warning(
-                    "Entry-point name '%s' differs from canonical name '%s' for %s",
-                    entry_point.name,
-                    canonicalized.name,
-                    loaded_type.__name__,
-                )
 
             if not issubclass(loaded_type, base_class):
                 logger.warning(
-                    f"Found incompatible plugin. The '{canonicalized.name}' plugin must be an instance of '{group}'"
+                    f"Found incompatible plugin. The '{plugin_name}' plugin must be an instance of '{group}'"
                 )
             else:
-                logger.debug(f'{group} plugin found: {canonicalized.name}')
-                plugin_types.append(PluginInformation(loaded_type, entry_point.dist))
+                logger.debug(f'{group} plugin found: {plugin_name}')
+                plugin_types.append(PluginInformation(loaded_type, entry_point.dist, plugin_name))
 
         if check_dependencies:
             plugin_types = Builder._resolve_dependencies(plugin_types)
@@ -140,13 +130,13 @@ class Builder:
         Raises:
             PluginDependencyError: If a required dependency is missing
         """
-        # Build a set of available plugin names
-        available_plugins = {canonicalize_type(info.type).name for info in plugins}
+        # Build a set of available plugin names (PEP 503 normalised)
+        available_plugins = {info.name for info in plugins}
 
         resolved_plugins: list[PluginInformation[T]] = []
 
         for plugin_info in plugins:
-            plugin_name = canonicalize_type(plugin_info.type).name
+            plugin_name = plugin_info.name
             dependencies = plugin_info.type.dependencies()
 
             for dep in dependencies:
@@ -158,7 +148,7 @@ class Builder:
                     )
                     continue
 
-                if dep.plugin not in available_plugins:
+                if str(canonicalize_name(dep.plugin)) not in available_plugins:
                     if dep.required:
                         logger.error(f"Plugin '{plugin_name}' requires '{dep.plugin}' but it is not available")
                         raise PluginDependencyError(plugin_name, dep.plugin)
