@@ -2,6 +2,7 @@
 
 import json
 import logging
+import shutil
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -39,6 +40,9 @@ class DirectoryCacheManager:
     def _load(self) -> DirectoryCache:
         """Load cache from disk, creating if necessary.
 
+        Falls back to the backup file when the primary cache is
+        corrupt or unreadable, and to an empty cache when both fail.
+
         Returns:
             The loaded or newly created cache.
         """
@@ -49,21 +53,24 @@ class DirectoryCacheManager:
             try:
                 self._cache = DirectoryCache.model_validate_json(self._cache_path.read_text(encoding='utf-8'))
                 logger.debug(f'Loaded directory cache from {self._cache_path}')
-            except json.JSONDecodeError as e:
-                logger.warning(f'Invalid JSON in cache file, creating new: {e}')
-                self._cache = DirectoryCache()
-            except ValidationError as e:
-                logger.warning(f'Invalid cache format, creating new: {e}')
-                self._cache = DirectoryCache()
-            except (OSError, PermissionError) as e:
-                logger.warning(f'Failed to read cache file, creating new: {e}')
-                self._cache = DirectoryCache()
+                return self._cache
+            except (json.JSONDecodeError, ValidationError, OSError, PermissionError) as e:
+                logger.warning(f'Primary cache unreadable: {e}')
             except Exception as e:
-                logger.warning(f'Failed to load directory cache, creating new: {e}')
-                self._cache = DirectoryCache()
-        else:
-            self._cache = DirectoryCache()
+                logger.warning(f'Primary cache unreadable: {e}')
 
+        # Fallback: try the backup file
+        backup_path = self._cache_path.with_suffix('.bak')
+        if backup_path.exists():
+            try:
+                self._cache = DirectoryCache.model_validate_json(backup_path.read_text(encoding='utf-8'))
+                logger.warning(f'Recovered directory cache from backup {backup_path}')
+                return self._cache
+            except Exception as e:
+                logger.warning(f'Backup cache also unreadable: {e}')
+
+        logger.error('Directory cache unrecoverable, starting with empty cache')
+        self._cache = DirectoryCache()
         return self._cache
 
     def _save(self) -> None:
@@ -77,6 +84,11 @@ class DirectoryCacheManager:
         temp_path = self._cache_path.with_suffix('.tmp')
         try:
             temp_path.write_text(self._cache.model_dump_json(indent=2), encoding='utf-8')
+
+            # Back up the current file before overwriting
+            if self._cache_path.exists():
+                shutil.copy2(self._cache_path, self._cache_path.with_suffix('.bak'))
+
             temp_path.replace(self._cache_path)
             logger.debug(f'Saved directory cache to {self._cache_path}')
         except PermissionError as e:
