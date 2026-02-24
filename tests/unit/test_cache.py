@@ -177,3 +177,67 @@ class TestDirectoryCacheValidation:
         updated = cache_manager.update_directory(target_dir, name='New Name')
         assert updated is not None
         assert updated.name == 'New Name'
+
+
+class TestDirectoryCacheBackup:
+    """Tests for the .bak backup mechanism"""
+
+    @staticmethod
+    def test_save_creates_backup(cache_manager, temp_cache_dir) -> None:
+        """Test that saving creates a .bak file"""
+        tmp_path, data_dir = temp_cache_dir
+        target_dir = tmp_path / 'project'
+        target_dir.mkdir()
+
+        # First add — creates the primary file (no backup yet, nothing to back up)
+        cache_manager.add_directory(target_dir, name='First')
+        backup_path = cache_manager.cache_path.with_suffix('.bak')
+
+        # Second mutation triggers a backup of the first state
+        target_dir2 = tmp_path / 'project2'
+        target_dir2.mkdir()
+        cache_manager.add_directory(target_dir2, name='Second')
+
+        assert backup_path.exists()
+
+    @staticmethod
+    def test_load_falls_back_to_backup(temp_cache_dir) -> None:
+        """Test recovery from backup when the primary cache is corrupt"""
+        tmp_path, data_dir = temp_cache_dir
+        target_dir = tmp_path / 'project'
+        target_dir.mkdir()
+
+        # Set up a valid state and ensure a backup is created
+        manager = DirectoryCacheManager(data_dir)
+        manager.add_directory(target_dir, name='Saved')
+
+        # Create a second mutation so the backup contains the first valid state
+        target_dir2 = tmp_path / 'project2'
+        target_dir2.mkdir()
+        manager.add_directory(target_dir2)
+
+        # Corrupt the primary cache file
+        manager.cache_path.write_text('NOT VALID JSON', encoding='utf-8')
+
+        # New manager should recover from backup
+        recovered = DirectoryCacheManager(data_dir)
+        directories = recovered.list_directories()
+
+        # Backup was taken before the second add, so it should have the first entry
+        assert len(directories) == 1
+        assert directories[0].name == 'Saved'
+
+    @staticmethod
+    def test_both_corrupt_gives_empty_cache(temp_cache_dir) -> None:
+        """Test that corruption in both primary and backup yields an empty cache"""
+        _, data_dir = temp_cache_dir
+
+        primary = data_dir / DirectoryCacheManager.CACHE_FILENAME
+        backup = primary.with_suffix('.bak')
+
+        data_dir.mkdir(parents=True, exist_ok=True)
+        primary.write_text('GARBAGE', encoding='utf-8')
+        backup.write_text('ALSO GARBAGE', encoding='utf-8')
+
+        manager = DirectoryCacheManager(data_dir)
+        assert manager.list_directories() == []
