@@ -12,7 +12,7 @@ from porringer.core.schema import Ecosystem
 logger = logging.getLogger(__name__)
 
 
-class PnpmProjectEnvironment(ProjectEnvironment):
+class PNPMProjectEnvironment(ProjectEnvironment):
     """Project environment managed by pnpm.
 
     Delegates dependency resolution and lock-file synchronisation to

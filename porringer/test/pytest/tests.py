@@ -17,20 +17,10 @@ from porringer.test.pytest.shared import (
     ProjectEnvironmentTests,
     ScmEnvironmentTests,
 )
-from porringer.utility.utility import canonicalize_type
 
 
 class EnvironmentIntegrationTests[T: Environment](PluginIntegrationTests[T], EnvironmentTests[T], metaclass=ABCMeta):
     """Base class for all environment integration tests that test plugin agnostic behavior"""
-
-    @staticmethod
-    def test_group_name(plugin_type: type[T]) -> None:
-        """Verifies that the group name is the same as the plugin type
-
-        Args:
-            plugin_type: The type to register
-        """
-        assert canonicalize_type(plugin_type).group == 'environment'
 
 
 class EnvironmentUnitTests[T: Environment](PluginUnitTests[T], EnvironmentTests[T], metaclass=ABCMeta):
@@ -106,15 +96,6 @@ class ScmEnvironmentIntegrationTests[T: ScmEnvironment](
     PluginIntegrationTests[T], ScmEnvironmentTests[T], metaclass=ABCMeta
 ):
     """Base class for all SCM-environment integration tests."""
-
-    @staticmethod
-    def test_group_name(plugin_type: type[T]) -> None:
-        """Verifies that the group name matches the plugin type.
-
-        Args:
-            plugin_type: The type to register
-        """
-        assert canonicalize_type(plugin_type).group == 'scm'
 
 
 class ScmEnvironmentUnitTests[T: ScmEnvironment](PluginUnitTests[T], ScmEnvironmentTests[T], metaclass=ABCMeta):

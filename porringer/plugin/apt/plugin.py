@@ -13,7 +13,7 @@ from porringer.core.plugin_schema.environment import (
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
-class AptEnvironment(Environment):
+class APTEnvironment(Environment):
     """Represents a Debian/Ubuntu Linux environment managed by APT.
 
     Provides methods to install, search, uninstall, upgrade, and list packages using

@@ -7,7 +7,7 @@ from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
-class PdmProjectEnvironment(ProjectEnvironment, PluginManager):
+class PDMEnvironment(ProjectEnvironment, PluginManager):
     """Project environment managed by PDM.
 
     Delegates venv creation, dependency resolution, and lock-file

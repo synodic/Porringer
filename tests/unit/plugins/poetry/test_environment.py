@@ -2,15 +2,15 @@
 
 import pytest
 
-from porringer.plugin.poetry.plugin import PoetryProjectEnvironment
+from porringer.plugin.poetry.plugin import PoetryEnvironment
 from porringer.test.pytest.tests import ProjectEnvironmentUnitTests
 
 
-class TestEnvironment(ProjectEnvironmentUnitTests[PoetryProjectEnvironment]):
+class TestEnvironment(ProjectEnvironmentUnitTests[PoetryEnvironment]):
     """Unit tests for the Poetry project environment plugin."""
 
     @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')
-    def fixture_plugin_type() -> type[PoetryProjectEnvironment]:
+    def fixture_plugin_type() -> type[PoetryEnvironment]:
         """Returns the Poetry project environment type."""
-        return PoetryProjectEnvironment
+        return PoetryEnvironment

@@ -34,7 +34,7 @@ _ALREADY_SATISFIED_PATTERN = re.compile(
 )
 
 
-class PipEnvironment(PythonEnvironment):
+class PIPEnvironment(PythonEnvironment):
     """Represents a Python environment managed by pip.
 
     Provides methods to install, search, uninstall, upgrade, and list Python packages using pip
@@ -203,7 +203,7 @@ class PipEnvironment(PythonEnvironment):
                 )
 
                 # Also emit parsed progress events for structured updates
-                PipEnvironment._parse_progress_line(line, action, params.progress_callback)
+                PIPEnvironment._parse_progress_line(line, action, params.progress_callback)
 
         try:
             await asyncio.gather(read_stdout(), read_stderr_lines())

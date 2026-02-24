@@ -13,8 +13,8 @@ from porringer.core.plugin_schema.environment import Environment, PackageParamet
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
-from porringer.plugin.pdm.plugin import PdmProjectEnvironment
-from porringer.plugin.poetry.plugin import PoetryProjectEnvironment
+from porringer.plugin.pdm.plugin import PDMEnvironment
+from porringer.plugin.poetry.plugin import PoetryEnvironment
 from porringer.schema import (
     SetupAction,
     SetupParameters,
@@ -37,24 +37,24 @@ class TestPluginManagerProtocol:
 
     @staticmethod
     def test_pdm_is_plugin_manager() -> None:
-        """PdmProjectEnvironment implements PluginManager."""
-        assert issubclass(PdmProjectEnvironment, PluginManager)
+        """PDMEnvironment implements PluginManager."""
+        assert issubclass(PDMEnvironment, PluginManager)
 
     @staticmethod
     def test_poetry_is_plugin_manager() -> None:
-        """PoetryProjectEnvironment implements PluginManager."""
-        assert issubclass(PoetryProjectEnvironment, PluginManager)
+        """PoetryEnvironment implements PluginManager."""
+        assert issubclass(PoetryEnvironment, PluginManager)
 
     @staticmethod
     def test_pdm_isinstance_check() -> None:
-        """isinstance() check works for PdmProjectEnvironment."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        """isinstance() check works for PDMEnvironment."""
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         assert isinstance(plugin, PluginManager)
 
     @staticmethod
     def test_poetry_isinstance_check() -> None:
-        """isinstance() check works for PoetryProjectEnvironment."""
-        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        """isinstance() check works for PoetryEnvironment."""
+        plugin = PoetryEnvironment(_MOCK_PARAMS)
         assert isinstance(plugin, PluginManager)
 
 
@@ -69,7 +69,7 @@ class TestPluginAddCommand:
     @staticmethod
     def test_pdm_plugin_add_command_bare() -> None:
         """PDM plugin_add_command for a bare package name."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         cmd = plugin.plugin_add_command(ref)
         assert cmd[0] == plugin.tool_name()
@@ -78,7 +78,7 @@ class TestPluginAddCommand:
     @staticmethod
     def test_pdm_plugin_add_command_with_constraint() -> None:
         """PDM plugin_add_command includes version constraint."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython>=0.5')
         cmd = plugin.plugin_add_command(ref)
         assert cmd[0] == plugin.tool_name()
@@ -87,7 +87,7 @@ class TestPluginAddCommand:
     @staticmethod
     def test_poetry_plugin_add_command_bare() -> None:
         """Poetry plugin_add_command for a bare package name."""
-        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        plugin = PoetryEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export')
         cmd = plugin.plugin_add_command(ref)
         assert cmd[0] == plugin.tool_name()
@@ -96,7 +96,7 @@ class TestPluginAddCommand:
     @staticmethod
     def test_poetry_plugin_add_command_with_constraint() -> None:
         """Poetry plugin_add_command includes version constraint."""
-        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        plugin = PoetryEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export>=1.0,<2.0')
         cmd = plugin.plugin_add_command(ref)
         assert cmd[0] == plugin.tool_name()
@@ -114,7 +114,7 @@ class TestAsyncPluginAdd:
     @staticmethod
     def test_async_plugin_add_success() -> None:
         """async_plugin_add returns Package on success."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
@@ -135,7 +135,7 @@ class TestAsyncPluginAdd:
     @staticmethod
     def test_async_plugin_add_failure() -> None:
         """async_plugin_add returns None on non-zero exit."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
@@ -155,7 +155,7 @@ class TestAsyncPluginAdd:
     @staticmethod
     def test_async_plugin_add_file_not_found() -> None:
         """async_plugin_add returns None when tool is not on PATH."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
@@ -206,7 +206,7 @@ class TestCliCommandPreview:
 
     def test_empty_command_when_plugin_manager_unavailable(self) -> None:
         """get_cli_command returns empty list when PluginManager tool is not on PATH."""
-        pdm_env = PdmProjectEnvironment(_MOCK_PARAMS)
+        pdm_env = PDMEnvironment(_MOCK_PARAMS)
         project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
 
         action = SetupAction(
@@ -311,7 +311,7 @@ class TestPluginListCommand:
     @staticmethod
     def test_pdm_plugin_list_command() -> None:
         """PDM plugin_list_command starts with tool name."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         cmd = plugin.plugin_list_command()
         assert cmd[0] == plugin.tool_name()
         assert len(cmd) > 1
@@ -319,7 +319,7 @@ class TestPluginListCommand:
     @staticmethod
     def test_poetry_plugin_list_command() -> None:
         """Poetry plugin_list_command starts with tool name."""
-        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        plugin = PoetryEnvironment(_MOCK_PARAMS)
         cmd = plugin.plugin_list_command()
         assert cmd[0] == plugin.tool_name()
         assert len(cmd) > 1
@@ -331,7 +331,7 @@ class TestParsePluginList:
     @staticmethod
     def test_pdm_parse_with_version_and_description() -> None:
         """PDM parser extracts name and version from tabular output."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         stdout = 'cppython  0.9.14  A Python management solution for C++\n'
         result = plugin.parse_plugin_list(stdout)
         assert len(result) == 1
@@ -341,7 +341,7 @@ class TestParsePluginList:
     @staticmethod
     def test_pdm_parse_multiple_plugins() -> None:
         """PDM parser handles multiple lines."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         stdout = 'cppython 0.9.14 desc\npoetry-plugin 1.0.0 other\n'
         result = plugin.parse_plugin_list(stdout)
         assert len(result) == 2
@@ -351,14 +351,14 @@ class TestParsePluginList:
     @staticmethod
     def test_pdm_parse_empty_output() -> None:
         """PDM parser returns empty list for empty output."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         assert plugin.parse_plugin_list('') == []
         assert plugin.parse_plugin_list('\n') == []
 
     @staticmethod
     def test_poetry_parse_plugin_line() -> None:
         """Poetry parser extracts name and version from indented lines."""
-        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        plugin = PoetryEnvironment(_MOCK_PARAMS)
         stdout = '  - poetry-plugin-export (1.6.0) Poetry plugin\n'
         result = plugin.parse_plugin_list(stdout)
         assert len(result) == 1
@@ -368,7 +368,7 @@ class TestParsePluginList:
     @staticmethod
     def test_poetry_parse_ignores_non_plugin_lines() -> None:
         """Poetry parser skips header/dependency lines."""
-        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        plugin = PoetryEnvironment(_MOCK_PARAMS)
         stdout = (
             'Installed plugins:\n'
             '  - poetry-plugin-export (1.6.0) Poetry plugin\n'
@@ -387,7 +387,7 @@ class TestInstalledPlugins:
     @staticmethod
     def test_installed_plugins_success() -> None:
         """installed_plugins parses subprocess output on success."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = 'cppython 0.9.14 desc\n'
@@ -402,7 +402,7 @@ class TestInstalledPlugins:
     @staticmethod
     def test_installed_plugins_failure_returns_empty() -> None:
         """installed_plugins returns empty list on non-zero exit."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stdout = ''
@@ -416,7 +416,7 @@ class TestInstalledPlugins:
     @staticmethod
     def test_installed_plugins_file_not_found() -> None:
         """installed_plugins returns empty list when tool is missing."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
 
         with patch(
             'porringer.core.plugin_schema.plugin_manager.subprocess.run',
@@ -511,7 +511,7 @@ class TestDryRunPluginPresence:
             parameters=params,
         )
 
-        # LATEST + installed + no newer version → skip (ALREADY_LATEST)
+        # LATEST + installed + no newer version â†’ skip (ALREADY_LATEST)
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_LATEST
 
@@ -583,7 +583,7 @@ class TestPluginUpdateCommand:
     @staticmethod
     def test_pdm_plugin_update_command_bare() -> None:
         """PDM plugin_update_command starts with tool name and includes the package."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         cmd = plugin.plugin_update_command(ref)
         assert cmd[0] == plugin.tool_name()
@@ -594,7 +594,7 @@ class TestPluginUpdateCommand:
     @staticmethod
     def test_pdm_plugin_update_command_with_constraint() -> None:
         """PDM plugin_update_command includes version constraint."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython>=0.5')
         cmd = plugin.plugin_update_command(ref)
         assert cmd[0] == plugin.tool_name()
@@ -604,7 +604,7 @@ class TestPluginUpdateCommand:
     @staticmethod
     def test_poetry_plugin_update_delegates_to_add() -> None:
         """Poetry plugin_update_command delegates to plugin_add_command."""
-        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        plugin = PoetryEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export')
         update_cmd = plugin.plugin_update_command(ref)
         add_cmd = plugin.plugin_add_command(ref)
@@ -613,7 +613,7 @@ class TestPluginUpdateCommand:
     @staticmethod
     def test_poetry_plugin_update_with_constraint() -> None:
         """Poetry plugin_update_command with constraint delegates to add."""
-        plugin = PoetryProjectEnvironment(_MOCK_PARAMS)
+        plugin = PoetryEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export>=1.0')
         update_cmd = plugin.plugin_update_command(ref)
         add_cmd = plugin.plugin_add_command(ref)
@@ -625,11 +625,11 @@ class TestPluginUpdateCommand:
 
         Without --pip-args=--upgrade, ``pdm self add <pkg>`` delegates to
         ``pip install <pkg>`` which is a no-op when the package is already
-        installed — pip sees the requirement satisfied and skips the upgrade.
+        installed â€” pip sees the requirement satisfied and skips the upgrade.
         This test reproduces the bug where ``pdm self add cppython`` reported
         success but left the old version in place.
         """
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
 
         add_cmd = plugin.plugin_add_command(ref)
@@ -656,7 +656,7 @@ class TestAsyncPluginUpdate:
     @staticmethod
     def test_async_plugin_update_success() -> None:
         """async_plugin_update returns Package on success."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
@@ -677,7 +677,7 @@ class TestAsyncPluginUpdate:
     @staticmethod
     def test_async_plugin_update_failure() -> None:
         """async_plugin_update returns None on non-zero exit."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
@@ -697,7 +697,7 @@ class TestAsyncPluginUpdate:
     @staticmethod
     def test_async_plugin_update_file_not_found() -> None:
         """async_plugin_update returns None when tool is not on PATH."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
@@ -715,7 +715,7 @@ class TestAsyncPluginUpdate:
     @staticmethod
     def test_async_plugin_update_uses_update_command() -> None:
         """async_plugin_update delegates to plugin_update_command."""
-        plugin = PdmProjectEnvironment(_MOCK_PARAMS)
+        plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
@@ -736,7 +736,7 @@ class TestAsyncPluginUpdate:
 
 
 # ---------------------------------------------------------------------------
-# resolve_operation — unified resolution tests
+# resolve_operation â€” unified resolution tests
 # ---------------------------------------------------------------------------
 
 
@@ -774,7 +774,7 @@ class TestResolveOperation:
     # --- Normal package resolution ---
 
     def test_minimal_installed_skips(self) -> None:
-        """MINIMAL + installed → SKIP."""
+        """MINIMAL + installed â†’ SKIP."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -783,7 +783,7 @@ class TestResolveOperation:
         assert resolved.skip_reason == SkipReason.ALREADY_INSTALLED
 
     def test_minimal_not_installed_installs(self) -> None:
-        """MINIMAL + not installed → INSTALL."""
+        """MINIMAL + not installed â†’ INSTALL."""
         action = self._make_action()
         envs = self._make_envs(installed=[])
 
@@ -791,7 +791,7 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.INSTALL
 
     def test_latest_installed_upgrades(self) -> None:
-        """LATEST + installed + no newer version → SKIP (ALREADY_LATEST)."""
+        """LATEST + installed + no newer version â†’ SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -800,7 +800,7 @@ class TestResolveOperation:
         assert resolved.skip_reason == SkipReason.ALREADY_LATEST
 
     def test_latest_not_installed_installs(self) -> None:
-        """LATEST + not installed → INSTALL (fallback)."""
+        """LATEST + not installed â†’ INSTALL (fallback)."""
         action = self._make_action()
         envs = self._make_envs(installed=[])
 
@@ -808,7 +808,7 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.INSTALL
 
     def test_exact_installed_upgrades(self) -> None:
-        """EXACT + installed + no newer version → SKIP (ALREADY_LATEST)."""
+        """EXACT + installed + no newer version â†’ SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -819,7 +819,7 @@ class TestResolveOperation:
     # --- Plugin-management resolution ---
 
     def test_plugin_minimal_installed_skips(self) -> None:
-        """Plugin: MINIMAL + installed → SKIP."""
+        """Plugin: MINIMAL + installed â†’ SKIP."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -833,7 +833,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     def test_plugin_minimal_not_installed_installs(self) -> None:
-        """Plugin: MINIMAL + not installed → INSTALL."""
+        """Plugin: MINIMAL + not installed â†’ INSTALL."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -846,7 +846,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     def test_plugin_latest_installed_upgrades(self) -> None:
-        """Plugin: LATEST + installed → UPGRADE."""
+        """Plugin: LATEST + installed â†’ UPGRADE."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -859,7 +859,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     def test_plugin_latest_not_installed_installs(self) -> None:
-        """Plugin: LATEST + not installed → INSTALL (fallback)."""
+        """Plugin: LATEST + not installed â†’ INSTALL (fallback)."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -871,7 +871,7 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.INSTALL
 
     def test_plugin_no_manager_defaults_to_install(self) -> None:
-        """Plugin: no PluginManager → INSTALL."""
+        """Plugin: no PluginManager â†’ INSTALL."""
         action = self._make_action(plugin_target='mock-pm')
 
         resolved = asyncio.run(resolve_operation(action, {}, SyncStrategy.MINIMAL))
@@ -889,7 +889,7 @@ class TestResolveOperation:
         assert resolved.installed_version == '2.3.1'
 
     def test_missing_installer_skips(self) -> None:
-        """Action with no installer/package → SKIP."""
+        """Action with no installer/package â†’ SKIP."""
         action = SetupAction(
             description='Bad action',
             kind=PluginKind.TOOL,
@@ -1024,7 +1024,7 @@ class TestCliCommandUpgradePreview:
 
     def test_poetry_latest_delegates_update_to_add(self) -> None:
         """Poetry: LATEST returns same as add (Poetry update delegates to add)."""
-        poetry_env = PoetryProjectEnvironment(_MOCK_PARAMS)
+        poetry_env = PoetryEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export')
         project_environments: dict[str, ProjectEnvironment] = {'poetryproject': poetry_env}
 
@@ -1043,6 +1043,6 @@ class TestCliCommandUpgradePreview:
         with patch.object(type(poetry_env), 'is_available', return_value=True):
             cmd = get_cli_command(action, environments, SyncStrategy.LATEST, project_environments)
 
-        # Poetry delegates update to add — verify via protocol method
+        # Poetry delegates update to add â€” verify via protocol method
         assert cmd == poetry_env.plugin_update_command(ref)
         assert cmd == poetry_env.plugin_add_command(ref)

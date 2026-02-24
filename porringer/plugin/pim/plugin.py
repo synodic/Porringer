@@ -11,7 +11,7 @@ from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginDependency, PluginKind
 
 
-class PimEnvironment(Environment, RuntimeProvider):
+class PIMEnvironment(Environment, RuntimeProvider):
     """Represents a Python runtime environment managed by Python Install Manager (pymanager).
 
     Provides methods to install, search, uninstall, upgrade, and list Python runtimes using

@@ -30,7 +30,7 @@ def _get_pipx_venvs_dir() -> Path:
         return Path.home() / '.local' / 'pipx' / 'venvs'
 
 
-class PipxEnvironment(PythonEnvironment):
+class PIPXEnvironment(PythonEnvironment):
     """Represents a Python environment managed by pipx.
 
     Provides methods to install, search, uninstall, upgrade, and list Python packages using

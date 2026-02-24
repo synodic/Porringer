@@ -13,13 +13,13 @@ from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.schema import Distribution, Package, PackageRef, PluginParameters
-from porringer.plugin.apt.plugin import AptEnvironment
+from porringer.plugin.apt.plugin import APTEnvironment
 from porringer.plugin.brew.plugin import BrewEnvironment
 from porringer.plugin.deno.plugin import DenoEnvironment
-from porringer.plugin.npm.plugin import NpmEnvironment
-from porringer.plugin.pim.plugin import PimEnvironment
-from porringer.plugin.pip.plugin import PipEnvironment
-from porringer.plugin.pipx.plugin import PipxEnvironment
+from porringer.plugin.npm.plugin import NPMEnvironment
+from porringer.plugin.pim.plugin import PIMEnvironment
+from porringer.plugin.pip.plugin import PIPEnvironment
+from porringer.plugin.pipx.plugin import PIPXEnvironment
 from porringer.plugin.pyenv.plugin import PyenvEnvironment
 from porringer.plugin.winget.plugin import WingetEnvironment
 
@@ -53,7 +53,7 @@ class TestCheckPypiUpdates:
     @staticmethod
     def test_stable_version_returned() -> None:
         """Stable-only query returns info.version."""
-        env = PipxEnvironment(_MOCK_PARAMS)
+        env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {'info': {'version': '1.2.3'}, 'releases': {'1.2.3': []}}
         response = MagicMock()
         response.json.return_value = pypi_data
@@ -71,7 +71,7 @@ class TestCheckPypiUpdates:
     @staticmethod
     def test_prerelease_version_returned() -> None:
         """Pre-release query scans all release keys for the highest."""
-        env = PipxEnvironment(_MOCK_PARAMS)
+        env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {
             'info': {'version': '1.2.3'},
             'releases': {
@@ -96,7 +96,7 @@ class TestCheckPypiUpdates:
     @staticmethod
     def test_http_error_returns_empty() -> None:
         """Network failures are handled gracefully."""
-        env = PipxEnvironment(_MOCK_PARAMS)
+        env = PIPXEnvironment(_MOCK_PARAMS)
 
         with patch('httpx.Client') as mock_client:
             mock_instance = MagicMock()
@@ -110,7 +110,7 @@ class TestCheckPypiUpdates:
     @staticmethod
     def test_multiple_packages() -> None:
         """Multiple packages are queried independently."""
-        env = PipxEnvironment(_MOCK_PARAMS)
+        env = PIPXEnvironment(_MOCK_PARAMS)
         data_a = {'info': {'version': '2.0.0'}, 'releases': {}}
         data_b = {'info': {'version': '3.0.0'}, 'releases': {}}
 
@@ -136,7 +136,7 @@ class TestCheckPypiUpdates:
     @staticmethod
     def test_prerelease_info_version_falls_back_to_stable_release() -> None:
         """When info.version is a pre-release and include_prereleases=False, scan releases for stable."""
-        env = PipxEnvironment(_MOCK_PARAMS)
+        env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {
             'info': {'version': '0.9.15.dev3'},
             'releases': {
@@ -160,7 +160,7 @@ class TestCheckPypiUpdates:
     @staticmethod
     def test_prerelease_info_version_with_no_stable_releases() -> None:
         """When info.version is a pre-release and no stable releases exist, return empty."""
-        env = PipxEnvironment(_MOCK_PARAMS)
+        env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {
             'info': {'version': '1.0.0a1'},
             'releases': {
@@ -182,7 +182,7 @@ class TestCheckPypiUpdates:
     @staticmethod
     def test_stable_info_version_not_affected() -> None:
         """When info.version is stable and include_prereleases=False, return it directly."""
-        env = PipxEnvironment(_MOCK_PARAMS)
+        env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {
             'info': {'version': '2.0.0'},
             'releases': {
@@ -204,7 +204,7 @@ class TestCheckPypiUpdates:
 
 
 # =========================================================================
-# PipxEnvironment / UvEnvironment — inherit from PythonEnvironment
+# PIPXEnvironment / UvEnvironment â€” inherit from PythonEnvironment
 # =========================================================================
 # These plugins inherit check_updates from PythonEnvironment, which
 # delegates to _check_pypi_updates (tested above).  The abstract method
@@ -212,16 +212,16 @@ class TestCheckPypiUpdates:
 
 
 # =========================================================================
-# PipEnvironment — uses pip list --outdated with PyPI fallback
+# PIPEnvironment â€” uses pip list --outdated with PyPI fallback
 # =========================================================================
 
 
 class TestPipCheckUpdates:
-    """PipEnvironment.check_updates uses native pip then falls back to PyPI."""
+    """PIPEnvironment.check_updates uses native pip then falls back to PyPI."""
 
     @staticmethod
     def test_native_pip_outdated() -> None:
-        env = PipEnvironment(_MOCK_PARAMS)
+        env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([
             {'name': 'ruff', 'version': '0.8.0', 'latest_version': '0.9.0', 'latest_filetype': 'wheel'},
             {'name': 'black', 'version': '23.0', 'latest_version': '24.0', 'latest_filetype': 'wheel'},
@@ -237,7 +237,7 @@ class TestPipCheckUpdates:
 
     @staticmethod
     def test_prereleases_flag_passed() -> None:
-        env = PipEnvironment(_MOCK_PARAMS)
+        env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([])
 
         with patch('subprocess.run') as mock_run:
@@ -249,7 +249,7 @@ class TestPipCheckUpdates:
 
     @staticmethod
     def test_falls_back_to_pypi_on_failure() -> None:
-        env = PipEnvironment(_MOCK_PARAMS)
+        env = PIPEnvironment(_MOCK_PARAMS)
 
         with (
             patch('subprocess.run', side_effect=FileNotFoundError),
@@ -262,7 +262,7 @@ class TestPipCheckUpdates:
 
     @staticmethod
     def test_all_packages_returned_when_no_filter() -> None:
-        env = PipEnvironment(_MOCK_PARAMS)
+        env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([
             {'name': 'ruff', 'version': '0.8.0', 'latest_version': '0.9.0'},
             {'name': 'black', 'version': '23.0', 'latest_version': '24.0'},
@@ -276,16 +276,16 @@ class TestPipCheckUpdates:
 
 
 # =========================================================================
-# NpmEnvironment — npm registry via shared helper
+# NPMEnvironment â€” npm registry via shared helper
 # =========================================================================
 
 
 class TestNpmCheckUpdates:
-    """NpmEnvironment.check_updates delegates to _check_npm_registry."""
+    """NPMEnvironment.check_updates delegates to _check_npm_registry."""
 
     @staticmethod
     def test_stable_version() -> None:
-        env = NpmEnvironment(_MOCK_PARAMS)
+        env = NPMEnvironment(_MOCK_PARAMS)
         expected = [Package(name='typescript', version='10.0.0')]
 
         with patch.object(env, '_check_npm_registry', return_value=expected) as mock:
@@ -296,7 +296,7 @@ class TestNpmCheckUpdates:
 
     @staticmethod
     def test_prereleases_forwarded() -> None:
-        env = NpmEnvironment(_MOCK_PARAMS)
+        env = NPMEnvironment(_MOCK_PARAMS)
         with patch.object(env, '_check_npm_registry', return_value=[]) as mock:
             env.check_updates(_make_params(['typescript'], include_prereleases=True))
 
@@ -305,7 +305,7 @@ class TestNpmCheckUpdates:
 
 
 # =========================================================================
-# PnpmEnvironment / BunEnvironment — same shared helper, tested via npm
+# PNPMEnvironment / BunEnvironment â€” same shared helper, tested via npm
 # =========================================================================
 # These plugins delegate identically to _check_npm_registry.
 # The abstract method enforcement ensures they override check_updates.
@@ -314,7 +314,7 @@ class TestNpmCheckUpdates:
 
 
 # =========================================================================
-# DenoEnvironment — npm and JSR registries
+# DenoEnvironment â€” npm and JSR registries
 # =========================================================================
 
 
@@ -370,7 +370,7 @@ class TestDenoCheckUpdates:
 
 
 # =========================================================================
-# BrewEnvironment — brew outdated + brew info
+# BrewEnvironment â€” brew outdated + brew info
 # =========================================================================
 
 
@@ -427,7 +427,7 @@ class TestBrewCheckUpdates:
 
 
 # =========================================================================
-# WingetEnvironment — winget upgrade (text parsing)
+# WingetEnvironment â€” winget upgrade (text parsing)
 # =========================================================================
 
 
@@ -462,16 +462,16 @@ class TestWingetCheckUpdates:
 
 
 # =========================================================================
-# AptEnvironment — apt-cache policy
+# APTEnvironment â€” apt-cache policy
 # =========================================================================
 
 
 class TestAptCheckUpdates:
-    """AptEnvironment.check_updates uses ``apt-cache policy``."""
+    """APTEnvironment.check_updates uses ``apt-cache policy``."""
 
     @staticmethod
     def test_parses_candidate() -> None:
-        env = AptEnvironment(_MOCK_PARAMS)
+        env = APTEnvironment(_MOCK_PARAMS)
         policy_output = 'python3:\n  Installed: 3.11.6-1\n  Candidate: 3.12.0-1\n  Version table:\n'
 
         with patch.object(env, '_run_text_command', return_value=policy_output):
@@ -483,7 +483,7 @@ class TestAptCheckUpdates:
 
     @staticmethod
     def test_no_candidate_returns_empty() -> None:
-        env = AptEnvironment(_MOCK_PARAMS)
+        env = APTEnvironment(_MOCK_PARAMS)
         policy_output = 'nonexistent:\n  Installed: (none)\n  Candidate: (none)\n'
 
         with patch.object(env, '_run_text_command', return_value=policy_output):
@@ -493,7 +493,7 @@ class TestAptCheckUpdates:
 
     @staticmethod
     def test_command_failure_returns_empty() -> None:
-        env = AptEnvironment(_MOCK_PARAMS)
+        env = APTEnvironment(_MOCK_PARAMS)
 
         with patch.object(env, '_run_text_command', return_value=None):
             result = env.check_updates(_make_params(['python3']))
@@ -502,7 +502,7 @@ class TestAptCheckUpdates:
 
 
 # =========================================================================
-# PyenvEnvironment — pyenv install --list
+# PyenvEnvironment â€” pyenv install --list
 # =========================================================================
 
 
@@ -554,16 +554,16 @@ class TestPyenvCheckUpdates:
 
 
 # =========================================================================
-# PimEnvironment — py list --online
+# PIMEnvironment â€” py list --online
 # =========================================================================
 
 
 class TestPimCheckUpdates:
-    """PimEnvironment.check_updates uses ``py list --online``."""
+    """PIMEnvironment.check_updates uses ``py list --online``."""
 
     @staticmethod
     def test_finds_latest_matching_version() -> None:
-        env = PimEnvironment(_MOCK_PARAMS)
+        env = PIMEnvironment(_MOCK_PARAMS)
         data = {
             'versions': [
                 {'tag': '3.12.0', 'sort-version': '3.12.0'},
@@ -580,7 +580,7 @@ class TestPimCheckUpdates:
 
     @staticmethod
     def test_command_failure_returns_empty() -> None:
-        env = PimEnvironment(_MOCK_PARAMS)
+        env = PIMEnvironment(_MOCK_PARAMS)
 
         with patch.object(env, '_run_json_command', return_value=None):
             result = env.check_updates(_make_params(['3.12']))
