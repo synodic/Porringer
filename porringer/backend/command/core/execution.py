@@ -120,7 +120,13 @@ class ExecutionState:
 
         for phase_actions in self.phases.values():
             if phase_actions:
-                _resolve_deferred_actions(phase_actions, self.environments, self.strategy)
+                _resolve_deferred_actions(
+                    phase_actions,
+                    self.environments,
+                    self.strategy,
+                    scm_environments=self.scm_environments,
+                    project_environments=self.project_environments,
+                )
 
         for phase_actions in self.phases.values():
             for action in phase_actions:
@@ -1159,6 +1165,11 @@ async def execute_single(
 
     # --- Phase 4: SCM clone -------------------------------------------
     if state.phases[PluginKind.SCM]:
+        # Re-discover plugins so that SCM tools installed in earlier
+        # phases (e.g. mercurial via pipx) are now available and
+        # deferred SCM actions can be resolved.
+        state.phase_transition()
+
         state.results.extend(
             await _execute_scm_actions(
                 state.phases[PluginKind.SCM],
@@ -1284,6 +1295,8 @@ def _resolve_deferred_actions(
     actions: list[SetupAction],
     environments: dict[str, Environment],
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
+    scm_environments: dict[str, ScmEnvironment] | None = None,
+    project_environments: dict[str, ProjectEnvironment] | None = None,
 ) -> None:
     """Resolve deferred actions whose `installer` is `None`.
 
@@ -1297,12 +1310,19 @@ def _resolve_deferred_actions(
         actions: Mutable list of actions to resolve in-place.
         environments: Freshly-discovered environment plugins.
         strategy: Sync strategy (for description verb).
+        scm_environments: Optional SCM-environment plugins.
+        project_environments: Optional project-environment plugins.
     """
     deferred = [a for a in actions if a.installer is None and a.ecosystem is not None]
     if not deferred:
         return
 
-    resolver = BackendResolver(environments)
+    all_plugins: dict[str, Environment | ScmEnvironment | ProjectEnvironment] = {
+        **environments,
+        **(scm_environments or {}),
+        **(project_environments or {}),
+    }
+    resolver = BackendResolver(all_plugins)
     verb = STRATEGY_VERB[strategy]
 
     for action in deferred:
