@@ -53,9 +53,9 @@ from .action_builder import (
 from .discovery import (
     DiscoveredPlugins,
     discover_all_plugins,
-    discover_plugins,
     invalidate_plugin_cache,
 )
+from .phase import run_phases
 from .presence import async_dry_run_action
 from .resolution import (
     OperationKind,
@@ -73,8 +73,8 @@ class ExecutionState:
 
     Owns the discovered plugin dicts, grouped phase actions, and
     common parameters that every phase needs.  Provides
-    ``phase_transition()`` and ``propagate_runtime()`` as methods
-    so callers don't need to pass a half-dozen arguments.
+    :meth:`refresh_all_plugins` and :meth:`propagate_runtime` as
+    methods so callers don't need to pass a half-dozen arguments.
     """
 
     actions: list[SetupAction]
@@ -103,41 +103,22 @@ class ExecutionState:
         """The sync strategy from the current parameters."""
         return self.parameters.strategy
 
-    # -- phase-transition machinery ------------------------------------
+    # -- plugin refresh machinery --------------------------------------
 
-    def phase_transition(self) -> None:
-        """Refresh PATH, re-discover environment plugins, and resolve deferred actions.
+    def refresh_all_plugins(self) -> None:
+        """Refresh PATH and re-discover all plugin types.
 
-        Mutates ``self.environments`` in place and updates
-        descriptions / CLI commands on any newly-resolved actions.
-        The cached runtime executable (if any) is automatically
-        re-propagated to newly-created consumer instances.
+        Invalidates the plugin cache, re-discovers environments,
+        project environments, and SCM environments, then re-applies
+        the cached runtime executable to all new consumer instances.
         """
         refresh_path()
         invalidate_plugin_cache()
-        self.environments = discover_plugins('environment', Environment, check_dependencies=True)
+        plugins = discover_all_plugins()
+        self.environments = dict(plugins.environments)
+        self.project_environments = dict(plugins.project_environments)
+        self.scm_environments = dict(plugins.scm_environments)
         self._apply_resolved_runtime()
-
-        for phase_actions in self.phases.values():
-            if phase_actions:
-                _resolve_deferred_actions(
-                    phase_actions,
-                    self.environments,
-                    self.strategy,
-                    scm_environments=self.scm_environments,
-                    project_environments=self.project_environments,
-                )
-
-        for phase_actions in self.phases.values():
-            for action in phase_actions:
-                if action.cli_command is None or action.installer is not None:
-                    action.cli_command = get_cli_command(
-                        action,
-                        self.environments,
-                        self.strategy,
-                        self.project_environments,
-                        self.scm_environments,
-                    )
 
     def propagate_runtime(self) -> None:
         """Resolve interpreter paths from completed runtime actions and propagate downstream.
@@ -146,8 +127,7 @@ class ExecutionState:
         actions, resolves its executable, injects the directory onto
         ``PATH``, and sets ``runtime_executable`` on every matching
         ``RuntimeConsumer``.  The result is cached so that subsequent
-        calls to :meth:`phase_transition` or
-        :meth:`refresh_project_environments` can re-apply it to
+        calls to :meth:`refresh_all_plugins` can re-apply it to
         newly-created plugin instances.
         """
         result = _propagate_runtime(
@@ -157,17 +137,6 @@ class ExecutionState:
         )
         if result is not None:
             self._resolved_runtime = result
-
-    def refresh_project_environments(self) -> None:
-        """Re-discover project-environment plugins and re-propagate the runtime.
-
-        Replaces ``self.project_environments`` with freshly-discovered
-        instances and re-applies the cached runtime executable so that
-        new ``RuntimeConsumer`` project environments inherit the
-        resolved interpreter path.
-        """
-        self.project_environments = discover_plugins('project_environment', ProjectEnvironment)
-        self._apply_resolved_runtime()
 
     def _apply_resolved_runtime(self) -> None:
         """Re-apply the cached runtime executable to all current consumers.
@@ -200,6 +169,59 @@ class ExecutionState:
     def plugin_context(self) -> PluginContext:
         """Plugin-management context for this execution run."""
         return PluginContext(project_environments=self.project_environments)
+
+    # -- phase executor delegates --------------------------------------
+
+    async def run_package_actions(self, actions: list[SetupAction]) -> tuple[list[SetupActionResult], bool]:
+        """Execute package/tool/runtime actions.
+
+        Returns:
+            Tuple of (results, should_continue).
+        """
+        return await execute_package_actions(
+            actions,
+            self.environments,
+            self.parameters,
+            self.event_queue,
+            self.plugin_context,
+        )
+
+    async def run_project_phase(self, actions: list[SetupAction]) -> list[SetupActionResult]:
+        """Execute or skip project sync actions."""
+        return await handle_project_phase(actions, self)
+
+    async def run_scm_actions(self, actions: list[SetupAction]) -> list[SetupActionResult]:
+        """Execute SCM clone actions."""
+        return await _execute_scm_actions(
+            actions,
+            self.scm_environments,
+            self.fallback_dir,
+            self.parameters,
+            self.event_queue,
+        )
+
+    async def run_command_actions(self, actions: list[SetupAction]) -> list[SetupActionResult]:
+        """Execute post-sync shell commands."""
+        return await execute_command_actions(actions, self)
+
+    def resolve_deferred(self, actions: list[SetupAction]) -> None:
+        """Resolve deferred actions and update their CLI commands."""
+        _resolve_deferred_actions(
+            actions,
+            self.environments,
+            self.strategy,
+            scm_environments=self.scm_environments,
+            project_environments=self.project_environments,
+        )
+        for action in actions:
+            if action.cli_command is None or action.installer is not None:
+                action.cli_command = get_cli_command(
+                    action,
+                    self.environments,
+                    self.strategy,
+                    self.project_environments,
+                    self.scm_environments,
+                )
 
     def early_return(self) -> SetupResults:
         """Create a ``SetupResults`` from the results accumulated so far."""
@@ -1106,83 +1128,8 @@ async def execute_single(
         )
     )
 
-    # --- Phase 1: runtime-provider actions (pim / pyenv) ---------------
-    if state.phases[PluginKind.RUNTIME]:
-        runtime_results, should_continue = await execute_package_actions(
-            state.phases[PluginKind.RUNTIME],
-            state.environments,
-            state.parameters,
-            state.event_queue,
-            state.plugin_context,
-        )
-        state.results.extend(runtime_results)
-        if not should_continue:
-            return state.early_return()
-        state.propagate_runtime()
-
-        # Phase transition: re-discover plugins now that the runtime
-        # is installed and its directories are on PATH, so that
-        # downstream consumers (pip, uv, etc.) become available.
-        state.phase_transition()
-
-    # --- Phase 2a: package-kind actions (pip, uv, etc.) ---------------
-    if state.phases[PluginKind.PACKAGE]:
-        package_results, should_continue = await execute_package_actions(
-            state.phases[PluginKind.PACKAGE],
-            state.environments,
-            state.parameters,
-            state.event_queue,
-            state.plugin_context,
-        )
-        state.results.extend(package_results)
-        if not should_continue:
-            return state.early_return()
-
-    # --- Phase 2b: tool-kind actions (pipx, etc.) ---------------------
-    if state.phases[PluginKind.TOOL]:
-        # Phase transition: re-discover plugins so that tools installed
-        # in Phase 2a (e.g. pipx via pip) are now available as backends.
-        state.phase_transition()
-
-        tool_results, should_continue = await execute_package_actions(
-            state.phases[PluginKind.TOOL],
-            state.environments,
-            state.parameters,
-            state.event_queue,
-            state.plugin_context,
-        )
-        state.results.extend(tool_results)
-        if not should_continue:
-            return state.early_return()
-
-    # --- Phase 3: project sync ----------------------------------------
-    if state.phases[PluginKind.PROJECT]:
-        # Re-discover project environments in case tools installed in
-        # earlier phases provide new project-environment backends.
-        state.refresh_project_environments()
-
-        state.results.extend(await handle_project_phase(state.phases[PluginKind.PROJECT], state))
-
-    # --- Phase 4: SCM clone -------------------------------------------
-    if state.phases[PluginKind.SCM]:
-        # Re-discover plugins so that SCM tools installed in earlier
-        # phases (e.g. mercurial via pipx) are now available and
-        # deferred SCM actions can be resolved.
-        state.phase_transition()
-
-        state.results.extend(
-            await _execute_scm_actions(
-                state.phases[PluginKind.SCM],
-                state.scm_environments,
-                state.fallback_dir,
-                state.parameters,
-                state.event_queue,
-            )
-        )
-
-    # --- Phase 5: post-sync commands ----------------------------------
-    if state.phases[None]:
-        state.results.extend(await execute_command_actions(state.phases[None], state))
+    # Run all phases via the generalized phase loop.
+    await run_phases(state)
 
     return SetupResults(
         actions=actions,
