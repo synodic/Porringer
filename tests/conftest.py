@@ -9,6 +9,7 @@ from rich.console import Console
 
 from porringer.api import API
 from porringer.backend.cache import DirectoryCacheManager
+from porringer.backend.command.core.discovery import invalidate_plugin_cache
 from porringer.backend.schema import GlobalConfiguration
 from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
@@ -54,6 +55,18 @@ def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
         manifest_results.append(sr)
 
     return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
+
+
+@pytest.fixture(autouse=True)
+def _invalidate_plugin_cache() -> None:
+    """Clear the module-level plugin cache before every test.
+
+    The discovery cache (30 s TTL) holds live plugin instances whose
+    mutable state — particularly ``runtime_executable`` propagated
+    during a RuntimePhase — leaks across test boundaries.  Clearing it
+    ensures each test starts with freshly-discovered plugins.
+    """
+    invalidate_plugin_cache()
 
 
 @pytest.fixture

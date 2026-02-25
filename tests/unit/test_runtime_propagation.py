@@ -11,7 +11,9 @@ from unittest.mock import patch
 from packaging.version import Version
 
 from porringer.backend.command.core.action_builder import PHASE_ORDER
-from porringer.backend.command.core.execution import ExecutionState, execute_single
+from porringer.backend.command.core.discovery import DiscoveredPlugins
+from porringer.backend.command.core.execution import ExecutionState
+from porringer.backend.command.core.phase import PackagePhase, ToolPhase
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
@@ -195,12 +197,12 @@ def _make_state(
 # ---------------------------------------------------------------------------
 
 
-class TestRuntimePropagationAfterPhaseTransition:
+class TestRuntimePropagationAfterPluginRefresh:
     """Verify cached runtime is re-applied after plugin re-discovery."""
 
     @staticmethod
-    def test_phase_transition_re_propagates_runtime() -> None:
-        """Fresh consumers created by phase_transition receive the cached runtime."""
+    def test_refresh_all_plugins_re_propagates_runtime() -> None:
+        """Fresh consumers created by refresh_all_plugins receive the cached runtime."""
         provider = _MockRuntimeProvider(_MOCK_DIST)
         consumer = _MockPythonEnv(_MOCK_DIST)
         state = _make_state(
@@ -214,34 +216,48 @@ class TestRuntimePropagationAfterPhaseTransition:
         assert consumer.runtime_executable == _MOCK_RUNTIME_EXE
         assert state._resolved_runtime == ('python', _MOCK_RUNTIME_EXE)
 
-        # phase_transition replaces environments with new instances
+        # refresh_all_plugins replaces environments with new instances
         new_consumer = _MockPythonEnv(_MOCK_DIST)
         assert new_consumer.runtime_executable is None
 
-        with patch('porringer.backend.command.core.execution.discover_plugins') as mock_discover:
-            mock_discover.return_value = {'mock-pip': new_consumer}
-            with patch('porringer.backend.command.core.execution.refresh_path'):
-                state.phase_transition()
+        with (
+            patch('porringer.backend.command.core.execution.discover_all_plugins') as mock_discover,
+            patch('porringer.backend.command.core.execution.refresh_path'),
+            patch('porringer.backend.command.core.execution.invalidate_plugin_cache'),
+        ):
+            mock_discover.return_value = DiscoveredPlugins(
+                environments={'mock-pip': new_consumer},
+                project_environments={},
+                scm_environments={},
+            )
+            state.refresh_all_plugins()
 
         assert state.environments['mock-pip'] is new_consumer
         assert new_consumer.runtime_executable == _MOCK_RUNTIME_EXE
 
     @staticmethod
-    def test_phase_transition_noop_without_runtime() -> None:
-        """Without a resolved runtime, phase_transition sets nothing."""
+    def test_refresh_all_plugins_noop_without_runtime() -> None:
+        """Without a resolved runtime, refresh_all_plugins sets nothing."""
         state = _make_state(environments={'mock-pip': _MockPythonEnv(_MOCK_DIST)})
         assert state._resolved_runtime is None
 
         new_consumer = _MockPythonEnv(_MOCK_DIST)
-        with patch('porringer.backend.command.core.execution.discover_plugins') as mock_discover:
-            mock_discover.return_value = {'mock-pip': new_consumer}
-            with patch('porringer.backend.command.core.execution.refresh_path'):
-                state.phase_transition()
+        with (
+            patch('porringer.backend.command.core.execution.discover_all_plugins') as mock_discover,
+            patch('porringer.backend.command.core.execution.refresh_path'),
+            patch('porringer.backend.command.core.execution.invalidate_plugin_cache'),
+        ):
+            mock_discover.return_value = DiscoveredPlugins(
+                environments={'mock-pip': new_consumer},
+                project_environments={},
+                scm_environments={},
+            )
+            state.refresh_all_plugins()
 
         assert new_consumer.runtime_executable is None
 
     @staticmethod
-    def test_refresh_project_environments_re_propagates_runtime() -> None:
+    def test_refresh_all_plugins_re_propagates_to_project_environments() -> None:
         """Fresh project environments from refresh receive the cached runtime."""
         provider = _MockRuntimeProvider(_MOCK_DIST)
         consumer = _MockPythonEnv(_MOCK_DIST)
@@ -259,9 +275,17 @@ class TestRuntimePropagationAfterPhaseTransition:
         new_proj_env = _MockProjectEnv(_MOCK_DIST)
         assert new_proj_env.runtime_executable is None
 
-        with patch('porringer.backend.command.core.execution.discover_plugins') as mock_discover:
-            mock_discover.return_value = {'mock-pdm': new_proj_env}
-            state.refresh_project_environments()
+        with (
+            patch('porringer.backend.command.core.execution.discover_all_plugins') as mock_discover,
+            patch('porringer.backend.command.core.execution.refresh_path'),
+            patch('porringer.backend.command.core.execution.invalidate_plugin_cache'),
+        ):
+            mock_discover.return_value = DiscoveredPlugins(
+                environments={'mock-pim': provider, 'mock-pip': consumer},
+                project_environments={'mock-pdm': new_proj_env},
+                scm_environments={},
+            )
+            state.refresh_all_plugins()
 
         assert state.project_environments is not None
         assert state.project_environments['mock-pdm'] is new_proj_env
@@ -282,10 +306,17 @@ class TestRuntimePropagationAfterPhaseTransition:
         assert node_env.runtime_executable is None
 
         new_node_env = _MockNodeConsumer(_MOCK_DIST)
-        with patch('porringer.backend.command.core.execution.discover_plugins') as mock_discover:
-            mock_discover.return_value = {'mock-npm': new_node_env}
-            with patch('porringer.backend.command.core.execution.refresh_path'):
-                state.phase_transition()
+        with (
+            patch('porringer.backend.command.core.execution.discover_all_plugins') as mock_discover,
+            patch('porringer.backend.command.core.execution.refresh_path'),
+            patch('porringer.backend.command.core.execution.invalidate_plugin_cache'),
+        ):
+            mock_discover.return_value = DiscoveredPlugins(
+                environments={'mock-npm': new_node_env},
+                project_environments={},
+                scm_environments={},
+            )
+            state.refresh_all_plugins()
 
         assert new_node_env.runtime_executable is None
 
@@ -319,13 +350,10 @@ class TestPackagePhaseNoProjectPath:
         assert PythonEnvironment._discover_venv_python(Path('/nonexistent')) is None
 
     @staticmethod
-    def test_execute_single_phases_no_project_path() -> None:
-        """Phase 2a and 2b call sites must not pass project_path."""
-        source = inspect.getsource(execute_single)
+    def test_package_and_tool_phases_no_project_path() -> None:
+        """PackagePhase and ToolPhase execute methods must not pass project_path."""
+        package_source = inspect.getsource(PackagePhase.execute)
+        tool_source = inspect.getsource(ToolPhase.execute)
 
-        phase_2a_start = source.index('Phase 2a')
-        phase_2b_start = source.index('Phase 2b')
-        phase_3_start = source.index('Phase 3')
-
-        assert 'project_path' not in source[phase_2a_start:phase_2b_start], 'Phase 2a should not pass project_path'
-        assert 'project_path' not in source[phase_2b_start:phase_3_start], 'Phase 2b should not pass project_path'
+        assert 'project_path' not in package_source, 'PackagePhase.execute should not pass project_path'
+        assert 'project_path' not in tool_source, 'ToolPhase.execute should not pass project_path'
