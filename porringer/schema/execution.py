@@ -12,6 +12,40 @@ from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.schema.manifest import ManifestMetadata
 
 
+class CloneStatusKind(Enum):
+    """Discriminator for `CloneStatus`.
+
+    Indicates whether a repository is already cloned, missing, or present
+    but pointing at a different remote URL.
+    """
+
+    CLONED = auto()
+    """Repository is present and the remote URL matches."""
+
+    MISSING = auto()
+    """No repository exists at the destination."""
+
+    URL_MISMATCH = auto()
+    """A repository exists but its remote URL does not match."""
+
+
+@dataclass(frozen=True)
+class CloneStatus:
+    """Result of an SCM clone-presence check.
+
+    Returned by `ScmEnvironment.is_cloned()`.  Carries the
+    discriminator `kind` together with the actual remote URL
+    (when available) so callers can produce diagnostic messages
+    without re-querying the SCM tool.
+    """
+
+    kind: CloneStatusKind
+    """The high-level result of the check."""
+
+    remote_url: str | None = None
+    """The remote URL found at the destination, if any."""
+
+
 class SkipReason(Enum):
     """Machine-readable reason an action was skipped.
 

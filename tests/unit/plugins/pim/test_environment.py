@@ -24,23 +24,33 @@ def environment() -> PIMEnvironment:
 class TestPIMBasics:
     """Basic property tests."""
 
-    def test_ecosystem(self) -> None:
+    @staticmethod
+    def test_ecosystem() -> None:
+        """Ecosystem returns python."""
         assert PIMEnvironment.ecosystem() == 'python'
 
-    def test_plugin_kind(self) -> None:
+    @staticmethod
+    def test_plugin_kind() -> None:
+        """Plugin kind is RUNTIME."""
         assert PIMEnvironment.plugin_kind() == PluginKind.RUNTIME
 
-    def test_tool_name(self) -> None:
+    @staticmethod
+    def test_tool_name() -> None:
+        """Tool name is py."""
         assert PIMEnvironment.tool_name() == 'py'
 
-    def test_implements_runtime_provider(self, environment: PIMEnvironment) -> None:
+    @staticmethod
+    def test_implements_runtime_provider(environment: PIMEnvironment) -> None:
+        """PIMEnvironment implements RuntimeProvider."""
         assert isinstance(environment, RuntimeProvider)
 
 
 class TestResolveExecutable:
     """Tests for resolve_executable."""
 
-    def test_resolve_success(self, environment: PIMEnvironment) -> None:
+    @staticmethod
+    def test_resolve_success(environment: PIMEnvironment) -> None:
+        """Successful resolution returns the executable path."""
         exe_path = r'C:\Users\user\AppData\Local\Programs\Python\Python314\python.exe'
         with (
             patch('subprocess.run') as mock_run,
@@ -59,18 +69,24 @@ class TestResolveExecutable:
                 timeout=30,
             )
 
-    def test_resolve_not_installed(self, environment: PIMEnvironment) -> None:
+    @staticmethod
+    def test_resolve_not_installed(environment: PIMEnvironment) -> None:
+        """Returns None when version is not installed."""
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = subprocess.CalledProcessError(1, 'py', stderr='not found')
             result = environment.resolve_executable('3.99')
             assert result is None
 
-    def test_resolve_py_missing(self, environment: PIMEnvironment) -> None:
+    @staticmethod
+    def test_resolve_py_missing(environment: PIMEnvironment) -> None:
+        """Returns None when py launcher is missing."""
         with patch('subprocess.run', side_effect=FileNotFoundError):
             result = environment.resolve_executable('3.14')
             assert result is None
 
-    def test_resolve_path_does_not_exist(self, environment: PIMEnvironment) -> None:
+    @staticmethod
+    def test_resolve_path_does_not_exist(environment: PIMEnvironment) -> None:
+        """Returns None when resolved path does not exist."""
         with (
             patch('subprocess.run') as mock_run,
             patch.object(Path, 'exists', return_value=False),

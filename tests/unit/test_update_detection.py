@@ -73,6 +73,7 @@ class TestIsPackageInstalledReturnsTuple3:
 
     @staticmethod
     def test_installed_returns_matched_package() -> None:
+        """Installed package returns a match."""
         pkg = PackageRef.model_validate('ruff')
         installed = Package(name='ruff', version='0.8.0')
         ok, detail, matched = is_package_installed(pkg, [installed], 'pep440')
@@ -82,6 +83,7 @@ class TestIsPackageInstalledReturnsTuple3:
 
     @staticmethod
     def test_not_installed_returns_none() -> None:
+        """Missing package returns None."""
         pkg = PackageRef.model_validate('ruff')
         ok, detail, matched = is_package_installed(pkg, [], 'pep440')
         assert ok is False
@@ -99,24 +101,28 @@ class TestCheckForNewerVersion:
 
     @staticmethod
     def test_returns_newer_version() -> None:
+        """Newer version is returned when available."""
         env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
         result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
         assert result == '0.9.0'
 
     @staticmethod
     def test_returns_none_when_up_to_date() -> None:
+        """None is returned when already up to date."""
         env = _make_env(updates=[Package(name='ruff', version='0.8.0')])
         result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
         assert result is None
 
     @staticmethod
     def test_returns_none_when_plugin_has_no_updates() -> None:
+        """None is returned when the plugin reports no updates."""
         env = _make_env(updates=[])
         result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
         assert result is None
 
     @staticmethod
     def test_raises_when_plugin_raises() -> None:
+        """UpdateCheckError is raised when the plugin raises."""
         env = _make_env()
         env.check_updates.side_effect = RuntimeError('boom')
         with pytest.raises(UpdateCheckError):
@@ -124,6 +130,7 @@ class TestCheckForNewerVersion:
 
     @staticmethod
     def test_forwards_include_prereleases() -> None:
+        """The include_prereleases flag is forwarded to the plugin."""
         env = _make_env(updates=[Package(name='ruff', version='0.9.0a1')])
         asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True))
         call_args = env.check_updates.call_args
@@ -132,6 +139,7 @@ class TestCheckForNewerVersion:
 
     @staticmethod
     def test_returns_newer_prerelease() -> None:
+        """Newer prerelease is returned when opted in."""
         env = _make_env(updates=[Package(name='ruff', version='0.9.0a1')])
         result = asyncio.run(
             check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True)
@@ -454,6 +462,7 @@ class TestDryRunActionDispatch:
 
     @staticmethod
     def test_parameters_threaded_to_package_action() -> None:
+        """Parameters are threaded through to the package action."""
         action = _make_action()
         env = _make_env(
             installed=[Package(name='ruff', version='0.8.0')],
@@ -486,11 +495,13 @@ class TestSetupParametersDefaults:
 
     @staticmethod
     def test_defaults() -> None:
+        """Default parameters disable update detection."""
         params = SetupParameters()
         assert params.detect_updates is False
 
     @staticmethod
     def test_explicit_values() -> None:
+        """Explicit values override defaults."""
         params = SetupParameters(detect_updates=True)
         assert params.detect_updates is True
 
@@ -505,6 +516,7 @@ class TestSetupActionResultVersionFields:
 
     @staticmethod
     def test_defaults_are_none() -> None:
+        """Version fields default to None."""
         action = _make_action()
         result = SetupActionResult(action=action, success=True)
         assert result.installed_version is None
@@ -512,6 +524,7 @@ class TestSetupActionResultVersionFields:
 
     @staticmethod
     def test_explicit_values() -> None:
+        """Explicit version values are preserved."""
         action = _make_action()
         result = SetupActionResult(
             action=action,
@@ -789,7 +802,8 @@ class TestPluginSpec:
                 {'name': 'another-plugin', 'include_prereleases': True},
             ],
         })
-        assert len(spec.plugins) == 2
+        expected_plugin_count = 2
+        assert len(spec.plugins) == expected_plugin_count
         assert spec.plugins[0].name.name == 'cppython'
         assert spec.plugins[0].include_prereleases is False
         assert spec.plugins[1].name.name == 'another-plugin'

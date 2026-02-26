@@ -64,7 +64,8 @@ class TestBootstrapPreview:
         is not currently available — this is expected and correct.
         """
         tool_actions = [a for a in preview.actions if a.kind == PluginKind.TOOL and a.ecosystem == 'python']
-        assert len(tool_actions) == 2
+        expected_tool_count = 2
+        assert len(tool_actions) == expected_tool_count
         assert tool_actions[0].package is not None
         assert tool_actions[0].package.name == 'pdm'
         assert tool_actions[1].package is not None

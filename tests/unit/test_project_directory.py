@@ -38,8 +38,9 @@ class TestProjectDirectorySkip:
             params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
             results = test_api.sync.run(params)
 
-            # Should show all actions (2: 1 package + 1 command)
-            assert results.total_actions == 2
+            # Should show all actions (1 package + 1 command)
+            expected_action_count = 2
+            assert results.total_actions == expected_action_count
 
             # The RUN_COMMAND should NOT be skipped — post_sync is decoupled
             command_skips = [r for r in results.skips if r.action.kind is None]
@@ -172,7 +173,8 @@ class TestBatchSetupResultsSkips:
         assert batch.total_skipped == 0
         assert batch.skips == []
 
-    def test_skips_carries_action_metadata(self) -> None:
+    @staticmethod
+    def test_skips_carries_action_metadata() -> None:
         """Each skipped result carries full action metadata."""
         action = SetupAction(
             description='Sync project via uv',

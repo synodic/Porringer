@@ -24,31 +24,45 @@ def environment() -> PyenvEnvironment:
 class TestPyenvBasics:
     """Basic property tests."""
 
-    def test_ecosystem(self) -> None:
+    @staticmethod
+    def test_ecosystem() -> None:
+        """Ecosystem returns python."""
         assert PyenvEnvironment.ecosystem() == 'python'
 
-    def test_plugin_kind(self) -> None:
+    @staticmethod
+    def test_plugin_kind() -> None:
+        """Plugin kind is RUNTIME."""
         assert PyenvEnvironment.plugin_kind() == PluginKind.RUNTIME
 
-    def test_tool_name(self) -> None:
+    @staticmethod
+    def test_tool_name() -> None:
+        """Tool name is pyenv."""
         assert PyenvEnvironment.tool_name() == 'pyenv'
 
-    def test_install_command(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_install_command(environment: PyenvEnvironment) -> None:
+        """Install command uses pyenv install."""
         ref = PackageRef(name='3.14.0')
         assert environment.install_command(ref) == ['pyenv', 'install', '3.14.0']
 
-    def test_upgrade_command(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_upgrade_command(environment: PyenvEnvironment) -> None:
+        """Upgrade command adds skip-existing flag."""
         ref = PackageRef(name='3.14.0')
         assert environment.upgrade_command(ref) == ['pyenv', 'install', '--skip-existing', '3.14.0']
 
-    def test_implements_runtime_provider(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_implements_runtime_provider(environment: PyenvEnvironment) -> None:
+        """PyenvEnvironment implements RuntimeProvider."""
         assert isinstance(environment, RuntimeProvider)
 
 
 class TestResolveExecutable:
     """Tests for resolve_executable."""
 
-    def test_resolve_success(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_resolve_success(environment: PyenvEnvironment) -> None:
+        """Successful resolution returns the executable path."""
         prefix = '/home/user/.pyenv/versions/3.14.0'
         exe = Path(prefix) / 'bin' / 'python'
         with (
@@ -59,13 +73,17 @@ class TestResolveExecutable:
             result = environment.resolve_executable('3.14.0')
             assert result == exe
 
-    def test_resolve_not_installed(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_resolve_not_installed(environment: PyenvEnvironment) -> None:
+        """Returns None when version is not installed."""
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = subprocess.CalledProcessError(1, 'pyenv', stderr='not installed')
             result = environment.resolve_executable('3.99.0')
             assert result is None
 
-    def test_resolve_pyenv_missing(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_resolve_pyenv_missing(environment: PyenvEnvironment) -> None:
+        """Returns None when pyenv is not on PATH."""
         with patch('subprocess.run', side_effect=FileNotFoundError):
             result = environment.resolve_executable('3.14.0')
             assert result is None
@@ -74,22 +92,29 @@ class TestResolveExecutable:
 class TestPackages:
     """Tests for packages()."""
 
-    def test_packages_success(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_packages_success(environment: PyenvEnvironment) -> None:
+        """Packages returns installed versions."""
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout='3.12.4\n3.14.0\n', stderr=''
             )
             pkgs = environment.packages()
-            assert len(pkgs) == 2
+            expected_package_count = 2
+            assert len(pkgs) == expected_package_count
             assert pkgs[0].name == '3.12.4'
             assert pkgs[1].name == '3.14.0'
 
-    def test_packages_empty(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_packages_empty(environment: PyenvEnvironment) -> None:
+        """Empty output returns empty list."""
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout='', stderr='')
             assert environment.packages() == []
 
-    def test_packages_pyenv_missing(self, environment: PyenvEnvironment) -> None:
+    @staticmethod
+    def test_packages_pyenv_missing(environment: PyenvEnvironment) -> None:
+        """Returns empty list when pyenv is not on PATH."""
         with patch('subprocess.run', side_effect=FileNotFoundError):
             assert environment.packages() == []
 

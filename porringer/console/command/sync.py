@@ -46,6 +46,20 @@ class _ProgressState:
     overall_task: TaskID | None = None
 
 
+@dataclass
+class _SyncOptions:
+    """Bundled options for manifest sync execution."""
+
+    path: Path | None = None
+    all_cached: bool = False
+    dry_run: bool = False
+    timeout: int = DEFAULT_TIMEOUT
+    fail_fast: bool = True
+    strategy: SyncStrategy = SyncStrategy.MINIMAL
+    project_directory: Path | None = None
+    plugins: list[str] | None = None
+
+
 def _create_api(configuration: ConsoleConfiguration) -> API:
     """Create and return API instance.
 
@@ -72,121 +86,103 @@ def _action_description(action: SetupAction) -> str:
     return str(action.package) if action.package else action.description[:30]
 
 
-def _handle_action_started(
-    action_desc: str,
-    progress: Progress,
-    setup_params: SetupParameters,
-    total_actions: int,
-    state: _ProgressState,
-) -> None:
-    if total_actions > 0 and not setup_params.dry_run:
-        task_id = progress.add_task(f'  {action_desc}', total=1)
-        state.active_tasks[action_desc] = task_id
+@dataclass
+class _ProgressTracker:
+    """Tracks progress during streaming execution, reducing parameter passing."""
 
+    progress: Progress
+    setup_params: SetupParameters
+    state: _ProgressState
 
-def _handle_action_completed(
-    action_desc: str,
-    result: SetupActionResult | None,
-    progress: Progress,
-    setup_params: SetupParameters,
-    total_actions: int,
-    overall_task: TaskID | None,
-    state: _ProgressState,
-) -> None:
-    if result:
-        state.collected_results.append(result)
+    def handle_action_started(self, action_desc: str, total_actions: int) -> None:
+        """Record that an action has started."""
+        if total_actions > 0 and not self.setup_params.dry_run:
+            task_id = self.progress.add_task(f'  {action_desc}', total=1)
+            self.state.active_tasks[action_desc] = task_id
 
-    if action_desc in state.active_tasks:
-        task_id = state.active_tasks.pop(action_desc)
-        if result and result.success:
-            if result.skipped:
-                progress.update(task_id, description=f'  [dim]{action_desc} (skipped)[/dim]', completed=1)
+    def handle_action_completed(
+        self,
+        action_desc: str,
+        result: SetupActionResult | None,
+        total_actions: int,
+    ) -> None:
+        """Record that an action has completed and update the progress bar."""
+        if result:
+            self.state.collected_results.append(result)
+
+        if action_desc in self.state.active_tasks:
+            task_id = self.state.active_tasks.pop(action_desc)
+            if result and result.success:
+                if result.skipped:
+                    self.progress.update(task_id, description=f'  [dim]{action_desc} (skipped)[/dim]', completed=1)
+                else:
+                    self.progress.update(task_id, description=f'  [green]{action_desc}[/green]', completed=1)
             else:
-                progress.update(task_id, description=f'  [green]{action_desc}[/green]', completed=1)
+                self.progress.update(task_id, description=f'  [red]{action_desc}[/red]', completed=1)
+
+        self.state.completed += 1
+        overall_task = self.state.overall_task
+        if total_actions > 0 and not self.setup_params.dry_run and overall_task is not None:
+            self.progress.update(overall_task, completed=self.state.completed)
+
+    def handle_sub_action_progress(self, action_desc: str, sub: SubActionProgress | None) -> None:
+        """Update the progress bar with sub-action detail."""
+        if sub is None or action_desc not in self.state.active_tasks:
+            return
+
+        task_id = self.state.active_tasks[action_desc]
+        phase = sub.phase
+
+        desc = f'  {action_desc} [{phase}] {sub.message}' if sub.message else f'  {action_desc} [{phase}]'
+
+        max_desc_len = 80
+        if len(desc) > max_desc_len:
+            desc = desc[: max_desc_len - 3] + '...'
+
+        if sub.progress is not None:
+            self.progress.update(task_id, description=desc, completed=sub.progress, total=1.0)
         else:
-            progress.update(task_id, description=f'  [red]{action_desc}[/red]', completed=1)
+            self.progress.update(task_id, description=desc)
 
-    state.completed += 1
-    if total_actions > 0 and not setup_params.dry_run and overall_task is not None:
-        progress.update(overall_task, completed=state.completed)
+    def handle_progress_event(self, event: ProgressEvent, total_actions: int) -> None:
+        """Dispatch a progress event to the appropriate handler."""
+        if event.action is None:
+            return
+        action_desc = _action_description(event.action)
 
-
-def _handle_sub_action_progress(
-    action_desc: str,
-    sub: SubActionProgress | None,
-    progress: Progress,
-    state: _ProgressState,
-) -> None:
-    if sub is None or action_desc not in state.active_tasks:
-        return
-
-    task_id = state.active_tasks[action_desc]
-    phase = sub.phase
-
-    desc = f'  {action_desc} [{phase}] {sub.message}' if sub.message else f'  {action_desc} [{phase}]'
-
-    max_desc_len = 80
-    if len(desc) > max_desc_len:
-        desc = desc[: max_desc_len - 3] + '...'
-
-    if sub.progress is not None:
-        progress.update(task_id, description=desc, completed=sub.progress, total=1.0)
-    else:
-        progress.update(task_id, description=desc)
+        if event.kind == ProgressEventKind.ACTION_STARTED:
+            self.handle_action_started(action_desc, total_actions)
+            return
+        if event.kind == ProgressEventKind.ACTION_COMPLETED:
+            self.handle_action_completed(action_desc, event.result, total_actions)
+            return
+        if event.kind == ProgressEventKind.SUB_ACTION_PROGRESS:
+            self.handle_sub_action_progress(action_desc, event.sub_action)
 
 
-def _handle_progress_event(
-    event: ProgressEvent,
-    progress: Progress,
-    setup_params: SetupParameters,
-    total_actions: int,
-    overall_task: TaskID | None,
-    state: _ProgressState,
-) -> None:
-    if event.action is None:
-        return
-    action_desc = _action_description(event.action)
+async def _run_stream_with_progress(api: API, tracker: _ProgressTracker) -> None:
+    """Stream sync events and update progress display.
 
-    if event.kind == ProgressEventKind.ACTION_STARTED:
-        _handle_action_started(action_desc, progress, setup_params, total_actions, state)
-        return
-    if event.kind == ProgressEventKind.ACTION_COMPLETED:
-        _handle_action_completed(
-            action_desc,
-            event.result,
-            progress,
-            setup_params,
-            total_actions,
-            overall_task,
-            state,
-        )
-        return
-    if event.kind == ProgressEventKind.SUB_ACTION_PROGRESS:
-        _handle_sub_action_progress(action_desc, event.sub_action, progress, state)
-
-
-async def _run_stream_with_progress(
-    api: API,
-    setup_params: SetupParameters,
-    progress: Progress,
-    overall_task: TaskID | None,
-    state: _ProgressState,
-) -> None:
-    async for event in api.sync.execute_stream(setup_params):
+    Args:
+        api: The API instance.
+        tracker: Progress tracker with state and display.
+    """
+    async for event in api.sync.execute_stream(tracker.setup_params):
         if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
-            state.manifests.append(event.manifest)
-            total = sum(len(m.actions) for m in state.manifests)
-            if overall_task is not None:
-                progress.update(overall_task, total=total)
-            elif total > 0 and not setup_params.dry_run:
-                overall_task = progress.add_task(_progress_label(setup_params.strategy), total=total)
-                state.overall_task = overall_task
+            tracker.state.manifests.append(event.manifest)
+            total = sum(len(m.actions) for m in tracker.state.manifests)
+            if tracker.state.overall_task is not None:
+                tracker.progress.update(tracker.state.overall_task, total=total)
+            elif total > 0 and not tracker.setup_params.dry_run:
+                tracker.state.overall_task = tracker.progress.add_task(
+                    _progress_label(tracker.setup_params.strategy), total=total
+                )
             continue
         if event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
-            state.failed_paths.append(event.failed_path)
+            tracker.state.failed_paths.append(event.failed_path)
             continue
-        total_actions = sum(len(m.actions) for m in state.manifests)
-        _handle_progress_event(event, progress, setup_params, total_actions, state.overall_task or overall_task, state)
+        total_actions = sum(len(m.actions) for m in tracker.state.manifests)
+        tracker.handle_progress_event(event, total_actions)
 
 
 def _format_cli_command(result: SetupActionResult) -> str:
@@ -305,30 +301,12 @@ def _display_results(
     _display_summary(configuration, results, dry_run, strategy)
 
 
-def _handle_manifest(
-    configuration: ConsoleConfiguration,
-    *,
-    path: Path | None = None,
-    all_cached: bool = False,
-    dry_run: bool = False,
-    timeout: int = DEFAULT_TIMEOUT,
-    fail_fast: bool = True,
-    strategy: SyncStrategy = SyncStrategy.MINIMAL,
-    project_directory: Path | None = None,
-    plugins: list[str] | None = None,
-) -> None:
+def _handle_manifest(configuration: ConsoleConfiguration, options: _SyncOptions) -> None:
     """Handle manifest install execution.
 
     Args:
         configuration: CLI configuration.
-        path: Path to manifest file or directory.
-        all_cached: Use all cached directories.
-        dry_run: Preview without executing.
-        timeout: Timeout in seconds for commands.
-        fail_fast: Stop on first error.
-        strategy: Sync strategy.
-        project_directory: Working directory for project-sync and post-sync actions.
-        plugins: Plugin names to include. `None` means all plugins.
+        options: Bundled sync options.
 
     Raises:
         typer.Exit: On error.
@@ -336,40 +314,40 @@ def _handle_manifest(
     api = _create_api(configuration)
 
     # Determine what paths to use
-    if all_cached:
+    if options.all_cached:
         setup_params = SetupParameters(
             paths=None,
-            project_directory=project_directory,
-            timeout=timeout,
-            fail_fast=fail_fast,
-            dry_run=dry_run,
-            strategy=strategy,
-            plugins=plugins,
+            project_directory=options.project_directory,
+            timeout=options.timeout,
+            fail_fast=options.fail_fast,
+            dry_run=options.dry_run,
+            strategy=options.strategy,
+            plugins=options.plugins,
         )
-    elif path:
-        if not path.exists():
-            configuration.console.print(f'[red]Error:[/red] Path does not exist: {path}')
+    elif options.path:
+        if not options.path.exists():
+            configuration.console.print(f'[red]Error:[/red] Path does not exist: {options.path}')
             raise typer.Exit(EXIT_FAILURE)
-        resolved_path = path.resolve()
+        resolved_path = options.path.resolve()
         setup_params = SetupParameters(
             paths=resolved_path,
-            project_directory=project_directory,
-            timeout=timeout,
-            fail_fast=fail_fast,
-            dry_run=dry_run,
-            strategy=strategy,
-            plugins=plugins,
+            project_directory=options.project_directory,
+            timeout=options.timeout,
+            fail_fast=options.fail_fast,
+            dry_run=options.dry_run,
+            strategy=options.strategy,
+            plugins=options.plugins,
         )
     else:
         # Default to current directory
         setup_params = SetupParameters(
             paths=Path('.').resolve(),
-            project_directory=project_directory,
-            timeout=timeout,
-            fail_fast=fail_fast,
-            dry_run=dry_run,
-            strategy=strategy,
-            plugins=plugins,
+            project_directory=options.project_directory,
+            timeout=options.timeout,
+            fail_fast=options.fail_fast,
+            dry_run=options.dry_run,
+            strategy=options.strategy,
+            plugins=options.plugins,
         )
 
     # For dry runs, use the simple sync method (no progress bar needed).
@@ -393,7 +371,7 @@ def _handle_manifest(
         configuration.console.print('[yellow]No actions to execute[/yellow]')
         return
 
-    _display_results(configuration, execute_results, dry_run, strategy)
+    _display_results(configuration, execute_results, options.dry_run, options.strategy)
 
     if not execute_results.success:
         raise typer.Exit(EXIT_FAILURE)
@@ -431,15 +409,8 @@ def _execute_with_progress(
         transient=True,
         disable=setup_params.dry_run,
     ) as progress:
-        asyncio.run(
-            _run_stream_with_progress(
-                api,
-                setup_params,
-                progress,
-                None,
-                state,
-            )
-        )
+        tracker = _ProgressTracker(progress=progress, setup_params=setup_params, state=state)
+        asyncio.run(_run_stream_with_progress(api, tracker))
 
     # Build BatchSetupResults from collected events
     # Partition results by manifest using action identity
@@ -547,12 +518,14 @@ def sync_default(
 
     _handle_manifest(
         configuration,
-        path=path,
-        all_cached=all_cached,
-        dry_run=dry_run,
-        timeout=timeout,
-        fail_fast=fail_fast,
-        strategy=sync_strategy,
-        project_directory=project_dir.resolve() if project_dir else None,
-        plugins=plugin if plugin else None,
+        _SyncOptions(
+            path=path,
+            all_cached=all_cached,
+            dry_run=dry_run,
+            timeout=timeout,
+            fail_fast=fail_fast,
+            strategy=sync_strategy,
+            project_directory=project_dir.resolve() if project_dir else None,
+            plugins=plugin if plugin else None,
+        ),
     )

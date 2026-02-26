@@ -96,12 +96,14 @@ class TestResolverAlphabeticalOrder:
 
     @staticmethod
     def test_single_candidate_selected() -> None:
+        """Single candidate is selected."""
         plugins = {'alpha': _make('alpha')}
         resolver = BackendResolver(plugins)
         assert resolver.resolve(PluginKind.PACKAGE, Ecosystem('test')) == 'alpha'
 
     @staticmethod
     def test_alphabetically_first_wins() -> None:
+        """Alphabetically first plugin wins."""
         plugins = {
             'charlie': _make('charlie'),
             'alpha': _make('alpha'),
@@ -112,6 +114,7 @@ class TestResolverAlphabeticalOrder:
 
     @staticmethod
     def test_order_independent_of_insertion() -> None:
+        """Resolution is independent of insertion order."""
         plugins_a = {'z': _make('z'), 'a': _make('a')}
         plugins_b = {'a': _make('a'), 'z': _make('z')}
         assert BackendResolver(plugins_a).resolve(PluginKind.PACKAGE, Ecosystem('test')) == 'a'
@@ -123,6 +126,7 @@ class TestResolverPreferences:
 
     @staticmethod
     def test_preference_overrides_alphabetical() -> None:
+        """Explicit preference overrides alphabetical order."""
         plugins = {
             'alpha': _make('alpha'),
             'bravo': _make('bravo'),
@@ -132,6 +136,7 @@ class TestResolverPreferences:
 
     @staticmethod
     def test_unavailable_preference_falls_back() -> None:
+        """Unavailable preferred plugin falls back to next candidate."""
         plugins = {
             'alpha': _make('alpha'),
             'bravo': _make('bravo', available=False),
@@ -141,6 +146,7 @@ class TestResolverPreferences:
 
     @staticmethod
     def test_unsupported_preference_falls_back() -> None:
+        """Unsupported preferred plugin falls back to next candidate."""
         plugins = {
             'alpha': _make('alpha'),
             'bravo': _make('bravo', supported=False),
@@ -150,6 +156,7 @@ class TestResolverPreferences:
 
     @staticmethod
     def test_unknown_preference_falls_back() -> None:
+        """Unknown preferred plugin falls back to next candidate."""
         plugins = {'alpha': _make('alpha')}
         resolver = BackendResolver(plugins, preferences={Ecosystem('test'): 'nonexistent'})
         assert resolver.resolve(PluginKind.PACKAGE, Ecosystem('test')) == 'alpha'
@@ -160,6 +167,7 @@ class TestResolverPlatformSupport:
 
     @staticmethod
     def test_unsupported_plugin_excluded() -> None:
+        """Unsupported plugin is excluded from resolution."""
         plugins = {
             'only': _make('only', supported=False),
         }
@@ -168,6 +176,7 @@ class TestResolverPlatformSupport:
 
     @staticmethod
     def test_unsupported_skipped_in_favour_of_supported() -> None:
+        """Unsupported plugin is skipped in favour of supported one."""
         plugins = {
             'alpha': _make('alpha', supported=False),
             'bravo': _make('bravo'),
@@ -177,6 +186,7 @@ class TestResolverPlatformSupport:
 
     @staticmethod
     def test_all_unsupported_returns_none() -> None:
+        """All unsupported plugins returns None."""
         plugins = {
             'alpha': _make('alpha', supported=False),
             'bravo': _make('bravo', supported=False),
@@ -190,6 +200,7 @@ class TestResolverAvailability:
 
     @staticmethod
     def test_unavailable_plugin_skipped() -> None:
+        """Unavailable plugin is skipped."""
         plugins = {
             'alpha': _make('alpha', available=False),
             'bravo': _make('bravo'),
@@ -199,6 +210,7 @@ class TestResolverAvailability:
 
     @staticmethod
     def test_all_unavailable_returns_none() -> None:
+        """All unavailable plugins returns None."""
         plugins = {
             'alpha': _make('alpha', available=False),
             'bravo': _make('bravo', available=False),
@@ -212,6 +224,7 @@ class TestResolverEcosystemIsolation:
 
     @staticmethod
     def test_different_ecosystems_resolved_independently() -> None:
+        """Different ecosystems are resolved independently."""
         plugins = {
             'a-py': _make('a-py', ecosystem=Ecosystem('python')),
             'b-node': _make('b-node', ecosystem=Ecosystem('node')),
@@ -222,6 +235,7 @@ class TestResolverEcosystemIsolation:
 
     @staticmethod
     def test_different_kinds_resolved_independently() -> None:
+        """Different plugin kinds are resolved independently."""
         plugins = {
             'pkg': _make('pkg', kind=PluginKind.PACKAGE),
             'proj': _make('proj', kind=PluginKind.PROJECT),
@@ -232,6 +246,7 @@ class TestResolverEcosystemIsolation:
 
     @staticmethod
     def test_unregistered_pair_returns_none() -> None:
+        """Unregistered kind-ecosystem pair returns None."""
         plugins = {'alpha': _make('alpha', ecosystem=Ecosystem('python'))}
         resolver = BackendResolver(plugins)
         assert resolver.resolve(PluginKind.PACKAGE, Ecosystem('node')) is None
