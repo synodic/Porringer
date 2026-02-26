@@ -13,8 +13,7 @@ from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.plugin_schema.scm import ScmEnvironment
-from porringer.core.schema import PackageRef, PluginKind
+from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.schema import (
     ManifestMetadata,
     SetupAction,
@@ -24,7 +23,7 @@ from porringer.schema import (
 )
 
 from ..manifest import find_manifest
-from .discovery import discover_all_plugins
+from .discovery import DiscoveredPlugins, discover_all_plugins
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +53,14 @@ def action_description(
     installer: str | None,
     package: PackageRef | None = None,
     plugin_target: PackageRef | None = None,
+    *,
+    registered: bool = True,
 ) -> str:
     """Build a human-readable action description.
 
-    Centralises the ``via <installer>`` / ``(deferred)`` pattern used
-    in both `build_actions` (preview time) and `_resolve_deferred_actions`
-    (execution time).
+    Centralises the ``via <installer>`` / ``(deferred)`` / ``(no plugin)``
+    pattern used in both `build_actions` (preview time) and
+    `resolve_deferred_actions` (execution time).
 
     Args:
         kind: The plugin kind.
@@ -67,11 +68,19 @@ def action_description(
         installer: Resolved installer name, or ``None`` for deferred.
         package: The target package (may be ``None`` for PROJECT).
         plugin_target: Parent tool for plugin-management actions.
+        registered: When *installer* is ``None``, distinguishes
+            ``(deferred)`` (registered but unavailable) from
+            ``(no plugin)`` (not registered at all).
 
     Returns:
         Formatted description string.
     """
-    suffix = f'via {installer}' if installer else '(deferred)'
+    if installer:
+        suffix = f'via {installer}'
+    elif registered:
+        suffix = '(deferred)'
+    else:
+        suffix = '(no plugin)'
 
     if kind == PluginKind.PROJECT:
         return f'Sync project {suffix}'
@@ -112,23 +121,23 @@ def _get_plugin_cli_command(
 
 def get_cli_command(
     action: SetupAction,
-    environments: dict[str, Environment],
+    plugins: DiscoveredPlugins,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
-    scm_environments: dict[str, ScmEnvironment] | None = None,
 ) -> list[str]:
     """Gets the CLI command string for an action.
 
     Args:
         action: The action to get the command for.
-        environments: Dict of instantiated environment plugins.
+        plugins: Discovered plugin container.
         strategy: The sync strategy (determines install vs upgrade command).
-        project_environments: Dict of project-environment plugins.
-        scm_environments: Dict of SCM-environment plugins.
 
     Returns:
         The CLI command as a list of strings, or empty list if not applicable.
     """
+    environments = plugins.environments
+    project_environments = plugins.project_environments
+    scm_environments = plugins.scm_environments
+
     cmd: list[str] = []
     match action.kind:
         case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
@@ -154,12 +163,34 @@ def get_cli_command(
     return cmd
 
 
+def _log_unresolved(resolver: BackendResolver, kind: PluginKind, ecosystem: Ecosystem) -> None:
+    """Log an appropriate message when no installer could be resolved.
+
+    Distinguishes between a completely unregistered ``(kind, ecosystem)``
+    pair (ERROR — will never self-resolve) and a registered-but-unavailable
+    pair (INFO — may become available after a preceding phase).
+    """
+    if not resolver.is_registered(kind, ecosystem):
+        logger.error(
+            "No plugin registered for (%s, '%s'). "
+            'Ensure all required plugin packages are installed '
+            'with their entry points available to porringer.',
+            kind.value,
+            ecosystem,
+        )
+    else:
+        logger.info(
+            "Plugin(s) %s registered for (%s, '%s') but unavailable; deferring",
+            resolver.registered_names(kind, ecosystem),
+            kind.value,
+            ecosystem,
+        )
+
+
 def build_actions(
     manifest: SetupManifest,
-    environments: dict[str, Environment],
+    plugins: DiscoveredPlugins | dict[str, Environment],
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
-    scm_environments: dict[str, ScmEnvironment] | None = None,
 ) -> list[SetupAction]:
     """Builds the list of actions from a manifest.
 
@@ -172,20 +203,21 @@ def build_actions(
 
     Args:
         manifest: The parsed setup manifest.
-        environments: Dict of instantiated environment plugins.
+        plugins: Discovered plugin container, **or** a plain
+            ``dict[str, Environment]`` for backward compatibility
+            with existing callers / tests.
         strategy: The sync strategy (used for description text).
-        project_environments: Dict of project-environment plugins.
-        scm_environments: Dict of SCM-environment plugins.
 
     Returns:
         List of actions to perform.
     """
-    actions: list[SetupAction] = []
-    proj_envs = project_environments or {}
-    scm_envs = scm_environments or {}
+    # Accept a plain environments dict for backward compat (tests, etc.)
+    if isinstance(plugins, dict):
+        plugins = DiscoveredPlugins(environments=plugins, project_environments={}, scm_environments={})
 
-    all_plugins = {**environments, **proj_envs, **scm_envs}
-    resolver = BackendResolver(all_plugins, manifest.preferences)
+    actions: list[SetupAction] = []
+
+    resolver = BackendResolver(plugins.all_plugins, manifest.preferences)
 
     verb = STRATEGY_VERB[strategy]
 
@@ -193,25 +225,16 @@ def build_actions(
     for kind, ecosystem, packages in manifest.iter_sections():
         installer = resolver.resolve(kind, ecosystem)
 
-        # Actions of any kind are deferred when no backend is
-        # available at preview time — the prerequisite may be installed
-        # in an earlier phase (e.g. pip becomes available after pim
-        # installs a Python runtime, pipx becomes available after pip
-        # installs it, pyenv is installed via brew, etc.).  The
-        # execution engine re-discovers plugins and resolves deferred
-        # actions at each phase boundary.
         if installer is None:
-            logger.info(
-                "No installer available yet for (%s, '%s'); deferring its entries",
-                kind.value,
-                ecosystem,
-            )
+            _log_unresolved(resolver, kind, ecosystem)
+
+        is_registered = installer is not None or resolver.is_registered(kind, ecosystem)
 
         # Project kind produces a single sync action
         if kind == PluginKind.PROJECT:
             actions.append(
                 SetupAction(
-                    description=action_description(kind, verb, installer),
+                    description=action_description(kind, verb, installer, registered=is_registered),
                     kind=kind,
                     ecosystem=ecosystem,
                     installer=installer,
@@ -228,9 +251,16 @@ def build_actions(
                 # the repo URL as the package description so UI cards
                 # show *what* is being cloned.
                 scm_description = package.description or str(package.name)
+                desc = action_description(
+                    kind,
+                    verb,
+                    installer,
+                    package=package.name,
+                    registered=is_registered,
+                )
                 actions.append(
                     SetupAction(
-                        description=action_description(kind, verb, installer, package=package.name),
+                        description=desc,
                         kind=kind,
                         ecosystem=ecosystem,
                         installer=installer,
@@ -243,9 +273,16 @@ def build_actions(
         for package in packages:
             if not package.is_applicable():
                 continue
+            desc = action_description(
+                kind,
+                verb,
+                installer,
+                package=package.name,
+                registered=is_registered,
+            )
             actions.append(
                 SetupAction(
-                    description=action_description(kind, verb, installer, package=package.name),
+                    description=desc,
                     kind=kind,
                     ecosystem=ecosystem,
                     installer=installer,
@@ -265,6 +302,7 @@ def build_actions(
                             installer,
                             package=plugin_spec.name,
                             plugin_target=package.name,
+                            registered=is_registered,
                         ),
                         kind=kind,
                         ecosystem=ecosystem,
@@ -319,10 +357,8 @@ def _build_preview(
     plugins = discover_all_plugins(use_cache=use_cache)
     actions = build_actions(
         result.manifest,
-        plugins.environments,
+        plugins,
         strategy,
-        plugins.project_environments,
-        plugins.scm_environments,
     )
     metadata = ManifestMetadata(
         name=result.manifest.name,
@@ -336,6 +372,7 @@ def _build_preview(
         manifest_path=result.manifest_path,
         root_directory=result.root_directory,
         metadata=metadata,
+        preferences=dict(result.manifest.preferences),
     )
 
 

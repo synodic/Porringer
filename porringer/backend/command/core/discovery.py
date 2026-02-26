@@ -7,10 +7,10 @@ it without circular dependencies.
 """
 
 import importlib
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import NamedTuple
 
 from porringer.backend.builder import Builder
 from porringer.core.plugin_schema.environment import Environment
@@ -18,13 +18,39 @@ from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin
 
+logger = logging.getLogger(__name__)
 
-class DiscoveredPlugins(NamedTuple):
-    """Result of discovering all three plugin groups at once."""
+
+@dataclass
+class DiscoveredPlugins:
+    """Result of discovering all three plugin groups at once.
+
+    Provides :attr:`all_plugins` for a merged view and :meth:`copy`
+    for shallow-copying the dict fields (used by the execution engine
+    to prevent mutation from leaking back to callers).
+    """
 
     environments: dict[str, Environment]
     project_environments: dict[str, ProjectEnvironment]
     scm_environments: dict[str, ScmEnvironment]
+
+    @property
+    def all_plugins(self) -> dict[str, Environment | ProjectEnvironment | ScmEnvironment]:
+        """Merged view of every discovered plugin keyed by canonical name."""
+        return {**self.environments, **self.project_environments, **self.scm_environments}
+
+    def copy(self) -> DiscoveredPlugins:
+        """Return a shallow copy with independent dict instances.
+
+        Plugin objects themselves are shared; only the dict containers
+        are duplicated so that per-run mutations (e.g. setting
+        ``runtime_executable``) don't leak back to the shared cache.
+        """
+        return DiscoveredPlugins(
+            environments=dict(self.environments),
+            project_environments=dict(self.project_environments),
+            scm_environments=dict(self.scm_environments),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +106,9 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
 
     infos = Builder.find_plugins(group, base_class, **kwargs)
     instances = Builder.build_plugins(infos)
-    return {info.name: inst for info, inst in zip(infos, instances, strict=True)}
+    result = {info.name: inst for info, inst in zip(infos, instances, strict=True)}
+    logger.info('Discovered %d %s plugin(s): %s', len(result), group, sorted(result))
+    return result
 
 
 def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
@@ -103,12 +131,19 @@ def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
     """
     with _cache.lock:
         if use_cache and _cache.plugins is not None and (time.monotonic() - _cache.timestamp) < CACHE_TTL:
+            logger.debug('Plugin cache hit')
             return _cache.plugins
 
     result = DiscoveredPlugins(
         environments=discover_plugins('environment', Environment, check_dependencies=True),
         project_environments=discover_plugins('project_environment', ProjectEnvironment),
         scm_environments=discover_plugins('scm', ScmEnvironment),
+    )
+    logger.info(
+        'Plugin discovery complete — environments: %s, project: %s, scm: %s',
+        sorted(result.environments),
+        sorted(result.project_environments),
+        sorted(result.scm_environments),
     )
 
     with _cache.lock:

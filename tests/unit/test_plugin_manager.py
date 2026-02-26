@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from packaging.version import Version
 
 from porringer.backend.command.core.action_builder import get_cli_command
+from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.core.execution import PluginContext, execute_package
 from porringer.backend.command.core.presence import dry_run_action
 from porringer.backend.command.core.resolution import OperationKind, ResolutionContext, resolve_operation
@@ -25,6 +26,18 @@ from porringer.test.mock.plugin_manager import MockPluginManager
 
 _PY = Ecosystem('python')
 _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+
+
+def _make_plugins(
+    environments: dict[str, Environment] | None = None,
+    project_environments: dict[str, ProjectEnvironment] | None = None,
+) -> DiscoveredPlugins:
+    """Build a ``DiscoveredPlugins`` container for test helpers."""
+    return DiscoveredPlugins(
+        environments=environments or {},
+        project_environments=project_environments or {},
+        scm_environments={},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +214,7 @@ class TestCliCommandPreview:
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
+        cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.MINIMAL)
         assert cmd == mock_pm.plugin_add_command(ref)
 
     @staticmethod
@@ -223,7 +236,7 @@ class TestCliCommandPreview:
         environments: dict[str, Environment] = {'pipx': mock_env}
 
         with patch.object(type(pdm_env), 'is_available', return_value=False):
-            cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
+            cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.MINIMAL)
 
         assert cmd == []
 
@@ -242,7 +255,7 @@ class TestCliCommandPreview:
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, None)
+        cmd = get_cli_command(action, _make_plugins(environments), SyncStrategy.MINIMAL)
         assert cmd == []
 
 
@@ -981,7 +994,7 @@ class TestCliCommandUpgradePreview:
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        cmd = get_cli_command(action, environments, SyncStrategy.LATEST, project_environments)
+        cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.LATEST)
         assert cmd == mock_pm.plugin_update_command(ref)
 
     def test_exact_returns_update_command(self) -> None:
@@ -1002,7 +1015,7 @@ class TestCliCommandUpgradePreview:
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        cmd = get_cli_command(action, environments, SyncStrategy.EXACT, project_environments)
+        cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.EXACT)
         assert cmd == mock_pm.plugin_update_command(ref)
 
     def test_minimal_returns_add_command(self) -> None:
@@ -1023,7 +1036,7 @@ class TestCliCommandUpgradePreview:
         mock_env = MagicMock(spec=Environment)
         environments: dict[str, Environment] = {'pipx': mock_env}
 
-        cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
+        cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.MINIMAL)
         assert cmd == mock_pm.plugin_add_command(ref)
 
     @staticmethod
@@ -1046,7 +1059,7 @@ class TestCliCommandUpgradePreview:
         environments: dict[str, Environment] = {'pipx': mock_env}
 
         with patch.object(type(poetry_env), 'is_available', return_value=True):
-            cmd = get_cli_command(action, environments, SyncStrategy.LATEST, project_environments)
+            cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.LATEST)
 
         # Poetry delegates update to add â€” verify via protocol method
         assert cmd == poetry_env.plugin_update_command(ref)

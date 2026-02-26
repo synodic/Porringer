@@ -58,7 +58,10 @@ class Builder:
         """
         plugin_types: list[PluginInformation[T]] = []
 
-        for entry_point in list(metadata.entry_points(group=f'porringer.{group}')):
+        entry_points = list(metadata.entry_points(group=f'porringer.{group}'))
+        logger.debug('Entry points for porringer.%s: %s', group, [ep.name for ep in entry_points])
+
+        for entry_point in entry_points:
             try:
                 loaded_type = entry_point.load()
             except Exception as e:

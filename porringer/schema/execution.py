@@ -199,6 +199,8 @@ class SetupResults:
         manifest_path: The path to the manifest that was used.
         root_directory: The logical project root directory.
         metadata: Optional display metadata from the manifest.
+        preferences: Ecosystem → plugin-name preferences from the manifest,
+            forwarded to the execution engine for deferred resolution.
     """
 
     actions: list[SetupAction] = field(default_factory=list)
@@ -206,6 +208,7 @@ class SetupResults:
     manifest_path: Path | None = None
     root_directory: Path | None = None
     metadata: ManifestMetadata | None = None
+    preferences: dict[Ecosystem, str] = field(default_factory=dict)
 
 
 @dataclass

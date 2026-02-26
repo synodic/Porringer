@@ -19,7 +19,7 @@ from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
-from porringer.schema import SetupAction, SetupParameters
+from porringer.schema import SetupAction, SetupParameters, SetupResults
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -178,17 +178,24 @@ def _make_state(
     if runtime_actions:
         phases[PluginKind.RUNTIME] = runtime_actions
 
+    plugins = DiscoveredPlugins(
+        environments=environments or {},
+        project_environments=project_environments or {},
+        scm_environments={},
+    )
+    preview = SetupResults(
+        actions=actions,
+        root_directory=Path('.'),
+    )
+
     return ExecutionState(
         actions=actions,
         phases=phases,
-        environments=environments or {},
-        project_environments=project_environments,
-        scm_environments=None,
+        plugins=plugins,
         parameters=SetupParameters(),
         event_queue=None,
         manifest_directory=Path('.'),
-        fallback_dir=Path('.'),
-        skip_project=False,
+        preview=preview,
     )
 
 
