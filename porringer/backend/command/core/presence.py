@@ -10,18 +10,21 @@ from pathlib import Path
 
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import PluginKind
 from porringer.schema import (
     SetupAction,
     SetupActionResult,
     SetupParameters,
+    SkipReason,
     SyncStrategy,
 )
+from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 from .resolution import ResolutionContext, is_package_installed, resolve_operation, resolved_to_result
 
 # Re-export for backward compatibility with existing callers
-__all__ = ['async_dry_run_action', 'dry_run_action', 'is_package_installed']
+__all__ = ['async_dry_run_action', 'clone_status_to_result', 'dry_run_action', 'is_package_installed']
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,8 @@ async def async_dry_run_action(
     *,
     project_path: Path | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
+    scm_environments: dict[str, ScmEnvironment] | None = None,
+    working_dir: Path | None = None,
     parameters: SetupParameters | None = None,
 ) -> SetupActionResult:
     """Simulate executing an action in dry-run mode (async).
@@ -40,6 +45,9 @@ async def async_dry_run_action(
     :func:`resolve_operation` to determine what *would* happen, then
     maps the result to a ``SetupActionResult`` via
     :func:`resolved_to_result`.
+
+    For SCM actions, performs a lightweight ``is_cloned()`` check
+    when SCM environments and a working directory are provided.
 
     Post-sync commands (``kind is None``) always report success since
     they would unconditionally run during a real execution.
@@ -51,6 +59,9 @@ async def async_dry_run_action(
         project_environments: Optional dict of project-environment
             plugins, used to look up ``PluginManager`` instances for
             plugin-target presence checks.
+        scm_environments: Optional dict of SCM-environment plugins,
+            used for SCM clone presence detection.
+        working_dir: Working directory (manifest location) for SCM checks.
         parameters: Full setup parameters.  When provided, ``strategy``
             and ``detect_updates`` are read from it.  When ``None``,
             ``SyncStrategy.MINIMAL`` is used.
@@ -67,10 +78,105 @@ async def async_dry_run_action(
                 project_environments=project_environments,
                 parameters=parameters,
             )
-        case PluginKind.PROJECT | PluginKind.SCM | None:
+        case PluginKind.SCM:
+            return await _async_dry_run_scm_action(
+                action,
+                scm_environments=scm_environments,
+                working_dir=working_dir,
+            )
+        case PluginKind.PROJECT | None:
             return SetupActionResult(action=action, success=True)
         case _:
             return SetupActionResult(action=action, success=False, message=f'Unknown action kind: {action.kind}')
+
+
+def clone_status_to_result(
+    action: SetupAction,
+    clone_status: CloneStatus,
+    url: str,
+    destination: Path,
+) -> SetupActionResult | None:
+    """Map a ``CloneStatus`` to a skip result, or ``None`` for MISSING.
+
+    Shared by the dry-run presence path and the real execution path
+    to produce consistent skip results for already-cloned and
+    URL-mismatch cases.
+
+    Args:
+        action: The action being checked.
+        clone_status: Result from ``ScmEnvironment.is_cloned()``.
+        url: The manifest URL being checked.
+        destination: The target clone destination.
+
+    Returns:
+        A ``SetupActionResult`` with ``skipped=True`` when the repo is
+        present, or ``None`` when the repository is missing and cloning
+        should proceed.
+    """
+    match clone_status.kind:
+        case CloneStatusKind.CLONED:
+            actual_url = clone_status.remote_url or url
+            remote_info = f' (matched remote: {clone_status.matched_remote})' if clone_status.matched_remote else ''
+            message = f"Already cloned at '{destination}' (remote: {actual_url}){remote_info}"
+            logger.info(message)
+            return SetupActionResult(
+                action=action,
+                success=True,
+                skipped=True,
+                skip_reason=SkipReason.ALREADY_INSTALLED,
+                message=message,
+            )
+        case CloneStatusKind.URL_MISMATCH:
+            actual = clone_status.remote_url or '(unknown)'
+            message = (
+                f"Repository exists at '{destination}' but no remote matches '{url}'. "
+                f"Found remote: '{actual}'. May be a fork workflow."
+            )
+            logger.warning(message)
+            return SetupActionResult(
+                action=action,
+                success=True,
+                skipped=True,
+                skip_reason=SkipReason.ALREADY_INSTALLED,
+                message=message,
+            )
+        case _:
+            return None
+
+
+async def _async_dry_run_scm_action(
+    action: SetupAction,
+    *,
+    scm_environments: dict[str, ScmEnvironment] | None = None,
+    working_dir: Path | None = None,
+) -> SetupActionResult:
+    """Simulate an SCM clone action in dry-run mode.
+
+    Performs a lightweight ``is_cloned()`` check to determine whether
+    the repository already exists at the destination.  Returns a
+    skip result when already cloned or when a URL mismatch is detected
+    (fork workflow).
+    """
+    scm_envs = scm_environments or {}
+    if (
+        not scm_envs
+        or action.installer is None
+        or action.installer not in scm_envs
+        or action.package is None
+        or working_dir is None
+    ):
+        # Cannot perform presence check — report as "would succeed"
+        return SetupActionResult(action=action, success=True)
+
+    scm_env = scm_envs[action.installer]
+    url = action.package.name
+
+    loop = asyncio.get_running_loop()
+    clone_status = await loop.run_in_executor(None, lambda: scm_env.is_cloned(url, working_dir))
+
+    return clone_status_to_result(action, clone_status, url, working_dir) or SetupActionResult(
+        action=action, success=True
+    )
 
 
 def dry_run_action(
@@ -79,6 +185,8 @@ def dry_run_action(
     *,
     project_path: Path | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
+    scm_environments: dict[str, ScmEnvironment] | None = None,
+    working_dir: Path | None = None,
     parameters: SetupParameters | None = None,
 ) -> SetupActionResult:
     """Simulate executing an action in dry-run mode (sync wrapper).
@@ -94,6 +202,9 @@ def dry_run_action(
         project_environments: Optional dict of project-environment
             plugins, used to look up ``PluginManager`` instances for
             plugin-target presence checks.
+        scm_environments: Optional dict of SCM-environment plugins,
+            used for SCM clone presence detection.
+        working_dir: Working directory (manifest location) for SCM checks.
         parameters: Full setup parameters.  When provided, ``strategy``
             and ``detect_updates`` are read from it.  When ``None``,
             ``SyncStrategy.MINIMAL`` is used.
@@ -107,6 +218,8 @@ def dry_run_action(
             environments,
             project_path=project_path,
             project_environments=project_environments,
+            scm_environments=scm_environments,
+            working_dir=working_dir,
             parameters=parameters,
         )
     )
