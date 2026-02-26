@@ -5,6 +5,7 @@ from typing import override
 
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Ecosystem
+from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 
 class MockScm(ScmEnvironment):
@@ -28,6 +29,11 @@ class MockScm(ScmEnvironment):
         return True
 
     @override
-    def is_cloned(self, url: str, destination: Path) -> bool:
-        """Always returns False for testing."""
-        return False
+    def is_cloned(self, url: str, destination: Path) -> CloneStatus:
+        """Always returns MISSING for testing."""
+        return CloneStatus(kind=CloneStatusKind.MISSING)
+
+    @override
+    def get_remote_url(self, destination: Path) -> str | None:
+        """Always returns None for testing."""
+        return None

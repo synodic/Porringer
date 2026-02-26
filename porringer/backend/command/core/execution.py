@@ -30,6 +30,7 @@ from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvide
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Package, PluginKind
 from porringer.schema import (
+    CloneStatusKind,
     ManifestMetadata,
     ProgressEvent,
     ProgressEventKind,
@@ -1613,14 +1614,29 @@ async def _execute_scm_clone(
     destination = working_dir
 
     # Skip if already cloned
-    if scm_env.is_cloned(url, destination):
-        return SetupActionResult(
-            action=action,
-            success=True,
-            skipped=True,
-            skip_reason=SkipReason.ALREADY_INSTALLED,
-            message=f"Repository already cloned at '{destination}'",
-        )
+    clone_status = scm_env.is_cloned(url, destination)
+
+    match clone_status.kind:
+        case CloneStatusKind.CLONED:
+            actual_url = clone_status.remote_url or url
+            message = f"SCM skip: repo already cloned at '{destination}' (remote: {actual_url})"
+            logger.info(message)
+            return SetupActionResult(
+                action=action,
+                success=True,
+                skipped=True,
+                skip_reason=SkipReason.ALREADY_INSTALLED,
+                message=message,
+            )
+        case CloneStatusKind.MISSING:
+            logger.info("SCM clone needed: .git not found at '%s'", destination)
+        case CloneStatusKind.URL_MISMATCH:
+            logger.info(
+                "SCM clone needed: remote URL mismatch at '%s' (expected '%s', found '%s')",
+                destination,
+                url,
+                clone_status.remote_url,
+            )
 
     if parameters.dry_run:
         # Dry-run — no-op

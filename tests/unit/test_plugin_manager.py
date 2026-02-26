@@ -204,7 +204,8 @@ class TestCliCommandPreview:
         cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
         assert cmd == mock_pm.plugin_add_command(ref)
 
-    def test_empty_command_when_plugin_manager_unavailable(self) -> None:
+    @staticmethod
+    def test_empty_command_when_plugin_manager_unavailable() -> None:
         """get_cli_command returns empty list when PluginManager tool is not on PATH."""
         pdm_env = PDMEnvironment(_MOCK_PARAMS)
         project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
@@ -226,7 +227,8 @@ class TestCliCommandPreview:
 
         assert cmd == []
 
-    def test_empty_command_when_no_project_environments(self) -> None:
+    @staticmethod
+    def test_empty_command_when_no_project_environments() -> None:
         """get_cli_command returns empty list with no project envs."""
         action = SetupAction(
             description="Add 'cppython' to 'pdm'",
@@ -344,7 +346,8 @@ class TestParsePluginList:
         plugin = PDMEnvironment(_MOCK_PARAMS)
         stdout = 'cppython 0.9.14 desc\npoetry-plugin 1.0.0 other\n'
         result = plugin.parse_plugin_list(stdout)
-        assert len(result) == 2
+        expected_plugin_count = 2
+        assert len(result) == expected_plugin_count
         assert result[0].name == 'cppython'
         assert result[1].name == 'poetry-plugin'
 
@@ -511,7 +514,7 @@ class TestDryRunPluginPresence:
             parameters=params,
         )
 
-        # LATEST + installed + no newer version â†’ skip (ALREADY_LATEST)
+        # LATEST + installed + no newer version → skip (ALREADY_LATEST)
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_LATEST
 
@@ -774,7 +777,7 @@ class TestResolveOperation:
     # --- Normal package resolution ---
 
     def test_minimal_installed_skips(self) -> None:
-        """MINIMAL + installed â†’ SKIP."""
+        """MINIMAL + installed → SKIP."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -783,7 +786,7 @@ class TestResolveOperation:
         assert resolved.skip_reason == SkipReason.ALREADY_INSTALLED
 
     def test_minimal_not_installed_installs(self) -> None:
-        """MINIMAL + not installed â†’ INSTALL."""
+        """MINIMAL + not installed → INSTALL."""
         action = self._make_action()
         envs = self._make_envs(installed=[])
 
@@ -791,7 +794,7 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.INSTALL
 
     def test_latest_installed_upgrades(self) -> None:
-        """LATEST + installed + no newer version â†’ SKIP (ALREADY_LATEST)."""
+        """LATEST + installed + no newer version → SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -800,7 +803,7 @@ class TestResolveOperation:
         assert resolved.skip_reason == SkipReason.ALREADY_LATEST
 
     def test_latest_not_installed_installs(self) -> None:
-        """LATEST + not installed â†’ INSTALL (fallback)."""
+        """LATEST + not installed → INSTALL (fallback)."""
         action = self._make_action()
         envs = self._make_envs(installed=[])
 
@@ -808,7 +811,7 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.INSTALL
 
     def test_exact_installed_upgrades(self) -> None:
-        """EXACT + installed + no newer version â†’ SKIP (ALREADY_LATEST)."""
+        """EXACT + installed + no newer version → SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -819,7 +822,7 @@ class TestResolveOperation:
     # --- Plugin-management resolution ---
 
     def test_plugin_minimal_installed_skips(self) -> None:
-        """Plugin: MINIMAL + installed â†’ SKIP."""
+        """Plugin: MINIMAL + installed → SKIP."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -833,7 +836,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     def test_plugin_minimal_not_installed_installs(self) -> None:
-        """Plugin: MINIMAL + not installed â†’ INSTALL."""
+        """Plugin: MINIMAL + not installed → INSTALL."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -846,7 +849,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     def test_plugin_latest_installed_upgrades(self) -> None:
-        """Plugin: LATEST + installed â†’ UPGRADE."""
+        """Plugin: LATEST + installed → UPGRADE."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -859,7 +862,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     def test_plugin_latest_not_installed_installs(self) -> None:
-        """Plugin: LATEST + not installed â†’ INSTALL (fallback)."""
+        """Plugin: LATEST + not installed → INSTALL (fallback)."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -871,7 +874,7 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.INSTALL
 
     def test_plugin_no_manager_defaults_to_install(self) -> None:
-        """Plugin: no PluginManager â†’ INSTALL."""
+        """Plugin: no PluginManager → INSTALL."""
         action = self._make_action(plugin_target='mock-pm')
 
         resolved = asyncio.run(resolve_operation(action, {}, SyncStrategy.MINIMAL))
@@ -888,8 +891,9 @@ class TestResolveOperation:
         assert resolved.operation == OperationKind.SKIP
         assert resolved.installed_version == '2.3.1'
 
-    def test_missing_installer_skips(self) -> None:
-        """Action with no installer/package â†’ SKIP."""
+    @staticmethod
+    def test_missing_installer_skips() -> None:
+        """Action with no installer/package → SKIP."""
         action = SetupAction(
             description='Bad action',
             kind=PluginKind.TOOL,
@@ -1022,7 +1026,8 @@ class TestCliCommandUpgradePreview:
         cmd = get_cli_command(action, environments, SyncStrategy.MINIMAL, project_environments)
         assert cmd == mock_pm.plugin_add_command(ref)
 
-    def test_poetry_latest_delegates_update_to_add(self) -> None:
+    @staticmethod
+    def test_poetry_latest_delegates_update_to_add() -> None:
         """Poetry: LATEST returns same as add (Poetry update delegates to add)."""
         poetry_env = PoetryEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export')

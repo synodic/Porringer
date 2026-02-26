@@ -10,6 +10,8 @@ from porringer.schema.config import LocalConfiguration
 from porringer.schema.download import DownloadParameters, DownloadResult, HashAlgorithm, ProgressCallback
 from porringer.schema.execution import (
     BatchSetupResults,
+    CloneStatus,
+    CloneStatusKind,
     SetupAction,
     SetupActionResult,
     SetupParameters,
@@ -35,6 +37,8 @@ __all__ = [
     'CancellationToken',
     'CheckParameters',
     'CheckResult',
+    'CloneStatus',
+    'CloneStatusKind',
     'DirectoryCache',
     'DirectoryValidationResult',
     'DownloadParameters',

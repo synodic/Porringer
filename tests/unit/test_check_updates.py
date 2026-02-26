@@ -129,7 +129,8 @@ class TestCheckPypiUpdates:
             mock_client.return_value.__exit__ = MagicMock(return_value=False)
             result = env._check_pypi_updates(_make_params(['pkg-a', 'pkg-b']))
 
-        assert len(result) == 2
+        expected_count = 2
+        assert len(result) == expected_count
         assert result[0].version == '2.0.0'
         assert result[1].version == '3.0.0'
 
@@ -221,6 +222,7 @@ class TestPipCheckUpdates:
 
     @staticmethod
     def test_native_pip_outdated() -> None:
+        """Native pip outdated returns filtered results."""
         env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([
             {'name': 'ruff', 'version': '0.8.0', 'latest_version': '0.9.0', 'latest_filetype': 'wheel'},
@@ -237,6 +239,7 @@ class TestPipCheckUpdates:
 
     @staticmethod
     def test_prereleases_flag_passed() -> None:
+        """Prereleases flag is passed to pip command."""
         env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([])
 
@@ -249,6 +252,7 @@ class TestPipCheckUpdates:
 
     @staticmethod
     def test_falls_back_to_pypi_on_failure() -> None:
+        """Falls back to PyPI on pip command failure."""
         env = PIPEnvironment(_MOCK_PARAMS)
 
         with (
@@ -262,6 +266,7 @@ class TestPipCheckUpdates:
 
     @staticmethod
     def test_all_packages_returned_when_no_filter() -> None:
+        """All packages returned when no filter is specified."""
         env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([
             {'name': 'ruff', 'version': '0.8.0', 'latest_version': '0.9.0'},
@@ -272,7 +277,8 @@ class TestPipCheckUpdates:
             mock_run.return_value = MagicMock(stdout=outdated_json, returncode=0)
             result = env.check_updates(CheckUpdatesParameters(packages=[], include_prereleases=False))
 
-        assert len(result) == 2
+        expected_count = 2
+        assert len(result) == expected_count
 
 
 # =========================================================================
@@ -285,6 +291,7 @@ class TestNpmCheckUpdates:
 
     @staticmethod
     def test_stable_version() -> None:
+        """Stable version is returned from npm registry."""
         env = NPMEnvironment(_MOCK_PARAMS)
         expected = [Package(name='typescript', version='10.0.0')]
 
@@ -296,6 +303,7 @@ class TestNpmCheckUpdates:
 
     @staticmethod
     def test_prereleases_forwarded() -> None:
+        """Prereleases flag is forwarded to npm registry."""
         env = NPMEnvironment(_MOCK_PARAMS)
         with patch.object(env, '_check_npm_registry', return_value=[]) as mock:
             env.check_updates(_make_params(['typescript'], include_prereleases=True))
@@ -323,6 +331,7 @@ class TestDenoCheckUpdates:
 
     @staticmethod
     def test_npm_package() -> None:
+        """npm-prefixed package queries npm registry."""
         env = DenoEnvironment(_MOCK_PARAMS)
 
         with patch.object(
@@ -337,6 +346,7 @@ class TestDenoCheckUpdates:
 
     @staticmethod
     def test_jsr_package() -> None:
+        """jsr-prefixed package queries JSR registry."""
         env = DenoEnvironment(_MOCK_PARAMS)
         jsr_data = {'latest': '0.5.0'}
         response = MagicMock()
@@ -379,6 +389,7 @@ class TestBrewCheckUpdates:
 
     @staticmethod
     def test_outdated_with_info() -> None:
+        """Outdated packages include info version."""
         env = BrewEnvironment(_MOCK_PARAMS)
         outdated_data = [{'name': 'git', 'current_version': '2.43.0'}]
         info_data = {'formulae': [{'versions': {'stable': '2.44.0'}}]}
@@ -393,6 +404,7 @@ class TestBrewCheckUpdates:
 
     @staticmethod
     def test_outdated_filters_by_requested() -> None:
+        """Outdated results are filtered by requested packages."""
         env = BrewEnvironment(_MOCK_PARAMS)
         outdated_data = [
             {'name': 'git', 'current_version': '2.43.0'},
@@ -409,6 +421,7 @@ class TestBrewCheckUpdates:
 
     @staticmethod
     def test_no_outdated_returns_empty() -> None:
+        """No outdated packages returns empty list."""
         env = BrewEnvironment(_MOCK_PARAMS)
 
         with patch.object(env, '_run_json_command', return_value=[]):
@@ -418,6 +431,7 @@ class TestBrewCheckUpdates:
 
     @staticmethod
     def test_command_failure_returns_empty() -> None:
+        """Command failure returns empty list."""
         env = BrewEnvironment(_MOCK_PARAMS)
 
         with patch.object(env, '_run_json_command', return_value=None):
@@ -436,6 +450,7 @@ class TestWingetCheckUpdates:
 
     @staticmethod
     def test_parses_upgrade_output() -> None:
+        """Parses winget upgrade output correctly."""
         env = WingetEnvironment(_MOCK_PARAMS)
         # Typical winget upgrade output with fixed-width columns
         output = (
@@ -453,6 +468,7 @@ class TestWingetCheckUpdates:
 
     @staticmethod
     def test_command_failure_returns_empty() -> None:
+        """Command failure returns empty list."""
         env = WingetEnvironment(_MOCK_PARAMS)
 
         with patch.object(env, '_run_text_command', return_value=None):
@@ -471,6 +487,7 @@ class TestAptCheckUpdates:
 
     @staticmethod
     def test_parses_candidate() -> None:
+        """Parses candidate version from apt-cache policy."""
         env = APTEnvironment(_MOCK_PARAMS)
         policy_output = 'python3:\n  Installed: 3.11.6-1\n  Candidate: 3.12.0-1\n  Version table:\n'
 
@@ -483,6 +500,7 @@ class TestAptCheckUpdates:
 
     @staticmethod
     def test_no_candidate_returns_empty() -> None:
+        """No candidate version returns empty list."""
         env = APTEnvironment(_MOCK_PARAMS)
         policy_output = 'nonexistent:\n  Installed: (none)\n  Candidate: (none)\n'
 
@@ -493,6 +511,7 @@ class TestAptCheckUpdates:
 
     @staticmethod
     def test_command_failure_returns_empty() -> None:
+        """Command failure returns empty list."""
         env = APTEnvironment(_MOCK_PARAMS)
 
         with patch.object(env, '_run_text_command', return_value=None):
@@ -511,6 +530,7 @@ class TestPyenvCheckUpdates:
 
     @staticmethod
     def test_finds_latest_matching_version() -> None:
+        """Finds latest matching version from pyenv list."""
         env = PyenvEnvironment(_MOCK_PARAMS)
         list_output = '  3.11.8\n  3.12.0\n  3.12.1\n  3.12.2\n  3.13.0a3\n'
 
@@ -523,6 +543,7 @@ class TestPyenvCheckUpdates:
 
     @staticmethod
     def test_excludes_prereleases_by_default() -> None:
+        """Excludes prereleases by default."""
         env = PyenvEnvironment(_MOCK_PARAMS)
         list_output = '  3.13.0a3\n  3.13.0b1\n  3.12.2\n'
 
@@ -534,6 +555,7 @@ class TestPyenvCheckUpdates:
 
     @staticmethod
     def test_includes_prereleases_when_requested() -> None:
+        """Includes prereleases when requested."""
         env = PyenvEnvironment(_MOCK_PARAMS)
         list_output = '  3.13.0a3\n  3.13.0b1\n  3.12.2\n'
 
@@ -545,6 +567,7 @@ class TestPyenvCheckUpdates:
 
     @staticmethod
     def test_command_failure_returns_empty() -> None:
+        """Command failure returns empty list."""
         env = PyenvEnvironment(_MOCK_PARAMS)
 
         with patch.object(env, '_run_text_command', return_value=None):
@@ -563,6 +586,7 @@ class TestPimCheckUpdates:
 
     @staticmethod
     def test_finds_latest_matching_version() -> None:
+        """Finds latest matching version from pim list."""
         env = PIMEnvironment(_MOCK_PARAMS)
         data = {
             'versions': [
@@ -580,6 +604,7 @@ class TestPimCheckUpdates:
 
     @staticmethod
     def test_command_failure_returns_empty() -> None:
+        """Command failure returns empty list."""
         env = PIMEnvironment(_MOCK_PARAMS)
 
         with patch.object(env, '_run_json_command', return_value=None):
@@ -598,6 +623,7 @@ class TestNpmRegistryHelper:
 
     @staticmethod
     def test_stable_version() -> None:
+        """Stable version returned from npm registry."""
         registry_data = {
             'dist-tags': {'latest': '10.0.0'},
             'versions': {'9.0.0': {}, '10.0.0': {}, '11.0.0-beta.1': {}},
@@ -616,6 +642,7 @@ class TestNpmRegistryHelper:
 
     @staticmethod
     def test_prerelease_version() -> None:
+        """Prerelease versions are included when include_prereleases is set."""
         registry_data = {
             'dist-tags': {'latest': '10.0.0'},
             'versions': {'9.0.0': {}, '10.0.0': {}, '11.0.0-beta.1': {}},
@@ -637,6 +664,7 @@ class TestNpmRegistryHelper:
 
     @staticmethod
     def test_http_error_returns_empty() -> None:
+        """HTTP errors result in an empty list."""
         with patch('porringer.core.plugin_schema.environment.httpx.Client') as mock_client:
             mock_instance = MagicMock()
             mock_instance.get.side_effect = httpx.HTTPError('timeout')

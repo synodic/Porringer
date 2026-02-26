@@ -224,6 +224,10 @@ def build_actions(
             for package in packages:
                 if not package.is_applicable():
                     continue
+                # Use the manifest description if set, otherwise surface
+                # the repo URL as the package description so UI cards
+                # show *what* is being cloned.
+                scm_description = package.description or str(package.name)
                 actions.append(
                     SetupAction(
                         description=action_description(kind, verb, installer, package=package.name),
@@ -231,7 +235,7 @@ def build_actions(
                         ecosystem=ecosystem,
                         installer=installer,
                         package=package.name,
-                        package_description=package.description,
+                        package_description=scm_description,
                     )
                 )
             continue

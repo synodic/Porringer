@@ -863,7 +863,8 @@ class TestPackageSpecPlugins:
     def test_package_spec_plugins_parsed() -> None:
         """PackageSpec accepts a plugins list of package refs"""
         spec = PackageSpec.model_validate({'name': 'pdm', 'plugins': ['cppython', 'pdm-bump']})
-        assert len(spec.plugins) == 2
+        expected_plugin_count = 2
+        assert len(spec.plugins) == expected_plugin_count
         assert spec.plugins[0].name.name == 'cppython'
         assert spec.plugins[1].name.name == 'pdm-bump'
 
@@ -878,7 +879,8 @@ class TestPackageSpecPlugins:
         """Manifest tools section accepts packages with plugins"""
         manifest = SetupManifest(tools={_PY: [{'name': 'pdm', 'plugins': ['cppython']}, 'ruff']})
         pkgs = manifest.tools[_PY]
-        assert len(pkgs) == 2
+        expected_tools_count = 2
+        assert len(pkgs) == expected_tools_count
         assert len(pkgs[0].plugins) == 1
         assert pkgs[0].plugins[0].name.name == 'cppython'
         assert len(pkgs[1].plugins) == 0
@@ -1088,7 +1090,8 @@ class TestManifestContributor:
         """manifest_filenames() always starts with 'porringer.json'"""
         filenames = SyncCommands.manifest_filenames()
         assert filenames[0] == 'porringer.json'
-        assert len(filenames) >= 2  # at least native + pyproject.toml
+        minimum_filename_count = 2  # at least native + pyproject.toml
+        assert len(filenames) >= minimum_filename_count
 
     @staticmethod
     def test_manifest_filenames_includes_contributed() -> None:
@@ -1358,7 +1361,8 @@ class TestDirectoryValidationResult:
         cache_manager.add_directory(d2)
 
         results = cache_manager.validate_directories()
-        assert len(results) == 2
+        expected_directory_count = 2
+        assert len(results) == expected_directory_count
         assert all(r.exists for r in results)
 
     @staticmethod
@@ -1378,7 +1382,8 @@ class TestDirectoryValidationResult:
         cache_manager.add_directory(without_manifest)
 
         results = cache_manager.validate_directories(check_manifest=True)
-        assert len(results) == 2
+        expected_directory_count = 2
+        assert len(results) == expected_directory_count
 
         result_with = next(r for r in results if r.directory.path == with_manifest.resolve())
         result_without = next(r for r in results if r.directory.path == without_manifest.resolve())

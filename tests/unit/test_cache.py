@@ -156,7 +156,8 @@ class TestDirectoryCacheValidation:
         # Validate — returns ALL directories, not just invalid ones
         results = cache_manager.validate_directories()
 
-        assert len(results) == 2
+        expected_directory_count = 2
+        assert len(results) == expected_directory_count
         existing_result = next(r for r in results if r.directory.path == existing_dir.resolve())
         deleted_result = next(r for r in results if r.directory.path == to_delete.resolve())
 
