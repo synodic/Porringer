@@ -60,6 +60,11 @@ class BackendResolver:
         for key in self._backend_plugins:
             self._resolved[key] = self._resolve(key)
 
+        logger.debug(
+            'Backend resolution map: %s',
+            {f'({k.value}, {e})': v for (k, e), v in self._resolved.items()},
+        )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -68,7 +73,15 @@ class BackendResolver:
         """Return the chosen plugin name for *(kind, ecosystem)*, or `None`."""
         key = (kind, ecosystem)
         if key not in self._resolved:
-            logger.warning("No plugins registered for (%s, '%s')", kind.value, ecosystem)
+            available_for_kind = [eco for (k, eco) in self._resolved if k == kind]
+            logger.warning(
+                "No plugins registered for (%s, '%s'). Available %s ecosystems: %s. "
+                'Ensure porringer is installed with all plugin entry points.',
+                kind.value,
+                ecosystem,
+                kind.value,
+                available_for_kind or '(none)',
+            )
             return None
         return self._resolved[key]
 

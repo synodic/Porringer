@@ -1037,6 +1037,7 @@ def _plugins_discovered_event(plugins: DiscoveredPlugins) -> ProgressEvent:
         plugin_availability[name] = proj.is_available()
     for name, scm in plugins.scm_environments.items():
         plugin_availability[name] = scm.is_available()
+    logger.info('Plugins discovered — availability: %s', plugin_availability)
     return ProgressEvent(
         kind=ProgressEventKind.PLUGINS_DISCOVERED,
         plugin_names=sorted(plugin_availability.keys()),
@@ -1598,10 +1599,16 @@ async def _execute_scm_clone(
     """
     scm_envs = scm_environments or {}
     if action.installer is None or action.installer not in scm_envs:
+        message = (
+            f"No SCM plugin found for installer '{action.installer}'. "
+            f'Available SCM plugins: {sorted(scm_envs) or "(none)"}. '
+            f'The plugin may not be installed or registered.'
+        )
+        logger.warning(message)
         return SetupActionResult(
             action=action,
             success=False,
-            message=f"SCM environment '{action.installer}' is not available",
+            message=message,
         )
 
     if action.package is None:

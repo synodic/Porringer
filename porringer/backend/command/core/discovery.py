@@ -7,6 +7,7 @@ it without circular dependencies.
 """
 
 import importlib
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -17,6 +18,8 @@ from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin
+
+logger = logging.getLogger(__name__)
 
 
 class DiscoveredPlugins(NamedTuple):
@@ -80,7 +83,9 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
 
     infos = Builder.find_plugins(group, base_class, **kwargs)
     instances = Builder.build_plugins(infos)
-    return {info.name: inst for info, inst in zip(infos, instances, strict=True)}
+    result = {info.name: inst for info, inst in zip(infos, instances, strict=True)}
+    logger.info('Discovered %d %s plugin(s): %s', len(result), group, sorted(result))
+    return result
 
 
 def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
@@ -103,12 +108,19 @@ def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
     """
     with _cache.lock:
         if use_cache and _cache.plugins is not None and (time.monotonic() - _cache.timestamp) < CACHE_TTL:
+            logger.debug('Plugin cache hit')
             return _cache.plugins
 
     result = DiscoveredPlugins(
         environments=discover_plugins('environment', Environment, check_dependencies=True),
         project_environments=discover_plugins('project_environment', ProjectEnvironment),
         scm_environments=discover_plugins('scm', ScmEnvironment),
+    )
+    logger.info(
+        'Plugin discovery complete — environments: %s, project: %s, scm: %s',
+        sorted(result.environments),
+        sorted(result.project_environments),
+        sorted(result.scm_environments),
     )
 
     with _cache.lock:
