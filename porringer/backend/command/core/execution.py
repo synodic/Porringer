@@ -30,7 +30,6 @@ from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvide
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Ecosystem, Package, PluginKind
 from porringer.schema import (
-    CloneStatusKind,
     ManifestMetadata,
     ProgressEvent,
     ProgressEventKind,
@@ -1659,9 +1658,7 @@ async def _execute_scm_clone(
     logger.info("SCM clone needed: repository not found at '%s'", destination)
 
     if parameters.dry_run:
-        return SetupActionResult(
-            action=action, success=True, message=f"Would clone '{url}' into '{destination}'"
-        )
+        return SetupActionResult(action=action, success=True, message=f"Would clone '{url}' into '{destination}'")
 
     try:
         if event_queue is not None and scm_env.tool_name() == 'git':

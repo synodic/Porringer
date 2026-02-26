@@ -5,7 +5,6 @@ from typing import override
 
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Ecosystem
-from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 
 class MockScm(ScmEnvironment):

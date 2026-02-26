@@ -78,14 +78,14 @@ class GitScm(ScmEnvironment):
             )
             if result.returncode != 0:
                 return {}
-        except (FileNotFoundError, subprocess.SubprocessError):
+        except FileNotFoundError, subprocess.SubprocessError:
             return {}
 
+        _min_remote_fields = 3  # "<name>\t<url> (fetch|push)" → at least 3 tokens
         remotes: dict[str, str] = {}
         for line in result.stdout.splitlines():
-            # Format: "<name>\t<url> (fetch|push)"
             parts = line.split()
-            if len(parts) >= 3 and parts[-1] == '(fetch)':
+            if len(parts) >= _min_remote_fields and parts[-1] == '(fetch)':
                 remotes[parts[0]] = parts[1]
         return remotes
 
@@ -112,6 +112,6 @@ class GitScm(ScmEnvironment):
             )
             if result.returncode == 0:
                 return Path(result.stdout.strip())
-        except (FileNotFoundError, subprocess.SubprocessError):
+        except FileNotFoundError, subprocess.SubprocessError:
             pass
         return None
