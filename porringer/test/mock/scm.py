@@ -29,11 +29,11 @@ class MockScm(ScmEnvironment):
         return True
 
     @override
-    def is_cloned(self, url: str, destination: Path) -> CloneStatus:
-        """Always returns MISSING for testing."""
-        return CloneStatus(kind=CloneStatusKind.MISSING)
+    def get_remote_urls(self, destination: Path) -> dict[str, str]:
+        """Always returns empty dict for testing."""
+        return {}
 
     @override
-    def get_remote_url(self, destination: Path) -> str | None:
+    def find_repo_root(self, path: Path) -> Path | None:
         """Always returns None for testing."""
         return None

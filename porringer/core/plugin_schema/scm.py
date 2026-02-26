@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, PluginKind, PluginParameters
-from porringer.schema.execution import CloneStatus
+from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,12 @@ class ScmEnvironment(ToolBasedPlugin):
     repositories using an SCM tool such as Git.
 
     Subclasses **must** override `tool_name()`, `clone()`,
-    and `is_cloned()`.
+    `get_remote_urls()`, and `find_repo_root()`.
+
+    The default `is_cloned()` implementation uses these hooks to
+    check **all** remotes, so fork workflows (where the manifest URL
+    matches ``upstream`` rather than ``origin``) are handled
+    automatically.
     """
 
     def __init__(self, parameters: PluginParameters) -> None:
@@ -66,31 +71,32 @@ class ScmEnvironment(ToolBasedPlugin):
         ...
 
     @abstractmethod
-    def is_cloned(self, url: str, destination: Path) -> CloneStatus:
-        """Check whether *url* has already been cloned to *destination*.
-
-        Used by the skip logic to avoid re-cloning repositories that are
-        already present.
-
-        Args:
-            url: The repository URL.
-            destination: Expected local path for the clone.
-
-        Returns:
-            A `CloneStatus` indicating whether the repository is present
-            and matches the expected URL.
-        """
-        ...
-
-    @abstractmethod
-    def get_remote_url(self, destination: Path) -> str | None:
-        """Return the remote origin URL for the repository at *destination*.
+    def get_remote_urls(self, destination: Path) -> dict[str, str]:
+        """Return all remote fetch URLs for the repository at *destination*.
 
         Args:
             destination: Local path of an existing clone.
 
         Returns:
-            The remote URL string, or ``None`` if it cannot be determined.
+            A mapping of remote name to fetch URL.
+            Empty dict if the repository has no remotes or the query fails.
+        """
+        ...
+
+    @abstractmethod
+    def find_repo_root(self, path: Path) -> Path | None:
+        """Find the SCM repository root that contains *path*.
+
+        Walks up from *path* to locate the root of the repository.
+        This handles the case where a manifest lives inside a
+        subdirectory of an already-cloned repo.
+
+        Args:
+            path: A filesystem path that may be inside a repository.
+
+        Returns:
+            The repository root directory, or ``None`` if *path* is
+            not inside a repository managed by this SCM tool.
         """
         ...
 
@@ -112,6 +118,57 @@ class ScmEnvironment(ToolBasedPlugin):
         """SCM environments always have kind `SCM`."""
         return PluginKind.SCM
 
+    def is_cloned(self, url: str, destination: Path) -> CloneStatus:
+        """Check whether *url* has already been cloned at or above *destination*.
+
+        The default implementation:
+
+        1. Calls `find_repo_root()` to locate the actual repository
+           root (handles nested manifests).
+        2. Calls `get_remote_urls()` to query **all** remotes.
+        3. If **any** remote's URL matches *url* (via `urls_match`),
+           returns ``CLONED`` with the matched remote name.
+        4. If the repository exists but no remote matches, returns
+           ``URL_MISMATCH``.
+
+        Subclasses may override for SCM-specific behaviour.
+
+        Args:
+            url: The expected repository URL.
+            destination: Expected local path for the clone.
+
+        Returns:
+            A `CloneStatus` indicating the result.
+        """
+        # Walk up to find the actual repo root (handles nested manifests)
+        repo_root = self.find_repo_root(destination)
+
+        if repo_root is None:
+            return CloneStatus(kind=CloneStatusKind.MISSING)
+
+        effective_root = repo_root if repo_root != destination else None
+
+        remotes = self.get_remote_urls(repo_root)
+        if not remotes:
+            return CloneStatus(kind=CloneStatusKind.URL_MISMATCH, repo_root=effective_root)
+
+        for remote_name, remote_url in remotes.items():
+            if self.urls_match(url, remote_url):
+                return CloneStatus(
+                    kind=CloneStatusKind.CLONED,
+                    remote_url=remote_url,
+                    matched_remote=remote_name,
+                    repo_root=effective_root,
+                )
+
+        # Repo exists but no remote matches the manifest URL
+        first_url = next(iter(remotes.values()))
+        return CloneStatus(
+            kind=CloneStatusKind.URL_MISMATCH,
+            remote_url=first_url,
+            repo_root=effective_root,
+        )
+
     @staticmethod
     def urls_match(expected: str, actual: str) -> bool:
         """Compare two remote URLs after normalizing trivial differences.
@@ -119,6 +176,10 @@ class ScmEnvironment(ToolBasedPlugin):
         Strips trailing slashes and ``.git`` suffixes from the path
         component so that ``https://github.com/org/repo.git`` matches
         ``https://github.com/org/repo``.
+
+        The comparison is **case-insensitive** for the hostname and
+        path, since all major Git hosting platforms treat repository
+        owner and name as case-insensitive.
 
         Subclasses may override this if their SCM tool uses a different
         URL convention or needs SSH↔HTTPS equivalence.
@@ -133,12 +194,15 @@ class ScmEnvironment(ToolBasedPlugin):
         parsed_expected = urlparse(expected)
         parsed_actual = urlparse(actual)
 
-        norm_path_expected = parsed_expected.path.rstrip('/').removesuffix('.git')
-        norm_path_actual = parsed_actual.path.rstrip('/').removesuffix('.git')
+        norm_path_expected = parsed_expected.path.rstrip('/').removesuffix('.git').lower()
+        norm_path_actual = parsed_actual.path.rstrip('/').removesuffix('.git').lower()
+
+        host_expected = (parsed_expected.hostname or '').lower()
+        host_actual = (parsed_actual.hostname or '').lower()
 
         return (
             parsed_expected.scheme == parsed_actual.scheme
-            and parsed_expected.hostname == parsed_actual.hostname
+            and host_expected == host_actual
             and norm_path_expected == norm_path_actual
         )
 

@@ -51,96 +51,194 @@ class TestUrlsMatch:
         """URLs with different host, scheme, or path should not match."""
         assert ScmEnvironment.urls_match(a, b) is False
 
+    @staticmethod
+    @pytest.mark.parametrize(
+        ('a', 'b'),
+        [
+            ('https://github.com/Org/Repo', 'https://github.com/org/repo'),
+            ('https://github.com/ORG/REPO.git', 'https://github.com/org/repo'),
+            ('https://GitHub.COM/org/repo', 'https://github.com/org/repo'),
+            ('https://github.com/Behemyth/periapsis', 'https://github.com/behemyth/periapsis'),
+        ],
+    )
+    def test_case_insensitive_host_and_path(a: str, b: str) -> None:
+        """URLs that differ only by case in host/path should match."""
+        assert ScmEnvironment.urls_match(a, b) is True
 
-# -- GitScm.get_remote_url tests --------------------------------------
+
+# -- GitScm.get_remote_urls tests -------------------------------------
 
 
-class TestGetRemoteUrl:
-    """Tests for GitScm.get_remote_url."""
+class TestGetRemoteUrls:
+    """Tests for GitScm.get_remote_urls."""
 
     @staticmethod
-    def test_returns_url_on_success(tmp_path: Path) -> None:
-        """get_remote_url returns the stripped stdout on success."""
+    def test_returns_all_fetch_urls(tmp_path: Path) -> None:
+        """get_remote_urls returns a dict of remote name → fetch URL."""
         scm = GitScm(_PARAMS)
-        expected = 'https://github.com/org/repo.git'
-        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=f'  {expected}  \n', stderr='')
+        git_output = (
+            'origin\thttps://github.com/fork/repo.git (fetch)\n'
+            'origin\thttps://github.com/fork/repo.git (push)\n'
+            'upstream\thttps://github.com/org/repo.git (fetch)\n'
+            'upstream\thttps://github.com/org/repo.git (push)\n'
+        )
+        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=git_output, stderr='')
         with patch('subprocess.run', return_value=fake_result) as mock_run:
-            result = scm.get_remote_url(tmp_path)
+            result = scm.get_remote_urls(tmp_path)
             mock_run.assert_called_once()
-        assert result == expected
+        assert result == {
+            'origin': 'https://github.com/fork/repo.git',
+            'upstream': 'https://github.com/org/repo.git',
+        }
 
     @staticmethod
-    def test_returns_none_on_failure(tmp_path: Path) -> None:
-        """get_remote_url returns None when git exits non-zero."""
+    def test_returns_empty_dict_on_failure(tmp_path: Path) -> None:
+        """get_remote_urls returns empty dict when git exits non-zero."""
         scm = GitScm(_PARAMS)
         fake_result = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='error')
         with patch('subprocess.run', return_value=fake_result):
-            result = scm.get_remote_url(tmp_path)
+            result = scm.get_remote_urls(tmp_path)
+        assert result == {}
+
+    @staticmethod
+    def test_returns_empty_dict_on_missing_git(tmp_path: Path) -> None:
+        """get_remote_urls returns empty dict when git is not found."""
+        scm = GitScm(_PARAMS)
+        with patch('subprocess.run', side_effect=FileNotFoundError):
+            result = scm.get_remote_urls(tmp_path)
+        assert result == {}
+
+    @staticmethod
+    def test_single_remote(tmp_path: Path) -> None:
+        """get_remote_urls handles a single remote correctly."""
+        scm = GitScm(_PARAMS)
+        git_output = 'origin\thttps://github.com/org/repo.git (fetch)\norigin\thttps://github.com/org/repo.git (push)\n'
+        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=git_output, stderr='')
+        with patch('subprocess.run', return_value=fake_result):
+            result = scm.get_remote_urls(tmp_path)
+        assert result == {'origin': 'https://github.com/org/repo.git'}
+
+
+# -- GitScm.find_repo_root tests --------------------------------------
+
+
+class TestFindRepoRoot:
+    """Tests for GitScm.find_repo_root."""
+
+    @staticmethod
+    def test_returns_root_when_inside_repo(tmp_path: Path) -> None:
+        """find_repo_root returns the repository root path."""
+        scm = GitScm(_PARAMS)
+        root = str(tmp_path / 'my-repo')
+        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=f'{root}\n', stderr='')
+        with patch('subprocess.run', return_value=fake_result):
+            result = scm.find_repo_root(tmp_path / 'my-repo' / 'subdir')
+        assert result == Path(root)
+
+    @staticmethod
+    def test_returns_none_when_not_in_repo(tmp_path: Path) -> None:
+        """find_repo_root returns None when path is not inside a repository."""
+        scm = GitScm(_PARAMS)
+        fake_result = subprocess.CompletedProcess(args=[], returncode=128, stdout='', stderr='fatal: not a git repo')
+        with patch('subprocess.run', return_value=fake_result):
+            result = scm.find_repo_root(tmp_path)
         assert result is None
 
     @staticmethod
     def test_returns_none_on_missing_git(tmp_path: Path) -> None:
-        """get_remote_url returns None when git is not found."""
+        """find_repo_root returns None when git is not found."""
         scm = GitScm(_PARAMS)
         with patch('subprocess.run', side_effect=FileNotFoundError):
-            result = scm.get_remote_url(tmp_path)
+            result = scm.find_repo_root(tmp_path)
         assert result is None
 
 
-# -- GitScm.is_cloned tests -------------------------------------------
+# -- ScmEnvironment.is_cloned tests (base class, using GitScm) --------
 
 
 class TestIsCloned:
-    """Tests for GitScm.is_cloned."""
+    """Tests for the base ScmEnvironment.is_cloned (exercised via GitScm)."""
 
     @staticmethod
-    def test_missing_when_no_directory(tmp_path: Path) -> None:
-        """is_cloned returns MISSING when destination does not exist."""
+    def test_missing_when_no_repo_root(tmp_path: Path) -> None:
+        """is_cloned returns MISSING when find_repo_root returns None."""
         scm = GitScm(_PARAMS)
-        result = scm.is_cloned('https://github.com/org/repo', tmp_path / 'nonexistent')
+        with patch.object(scm, 'find_repo_root', return_value=None):
+            result = scm.is_cloned('https://github.com/org/repo', tmp_path / 'nonexistent')
         assert result.kind == CloneStatusKind.MISSING
         assert result.remote_url is None
 
     @staticmethod
-    def test_missing_when_no_git_dir(tmp_path: Path) -> None:
-        """is_cloned returns MISSING when .git subdirectory is absent."""
-        scm = GitScm(_PARAMS)
-        result = scm.is_cloned('https://github.com/org/repo', tmp_path)
-        assert result.kind == CloneStatusKind.MISSING
-
-    @staticmethod
-    def test_cloned_when_url_matches(tmp_path: Path) -> None:
-        """is_cloned returns CLONED when remote URL matches (with .git suffix normalization)."""
-        (tmp_path / '.git').mkdir()
+    def test_cloned_when_origin_matches(tmp_path: Path) -> None:
+        """is_cloned returns CLONED when origin remote URL matches."""
         scm = GitScm(_PARAMS)
         url = 'https://github.com/org/repo'
-        remote = 'https://github.com/org/repo.git'
-        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=f'{remote}\n', stderr='')
-        with patch('subprocess.run', return_value=fake_result):
+        remotes = {'origin': 'https://github.com/org/repo.git'}
+        with (
+            patch.object(scm, 'find_repo_root', return_value=tmp_path),
+            patch.object(scm, 'get_remote_urls', return_value=remotes),
+        ):
             result = scm.is_cloned(url, tmp_path)
         assert result.kind == CloneStatusKind.CLONED
-        assert result.remote_url == remote
+        assert result.remote_url == 'https://github.com/org/repo.git'
+        assert result.matched_remote == 'origin'
 
     @staticmethod
-    def test_url_mismatch_when_different_remote(tmp_path: Path) -> None:
-        """is_cloned returns URL_MISMATCH when remote URL differs."""
-        (tmp_path / '.git').mkdir()
+    def test_cloned_when_upstream_matches(tmp_path: Path) -> None:
+        """is_cloned returns CLONED when upstream (not origin) matches — fork workflow."""
         scm = GitScm(_PARAMS)
         url = 'https://github.com/org/repo'
-        remote = 'https://github.com/other/different'
-        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=f'{remote}\n', stderr='')
-        with patch('subprocess.run', return_value=fake_result):
+        remotes = {
+            'origin': 'https://github.com/fork/repo.git',
+            'upstream': 'https://github.com/org/repo.git',
+        }
+        with (
+            patch.object(scm, 'find_repo_root', return_value=tmp_path),
+            patch.object(scm, 'get_remote_urls', return_value=remotes),
+        ):
             result = scm.is_cloned(url, tmp_path)
-        assert result.kind == CloneStatusKind.URL_MISMATCH
-        assert result.remote_url == remote
+        assert result.kind == CloneStatusKind.CLONED
+        assert result.remote_url == 'https://github.com/org/repo.git'
+        assert result.matched_remote == 'upstream'
 
     @staticmethod
-    def test_url_mismatch_when_get_remote_fails(tmp_path: Path) -> None:
-        """is_cloned returns URL_MISMATCH when git remote query fails."""
-        (tmp_path / '.git').mkdir()
+    def test_url_mismatch_when_no_remote_matches(tmp_path: Path) -> None:
+        """is_cloned returns URL_MISMATCH when no remote URL matches."""
         scm = GitScm(_PARAMS)
-        fake_result = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='error')
-        with patch('subprocess.run', return_value=fake_result):
+        url = 'https://github.com/org/repo'
+        remotes = {'origin': 'https://github.com/other/different.git'}
+        with (
+            patch.object(scm, 'find_repo_root', return_value=tmp_path),
+            patch.object(scm, 'get_remote_urls', return_value=remotes),
+        ):
+            result = scm.is_cloned(url, tmp_path)
+        assert result.kind == CloneStatusKind.URL_MISMATCH
+        assert result.remote_url == 'https://github.com/other/different.git'
+
+    @staticmethod
+    def test_url_mismatch_when_no_remotes(tmp_path: Path) -> None:
+        """is_cloned returns URL_MISMATCH when repo has no remotes."""
+        scm = GitScm(_PARAMS)
+        with (
+            patch.object(scm, 'find_repo_root', return_value=tmp_path),
+            patch.object(scm, 'get_remote_urls', return_value={}),
+        ):
             result = scm.is_cloned('https://github.com/org/repo', tmp_path)
         assert result.kind == CloneStatusKind.URL_MISMATCH
         assert result.remote_url is None
+
+    @staticmethod
+    def test_nested_manifest_uses_repo_root(tmp_path: Path) -> None:
+        """is_cloned finds the repo root when destination is a subdirectory."""
+        scm = GitScm(_PARAMS)
+        repo_root = tmp_path / 'my-repo'
+        subdir = repo_root / 'subdir'
+        url = 'https://github.com/org/repo'
+        remotes = {'origin': 'https://github.com/org/repo.git'}
+        with (
+            patch.object(scm, 'find_repo_root', return_value=repo_root),
+            patch.object(scm, 'get_remote_urls', return_value=remotes),
+        ):
+            result = scm.is_cloned(url, subdir)
+        assert result.kind == CloneStatusKind.CLONED
+        assert result.repo_root == repo_root

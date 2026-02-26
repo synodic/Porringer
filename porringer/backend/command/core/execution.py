@@ -57,7 +57,7 @@ from .discovery import (
     invalidate_plugin_cache,
 )
 from .phase import run_phases
-from .presence import async_dry_run_action
+from .presence import async_dry_run_action, clone_status_to_result
 from .resolution import (
     OperationKind,
     ResolutionContext,
@@ -1648,41 +1648,20 @@ async def _execute_scm_clone(
     # Clone directly into the working directory, not into a derived subdirectory.
     destination = working_dir
 
-    # Skip if already cloned
+    # Skip if already cloned (checks all remotes and walks up to repo root)
     clone_status = scm_env.is_cloned(url, destination)
 
-    match clone_status.kind:
-        case CloneStatusKind.CLONED:
-            actual_url = clone_status.remote_url or url
-            message = f"SCM skip: repo already cloned at '{destination}' (remote: {actual_url})"
-            logger.info(message)
-            return SetupActionResult(
-                action=action,
-                success=True,
-                skipped=True,
-                skip_reason=SkipReason.ALREADY_INSTALLED,
-                message=message,
-            )
-        case CloneStatusKind.MISSING:
-            logger.info("SCM clone needed: .git not found at '%s'", destination)
-        case CloneStatusKind.URL_MISMATCH:
-            logger.info(
-                "SCM clone needed: remote URL mismatch at '%s' (expected '%s', found '%s')",
-                destination,
-                url,
-                clone_status.remote_url,
-            )
+    skip_result = clone_status_to_result(action, clone_status, url, destination)
+    if skip_result is not None:
+        return skip_result
+
+    # Only MISSING reaches here — the repository needs cloning.
+    logger.info("SCM clone needed: repository not found at '%s'", destination)
 
     if parameters.dry_run:
-        # Dry-run — no-op
-        try:
-            loop = asyncio.get_running_loop()
-            success = await loop.run_in_executor(None, lambda: scm_env.clone(url, destination, dry=True))
-            message = None
-        except Exception as e:
-            success = False
-            message = str(e)
-        return SetupActionResult(action=action, success=success, message=message)
+        return SetupActionResult(
+            action=action, success=True, message=f"Would clone '{url}' into '{destination}'"
+        )
 
     try:
         if event_queue is not None and scm_env.tool_name() == 'git':

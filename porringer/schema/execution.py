@@ -45,6 +45,14 @@ class CloneStatus:
     remote_url: str | None = None
     """The remote URL found at the destination, if any."""
 
+    matched_remote: str | None = None
+    """Name of the remote whose URL matched (e.g. ``"origin"``, ``"upstream"``)."""
+
+    repo_root: Path | None = None
+    """The SCM repository root directory, when it differs from the
+    originally requested destination (e.g. when the manifest lives
+    inside a subdirectory of the repo)."""
+
 
 class SkipReason(Enum):
     """Machine-readable reason an action was skipped.

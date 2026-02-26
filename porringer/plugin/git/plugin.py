@@ -7,7 +7,6 @@ from typing import override
 
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Ecosystem, PluginParameters
-from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 logger = logging.getLogger(__name__)
 
@@ -58,49 +57,61 @@ class GitScm(ScmEnvironment):
         return self._run_bool_command(['git', 'clone', url, str(destination)], label='clone')
 
     @override
-    def is_cloned(self, url: str, destination: Path) -> CloneStatus:
-        """Check whether a Git repository already exists at *destination*.
+    def get_remote_urls(self, destination: Path) -> dict[str, str]:
+        """Return all remote fetch URLs for the Git repository at *destination*.
 
-        A directory is considered cloned if it exists and contains a
-        ``.git`` subdirectory **and** its ``origin`` remote URL matches
-        *url* (after normalization).
-
-        Args:
-            url: The expected repository URL.
-            destination: Expected local path for the clone.
-
-        Returns:
-            A `CloneStatus` indicating the result.
-        """
-        if not destination.is_dir() or not (destination / '.git').is_dir():
-            return CloneStatus(kind=CloneStatusKind.MISSING)
-
-        actual_url = self.get_remote_url(destination)
-        if actual_url is None or not self.urls_match(url, actual_url):
-            return CloneStatus(kind=CloneStatusKind.URL_MISMATCH, remote_url=actual_url)
-
-        return CloneStatus(kind=CloneStatusKind.CLONED, remote_url=actual_url)
-
-    @override
-    def get_remote_url(self, destination: Path) -> str | None:
-        """Return the remote origin URL for the Git repository at *destination*.
+        Parses ``git remote -v`` output, collecting only fetch URLs.
 
         Args:
             destination: Local path of an existing Git clone.
 
         Returns:
-            The remote URL string, or ``None`` if unavailable.
+            A mapping of remote name to fetch URL.
         """
         try:
             result = subprocess.run(
-                ['git', '-C', str(destination), 'remote', 'get-url', 'origin'],
+                ['git', '-C', str(destination), 'remote', '-v'],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                return {}
+        except (FileNotFoundError, subprocess.SubprocessError):
+            return {}
+
+        remotes: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            # Format: "<name>\t<url> (fetch|push)"
+            parts = line.split()
+            if len(parts) >= 3 and parts[-1] == '(fetch)':
+                remotes[parts[0]] = parts[1]
+        return remotes
+
+    @override
+    def find_repo_root(self, path: Path) -> Path | None:
+        """Find the Git repository root that contains *path*.
+
+        Uses ``git rev-parse --show-toplevel`` to locate the root.
+
+        Args:
+            path: A filesystem path that may be inside a Git repository.
+
+        Returns:
+            The repository root directory, or ``None`` if *path* is
+            not inside a Git repository.
+        """
+        try:
+            result = subprocess.run(
+                ['git', '-C', str(path), 'rev-parse', '--show-toplevel'],
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=30,
             )
             if result.returncode == 0:
-                return result.stdout.strip()
-        except FileNotFoundError, subprocess.SubprocessError:
+                return Path(result.stdout.strip())
+        except (FileNotFoundError, subprocess.SubprocessError):
             pass
         return None
