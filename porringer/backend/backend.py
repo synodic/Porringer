@@ -74,9 +74,8 @@ class BackendResolver:
         key = (kind, ecosystem)
         if key not in self._resolved:
             available_for_kind = [eco for (k, eco) in self._resolved if k == kind]
-            logger.warning(
-                "No plugins registered for (%s, '%s'). Available %s ecosystems: %s. "
-                'Ensure porringer is installed with all plugin entry points.',
+            logger.debug(
+                "No plugins registered for (%s, '%s'). Available %s ecosystems: %s.",
                 kind.value,
                 ecosystem,
                 kind.value,
@@ -84,6 +83,22 @@ class BackendResolver:
             )
             return None
         return self._resolved[key]
+
+    def is_registered(self, kind: PluginKind, ecosystem: Ecosystem) -> bool:
+        """Return ``True`` if at least one plugin is registered for *(kind, ecosystem)*.
+
+        A registered plugin may still be unavailable (e.g. the underlying
+        tool is not installed yet).  Use :meth:`resolve` to determine
+        whether a *suitable* plugin exists.
+        """
+        return (kind, ecosystem) in self._backend_plugins
+
+    def registered_names(self, kind: PluginKind, ecosystem: Ecosystem) -> list[str]:
+        """Return the names of all plugins registered for *(kind, ecosystem)*.
+
+        Returns an empty list when no plugin is registered for the pair.
+        """
+        return list(self._backend_plugins.get((kind, ecosystem), []))
 
     def validator_for(self, kind: PluginKind, ecosystem: Ecosystem) -> str | None:
         """Return the `package_name_validator()` tag for the resolved plugin.

@@ -250,3 +250,44 @@ class TestResolverEcosystemIsolation:
         plugins = {'alpha': _make('alpha', ecosystem=Ecosystem('python'))}
         resolver = BackendResolver(plugins)
         assert resolver.resolve(PluginKind.PACKAGE, Ecosystem('node')) is None
+
+
+class TestResolverRegistration:
+    """is_registered() and registered_names() distinguish registered-but-unavailable from unregistered."""
+
+    @staticmethod
+    def test_registered_and_available() -> None:
+        """A registered and available plugin is reported as registered."""
+        plugins = {'alpha': _make('alpha')}
+        resolver = BackendResolver(plugins)
+        assert resolver.is_registered(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) is True
+        assert resolver.registered_names(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) == ['alpha']
+        assert resolver.resolve(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) == 'alpha'
+
+    @staticmethod
+    def test_registered_but_unavailable() -> None:
+        """All plugins registered but none available — is_registered is True, resolve is None."""
+        plugins = {
+            'alpha': _make('alpha', available=False),
+            'bravo': _make('bravo', available=False),
+        }
+        resolver = BackendResolver(plugins)
+        assert resolver.is_registered(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) is True
+        assert sorted(resolver.registered_names(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM)) == ['alpha', 'bravo']
+        assert resolver.resolve(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) is None
+
+    @staticmethod
+    def test_not_registered_at_all() -> None:
+        """No plugin registered for the pair — is_registered is False."""
+        plugins = {'alpha': _make('alpha', ecosystem=Ecosystem('python'))}
+        resolver = BackendResolver(plugins)
+        assert resolver.is_registered(PluginKind.PACKAGE, Ecosystem('node')) is False
+        assert resolver.registered_names(PluginKind.PACKAGE, Ecosystem('node')) == []
+        assert resolver.resolve(PluginKind.PACKAGE, Ecosystem('node')) is None
+
+    @staticmethod
+    def test_empty_resolver() -> None:
+        """An empty resolver has nothing registered."""
+        resolver = BackendResolver({})
+        assert resolver.is_registered(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) is False
+        assert resolver.registered_names(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) == []

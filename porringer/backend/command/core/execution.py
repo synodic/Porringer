@@ -28,7 +28,7 @@ from porringer.core.plugin_schema.project_environment import (
 )
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
-from porringer.core.schema import Package, PluginKind
+from porringer.core.schema import Ecosystem, Package, PluginKind
 from porringer.schema import (
     CloneStatusKind,
     ManifestMetadata,
@@ -72,30 +72,70 @@ logger = logging.getLogger(__name__)
 class ExecutionState:
     """Mutable state for a single phased execution run.
 
-    Owns the discovered plugin dicts, grouped phase actions, and
+    Owns the discovered plugin container, grouped phase actions, and
     common parameters that every phase needs.  Provides
     :meth:`refresh_all_plugins` and :meth:`propagate_runtime` as
     methods so callers don't need to pass a half-dozen arguments.
+
+    Metadata fields (``manifest_path``, ``metadata``, ``preferences``)
+    are accessed via the stored :attr:`preview`.
     """
 
     actions: list[SetupAction]
     phases: dict[PluginKind | None, list[SetupAction]]
-    environments: dict[str, Environment]
-    project_environments: dict[str, ProjectEnvironment] | None
-    scm_environments: dict[str, ScmEnvironment] | None
+    plugins: DiscoveredPlugins
     parameters: SetupParameters
     event_queue: asyncio.Queue[ProgressEvent | None] | None
     manifest_directory: Path
-    fallback_dir: Path
-    skip_project: bool
-    manifest_path: Path | None = None
-    metadata: ManifestMetadata | None = None
+    preview: SetupResults
     results: list[SetupActionResult] = field(default_factory=list)
     _resolved_runtime: tuple[str, Path] | None = field(default=None, repr=False)
     """Cached ``(kind, executable)`` pair from the first successful
     runtime resolution.  Set by :meth:`propagate_runtime` and
     re-applied automatically after every plugin re-discovery so that
     newly-created consumer instances inherit the resolved path."""
+
+    # -- convenience accessors (delegate to plugins / preview) ---------
+
+    @property
+    def environments(self) -> dict[str, Environment]:
+        """Environment plugins from the current discovery."""
+        return self.plugins.environments
+
+    @property
+    def project_environments(self) -> dict[str, ProjectEnvironment] | None:
+        """Project-environment plugins (may be empty dict)."""
+        return self.plugins.project_environments or None
+
+    @property
+    def scm_environments(self) -> dict[str, ScmEnvironment] | None:
+        """SCM-environment plugins (may be empty dict)."""
+        return self.plugins.scm_environments or None
+
+    @property
+    def manifest_path(self) -> Path | None:
+        """Path to the manifest file (from preview)."""
+        return self.preview.manifest_path
+
+    @property
+    def metadata(self) -> ManifestMetadata | None:
+        """Display metadata from the manifest."""
+        return self.preview.metadata
+
+    @property
+    def preferences(self) -> dict[Ecosystem, str]:
+        """Ecosystem → plugin-name preferences from the manifest."""
+        return dict(self.preview.preferences)
+
+    @property
+    def skip_project(self) -> bool:
+        """Whether project-sync actions should be skipped."""
+        return self.parameters.project_directory is False
+
+    @property
+    def fallback_dir(self) -> Path:
+        """Working directory for SCM and post-sync command phases."""
+        return determine_fallback_dir(self.parameters, self.manifest_directory)
 
     # -- convenience properties ----------------------------------------
 
@@ -115,10 +155,7 @@ class ExecutionState:
         """
         refresh_path()
         invalidate_plugin_cache()
-        plugins = discover_all_plugins()
-        self.environments = dict(plugins.environments)
-        self.project_environments = dict(plugins.project_environments)
-        self.scm_environments = dict(plugins.scm_environments)
+        self.plugins = discover_all_plugins().copy()
         self._apply_resolved_runtime()
 
     def propagate_runtime(self) -> None:
@@ -133,8 +170,7 @@ class ExecutionState:
         """
         result = _propagate_runtime(
             self.phases[PluginKind.RUNTIME],
-            self.environments,
-            self.project_environments,
+            self.plugins,
         )
         if result is not None:
             self._resolved_runtime = result
@@ -147,11 +183,7 @@ class ExecutionState:
         if self._resolved_runtime is None:
             return
         kind, executable = self._resolved_runtime
-        proj_envs: dict[str, ProjectEnvironment] = self.project_environments or {}
-        all_plugins: dict[str, Environment | ProjectEnvironment] = {
-            **self.environments,
-            **proj_envs,
-        }
+        all_plugins = self.plugins.all_plugins
         for name, plugin in all_plugins.items():
             if isinstance(plugin, RuntimeConsumer):
                 consumer_type = cast(type[RuntimeConsumer], type(plugin))
@@ -207,21 +239,18 @@ class ExecutionState:
 
     def resolve_deferred(self, actions: list[SetupAction]) -> None:
         """Resolve deferred actions and update their CLI commands."""
-        _resolve_deferred_actions(
+        resolve_deferred_actions(
             actions,
-            self.environments,
+            self.plugins,
             self.strategy,
-            scm_environments=self.scm_environments,
-            project_environments=self.project_environments,
+            preferences=self.preferences,
         )
         for action in actions:
             if action.cli_command is None or action.installer is not None:
                 action.cli_command = get_cli_command(
                     action,
-                    self.environments,
+                    self.plugins,
                     self.strategy,
-                    self.project_environments,
-                    self.scm_environments,
                 )
 
     def early_return(self) -> SetupResults:
@@ -232,6 +261,7 @@ class ExecutionState:
             manifest_path=self.manifest_path,
             root_directory=self.manifest_directory,
             metadata=self.metadata,
+            preferences=self.preview.preferences,
         )
 
 
@@ -1107,16 +1137,11 @@ async def execute_single(
         # Shallow-copy the plugin dicts so that mutations (e.g.
         # runtime_executable propagation) don't leak back into
         # the caller's shared DiscoveredPlugins object.
-        environments=dict(plugins.environments),
-        project_environments=(dict(plugins.project_environments) if plugins.project_environments else None),
-        scm_environments=(dict(plugins.scm_environments) if plugins.scm_environments else None),
+        plugins=plugins.copy(),
         parameters=parameters,
         event_queue=event_queue,
         manifest_directory=root_directory,
-        fallback_dir=determine_fallback_dir(parameters, root_directory),
-        skip_project=parameters.project_directory is False,
-        manifest_path=preview.manifest_path,
-        metadata=preview.metadata,
+        preview=preview,
     )
 
     # Populate CLI commands for all resolved actions
@@ -1139,6 +1164,7 @@ async def execute_single(
         manifest_path=state.manifest_path,
         root_directory=state.manifest_directory,
         metadata=state.metadata,
+        preferences=state.preview.preferences,
     )
 
 
@@ -1169,17 +1195,14 @@ def _populate_cli_commands(actions: list[SetupAction], state: ExecutionState) ->
     for action in actions:
         action.cli_command = get_cli_command(
             action,
-            state.environments,
+            state.plugins,
             state.strategy,
-            state.project_environments,
-            state.scm_environments,
         )
 
 
 def _propagate_runtime(
     runtime_actions: list[SetupAction],
-    environments: dict[str, Environment],
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    plugins: DiscoveredPlugins,
 ) -> tuple[str, Path] | None:
     """Resolve the interpreter path and propagate to downstream consumers.
 
@@ -1193,7 +1216,7 @@ def _propagate_runtime(
         A ``(kind, executable)`` tuple on success, or ``None`` if no
         runtime could be resolved.
     """
-    proj_envs = project_environments or {}
+    environments = plugins.environments
 
     # Find a RuntimeProvider among the runtime action installers
     for action in runtime_actions:
@@ -1223,10 +1246,7 @@ def _propagate_runtime(
         inject_runtime_path(executable)
 
         # Propagate to all plugins (environment + project-environment) that consume this runtime kind
-        all_plugins: dict[str, Environment | ProjectEnvironment] = {
-            **environments,
-            **proj_envs,
-        }
+        all_plugins = plugins.all_plugins
         for name, downstream in all_plugins.items():
             if isinstance(downstream, RuntimeConsumer):
                 downstream_type = cast(type[RuntimeConsumer], type(downstream))
@@ -1240,12 +1260,11 @@ def _propagate_runtime(
     return None
 
 
-def _resolve_deferred_actions(
+def resolve_deferred_actions(
     actions: list[SetupAction],
-    environments: dict[str, Environment],
+    plugins: DiscoveredPlugins,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
-    scm_environments: dict[str, ScmEnvironment] | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    preferences: dict[Ecosystem, str] | None = None,
 ) -> None:
     """Resolve deferred actions whose `installer` is `None`.
 
@@ -1257,21 +1276,15 @@ def _resolve_deferred_actions(
 
     Args:
         actions: Mutable list of actions to resolve in-place.
-        environments: Freshly-discovered environment plugins.
+        plugins: Freshly-discovered plugin container.
         strategy: Sync strategy (for description verb).
-        scm_environments: Optional SCM-environment plugins.
-        project_environments: Optional project-environment plugins.
+        preferences: Optional ecosystem → plugin-name preferences from the manifest.
     """
     deferred = [a for a in actions if a.installer is None and a.ecosystem is not None]
     if not deferred:
         return
 
-    all_plugins: dict[str, Environment | ScmEnvironment | ProjectEnvironment] = {
-        **environments,
-        **(scm_environments or {}),
-        **(project_environments or {}),
-    }
-    resolver = BackendResolver(all_plugins)
+    resolver = BackendResolver(plugins.all_plugins, preferences)
     verb = STRATEGY_VERB[strategy]
 
     for action in deferred:
@@ -1289,7 +1302,22 @@ def _resolve_deferred_actions(
             )
             logger.info('Deferred action resolved: %s -> %s', action.description, installer)
         else:
-            logger.warning('Deferred action still unresolved: %s', action.description)
+            registered = resolver.registered_names(action.kind, action.ecosystem)
+            if registered:
+                logger.error(
+                    'Deferred action permanently unresolved: %s (registered plugins %s for %s/%s are all unavailable)',
+                    action.description,
+                    registered,
+                    action.kind.value,
+                    action.ecosystem,
+                )
+            else:
+                logger.error(
+                    'Deferred action permanently unresolved: %s (no plugin found for %s/%s)',
+                    action.description,
+                    action.kind.value,
+                    action.ecosystem,
+                )
 
 
 def skip_actions(

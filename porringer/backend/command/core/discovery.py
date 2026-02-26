@@ -11,7 +11,6 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import NamedTuple
 
 from porringer.backend.builder import Builder
 from porringer.core.plugin_schema.environment import Environment
@@ -22,12 +21,36 @@ from porringer.core.schema import Plugin
 logger = logging.getLogger(__name__)
 
 
-class DiscoveredPlugins(NamedTuple):
-    """Result of discovering all three plugin groups at once."""
+@dataclass
+class DiscoveredPlugins:
+    """Result of discovering all three plugin groups at once.
+
+    Provides :attr:`all_plugins` for a merged view and :meth:`copy`
+    for shallow-copying the dict fields (used by the execution engine
+    to prevent mutation from leaking back to callers).
+    """
 
     environments: dict[str, Environment]
     project_environments: dict[str, ProjectEnvironment]
     scm_environments: dict[str, ScmEnvironment]
+
+    @property
+    def all_plugins(self) -> dict[str, Environment | ProjectEnvironment | ScmEnvironment]:
+        """Merged view of every discovered plugin keyed by canonical name."""
+        return {**self.environments, **self.project_environments, **self.scm_environments}
+
+    def copy(self) -> DiscoveredPlugins:
+        """Return a shallow copy with independent dict instances.
+
+        Plugin objects themselves are shared; only the dict containers
+        are duplicated so that per-run mutations (e.g. setting
+        ``runtime_executable``) don't leak back to the shared cache.
+        """
+        return DiscoveredPlugins(
+            environments=dict(self.environments),
+            project_environments=dict(self.project_environments),
+            scm_environments=dict(self.scm_environments),
+        )
 
 
 # ---------------------------------------------------------------------------
