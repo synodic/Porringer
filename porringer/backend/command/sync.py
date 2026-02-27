@@ -181,6 +181,13 @@ class SyncCommands:
                     a for a in preview.actions if a.installer is None or a.installer in parameters.plugins
                 ]
 
+            # Filter actions to only included packages
+            if parameters.include_packages:
+                names = {n.lower() for n in parameters.include_packages}
+                preview.actions = [
+                    a for a in preview.actions if a.package is None or a.package.name.lower() in names
+                ]
+
             # Apply caller-level prerelease overrides
             if parameters.prerelease_packages:
                 overrides = {n.lower() for n in parameters.prerelease_packages}

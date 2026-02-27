@@ -189,6 +189,16 @@ class SetupParameters(BaseModel):
             '``action.package.name``.  ``None`` means no overrides.'
         ),
     )
+    include_packages: set[str] | None = Field(
+        default=None,
+        description=(
+            'Set of package names to include.  When set, only actions '
+            'whose ``action.package.name`` appears in this set '
+            '(case-insensitive) are executed.  ``None`` means all '
+            'packages.  Non-package actions (post-sync commands, etc.) '
+            'are always included regardless of this filter.'
+        ),
+    )
     max_concurrency: int = Field(
         default=8,
         description=(
@@ -198,11 +208,11 @@ class SetupParameters(BaseModel):
             'TaskGroup-dispatched coroutine.'
         ),
     )
-    plugins: list[str] | None = Field(
+    plugins: set[str] | None = Field(
         default=None,
         description=(
-            'List of plugin names to include. None means all plugins.'
-            ' Only actions handled by named plugins will be executed.'
+            'Set of plugin names to include.  ``None`` means all plugins.'
+            '  Only actions handled by named plugins will be executed.'
         ),
     )
 
