@@ -68,7 +68,7 @@ class TestSetupParametersPlugins:
             params = SetupParameters(
                 paths=Path(tmpdir),
                 dry_run=True,
-                plugins=[resolved_installer],
+                plugins={resolved_installer},
             )
             batch = test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
@@ -91,7 +91,7 @@ class TestSetupParametersPlugins:
             params = SetupParameters(
                 paths=Path(tmpdir),
                 dry_run=True,
-                plugins=['nonexistent_plugin_xyz'],
+                plugins={'nonexistent_plugin_xyz'},
             )
             batch = test_api.sync.run(params)
             # Only post_sync commands (installer=None) should remain
@@ -115,7 +115,7 @@ class TestSetupParametersPlugins:
             params = SetupParameters(
                 paths=Path(tmpdir),
                 dry_run=True,
-                plugins=['nonexistent_plugin_xyz'],
+                plugins={'nonexistent_plugin_xyz'},
             )
             batch = test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
@@ -138,7 +138,7 @@ class TestSetupParametersPlugins:
             params = SetupParameters(
                 paths=Path(tmpdir),
                 dry_run=True,
-                plugins=['nonexistent_plugin_xyz'],
+                plugins={'nonexistent_plugin_xyz'},
             )
             batch = await execute_via_stream(test_api, params)
             for manifest_result in batch.manifest_results:

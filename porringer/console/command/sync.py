@@ -57,7 +57,8 @@ class _SyncOptions:
     fail_fast: bool = True
     strategy: SyncStrategy = SyncStrategy.MINIMAL
     project_directory: Path | None = None
-    plugins: list[str] | None = None
+    plugins: set[str] | None = None
+    include_packages: set[str] | None = None
 
 
 def _create_api(configuration: ConsoleConfiguration) -> API:
@@ -323,6 +324,7 @@ def _handle_manifest(configuration: ConsoleConfiguration, options: _SyncOptions)
             dry_run=options.dry_run,
             strategy=options.strategy,
             plugins=options.plugins,
+            include_packages=options.include_packages,
         )
     elif options.path:
         if not options.path.exists():
@@ -337,6 +339,7 @@ def _handle_manifest(configuration: ConsoleConfiguration, options: _SyncOptions)
             dry_run=options.dry_run,
             strategy=options.strategy,
             plugins=options.plugins,
+            include_packages=options.include_packages,
         )
     else:
         # Default to current directory
@@ -348,6 +351,7 @@ def _handle_manifest(configuration: ConsoleConfiguration, options: _SyncOptions)
             dry_run=options.dry_run,
             strategy=options.strategy,
             plugins=options.plugins,
+            include_packages=options.include_packages,
         )
 
     # For dry runs, use the simple sync method (no progress bar needed).
@@ -526,6 +530,6 @@ def sync_default(
             fail_fast=fail_fast,
             strategy=sync_strategy,
             project_directory=project_dir.resolve() if project_dir else None,
-            plugins=plugin if plugin else None,
+            plugins=set(plugin) if plugin else None,
         ),
     )
