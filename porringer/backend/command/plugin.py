@@ -74,7 +74,7 @@ class PluginCommands:
         return build_plugin_info(all_plugins, kinds=kinds)
 
     @staticmethod
-    def list_packages(plugin_name: str, project_path: Path | None = None) -> builtins.list[Package]:
+    async def list_packages(plugin_name: str, project_path: Path | None = None) -> builtins.list[Package]:
         """List packages installed in a plugin's environment.
 
         Discovers the named plugin among `environment` plugins,
@@ -106,7 +106,7 @@ class PluginCommands:
             if str(canonicalize_name(name)) == normalized:
                 if not type(env).is_available():
                     raise PluginError(f"Plugin '{plugin_name}' is not available on this system")
-                return env.packages(project_path=project_path)
+                return await env.packages(project_path=project_path)
 
         available = sorted(environments.keys())
         raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(available)}")

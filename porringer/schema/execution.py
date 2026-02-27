@@ -66,7 +66,7 @@ class SkipReason(Enum):
     ALREADY_LATEST = auto()
 
 
-@dataclass
+@dataclass(slots=True)
 class SetupAction:
     """A single action to perform during setup.
 
@@ -108,7 +108,7 @@ class SetupAction:
     include_prereleases: bool = False
 
 
-@dataclass
+@dataclass(slots=True)
 class SetupActionResult:
     """Result of executing a single setup action.
 
@@ -189,6 +189,15 @@ class SetupParameters(BaseModel):
             '``action.package.name``.  ``None`` means no overrides.'
         ),
     )
+    max_concurrency: int = Field(
+        default=8,
+        description=(
+            'Maximum number of concurrent tasks for parallel package '
+            'operations.  Set to 0 for unlimited concurrency.  '
+            'Applied via an ``asyncio.Semaphore`` around each '
+            'TaskGroup-dispatched coroutine.'
+        ),
+    )
     plugins: list[str] | None = Field(
         default=None,
         description=(
@@ -198,7 +207,7 @@ class SetupParameters(BaseModel):
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class SetupResults:
     """Results of a setup operation.
 
@@ -219,7 +228,7 @@ class SetupResults:
     preferences: dict[Ecosystem, str] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(slots=True)
 class BatchSetupResults:
     """Results of batch setup operations across multiple manifests.
 

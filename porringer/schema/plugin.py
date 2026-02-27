@@ -7,7 +7,7 @@ from packaging.version import Version
 from porringer.core.schema import PluginKind
 
 
-@dataclass
+@dataclass(slots=True)
 class PluginInfo:
     """Metadata about a discovered plugin.
 
@@ -27,7 +27,7 @@ class PluginInfo:
     tool_version: Version | None
 
 
-@dataclass
+@dataclass(slots=True)
 class PluginOperationResult:
     """Result of a plugin operation (install/uninstall/update).
 

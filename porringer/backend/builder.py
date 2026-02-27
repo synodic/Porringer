@@ -19,7 +19,7 @@ from porringer.utility.exception import PluginDependencyError
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class PluginInformation[P]:
     """Gathered information about available plugins."""
 

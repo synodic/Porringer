@@ -61,7 +61,7 @@ class BrewEnvironment(Environment):
         return ['brew', 'upgrade', package.name]
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available formula updates via ``brew outdated``.
 
         Uses ``brew outdated --json`` to discover formulas with
@@ -74,7 +74,7 @@ class BrewEnvironment(Environment):
         Returns:
             A list of packages with their latest available version.
         """
-        outdated = self._run_json_command(['brew', 'outdated', '--json'])
+        outdated = await self._run_json_command(['brew', 'outdated', '--json'])
         if not isinstance(outdated, list):
             return []
 
@@ -85,7 +85,7 @@ class BrewEnvironment(Environment):
             if requested is not None and name.lower() not in requested:
                 continue
             # Resolve latest upstream version via brew info
-            info = self._run_json_command(['brew', 'info', name, '--json=v2'])
+            info = await self._run_json_command(['brew', 'info', name, '--json=v2'])
             if isinstance(info, dict):
                 formulas = info.get('formulae', [])
                 if formulas:
@@ -110,7 +110,7 @@ class BrewEnvironment(Environment):
         if result is not None and result.version is None:
             result = Package(
                 name=result.name,
-                version=self.__class__._get_formula_version(result.name),
+                version=await self.__class__._get_formula_version(result.name),
             )
         return result
 
@@ -125,12 +125,12 @@ class BrewEnvironment(Environment):
         if result is not None and result.version is None:
             result = Package(
                 name=result.name,
-                version=self.__class__._get_formula_version(result.name),
+                version=await self.__class__._get_formula_version(result.name),
             )
         return result
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Lists all installed formulas in Homebrew.
 
         Homebrew manages system packages globally; *project_path* is
@@ -142,7 +142,7 @@ class BrewEnvironment(Environment):
         Returns:
             A list of installed packages
         """
-        formulas = self._run_json_command(['brew', 'list', '--formula', '--json'])
+        formulas = await self._run_json_command(['brew', 'list', '--formula', '--json'])
         if not isinstance(formulas, list):
             return []
 
@@ -155,7 +155,7 @@ class BrewEnvironment(Environment):
         return packages
 
     @classmethod
-    def _get_formula_version(cls, formula: str) -> str | None:
+    async def _get_formula_version(cls, formula: str) -> str | None:
         """Gets the installed version for a formula.
 
         Args:
@@ -164,7 +164,7 @@ class BrewEnvironment(Environment):
         Returns:
             The version string, or None if not found
         """
-        info = cls._run_json_command(['brew', 'info', formula, '--json=v2'])
+        info = await cls._run_json_command(['brew', 'info', formula, '--json=v2'])
         if not isinstance(info, dict):
             return None
         formulas = info.get('formulae', [])

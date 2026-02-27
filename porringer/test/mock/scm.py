@@ -23,16 +23,16 @@ class MockScm(ScmEnvironment):
         return Ecosystem('git')
 
     @override
-    def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
+    async def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
         """No-op clone for testing."""
         return True
 
     @override
-    def get_remote_urls(self, destination: Path) -> dict[str, str]:
+    async def get_remote_urls(self, destination: Path) -> dict[str, str]:
         """Always returns empty dict for testing."""
         return {}
 
     @override
-    def find_repo_root(self, path: Path) -> Path | None:
+    async def find_repo_root(self, path: Path) -> Path | None:
         """Always returns None for testing."""
         return None

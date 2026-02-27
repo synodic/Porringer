@@ -21,7 +21,7 @@ class ProgressEventKind(Enum):
     SUB_ACTION_PROGRESS = auto()
 
 
-@dataclass
+@dataclass(slots=True)
 class SubActionProgress:
     """Fine-grained progress update from within a plugin operation.
 
@@ -45,7 +45,7 @@ class SubActionProgress:
     stream: Literal['stdout', 'stderr'] | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class ProgressEvent:
     """A single progress event from the setup execution stream.
 
@@ -76,7 +76,7 @@ class ProgressEvent:
     plugin_availability: dict[str, bool] | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class CancellationToken:
     """Token for cooperative cancellation of async operations.
 

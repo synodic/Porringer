@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+import httpx
+
 from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.plugin_manager import (
@@ -67,7 +69,7 @@ from .resolution import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class ExecutionState:
     """Mutable state for a single phased execution run.
 
@@ -157,7 +159,7 @@ class ExecutionState:
         self.plugins = discover_all_plugins().copy()
         self._apply_resolved_runtime()
 
-    def propagate_runtime(self) -> None:
+    async def propagate_runtime(self) -> None:
         """Resolve interpreter paths from completed runtime actions and propagate downstream.
 
         Finds the first ``RuntimeProvider`` among the RUNTIME-phase
@@ -167,7 +169,7 @@ class ExecutionState:
         calls to :meth:`refresh_all_plugins` can re-apply it to
         newly-created plugin instances.
         """
-        result = _propagate_runtime(
+        result = await _propagate_runtime(
             self.phases[PluginKind.RUNTIME],
             self.plugins,
         )
@@ -264,7 +266,7 @@ class ExecutionState:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class PluginContext:
     """Bundled plugin-management context for the execution helpers.
 
@@ -413,16 +415,15 @@ async def execute_run_command(
             message = f'Command not found: {action.command[0]}' if isinstance(e, FileNotFoundError) else str(e)
             return SetupActionResult(action=action, success=False, message=message)
     else:
-        # Non-streaming path — run in executor to avoid blocking the loop
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _run_command_sync, action, working_dir, timeout)
+        # Non-streaming path — run in thread to avoid blocking the loop
+        return await asyncio.to_thread(_run_command_sync, action, working_dir, timeout)
 
 
 def _run_command_sync(action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
     """Synchronous subprocess helper for post-sync commands.
 
     Runs the command with ``subprocess.run`` and returns a result.
-    Called via ``run_in_executor`` so the event loop stays unblocked.
+    Called via ``asyncio.to_thread`` so the event loop stays unblocked.
     """
     assert action.command is not None  # guaranteed by caller guard
 
@@ -781,38 +782,48 @@ async def _dry_run_package_actions(
     """
     project_path = plugin_context.project_path if plugin_context else None
     project_environments = plugin_context.project_environments if plugin_context else None
+    max_concurrency = parameters.max_concurrency if parameters else 0
 
     result_slots: list[SetupActionResult | None] = [None] * len(package_actions)
 
-    async def _check(index: int, action: SetupAction) -> None:
-        # Emit ACTION_STARTED *before* the check so GUI clients can
-        # show a spinner while the dry-run is in progress.
-        if event_queue is not None:
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
-        try:
-            result = await async_dry_run_action(
-                action,
-                environments,
-                project_path=project_path,
-                project_environments=project_environments,
-                parameters=parameters,
-            )
-        except Exception as exc:
-            logger.debug('Dry-run check failed for %s: %s', action.description, exc)
-            result = SetupActionResult(action=action, success=False, message=str(exc))
-        result_slots[index] = result
-        if event_queue is not None:
-            event_queue.put_nowait(
-                ProgressEvent(
-                    kind=ProgressEventKind.ACTION_COMPLETED,
-                    action=action,
-                    result=result,
-                )
-            )
+    semaphore: asyncio.Semaphore | None = asyncio.Semaphore(max_concurrency) if max_concurrency > 0 else None
 
-    async with asyncio.TaskGroup() as tg:
+    async def _check(index: int, action: SetupAction, client: httpx.AsyncClient) -> None:
+        if semaphore is not None:
+            await semaphore.acquire()
+        try:
+            # Emit ACTION_STARTED *before* the check so GUI clients can
+            # show a spinner while the dry-run is in progress.
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            try:
+                result = await async_dry_run_action(
+                    action,
+                    environments,
+                    project_path=project_path,
+                    project_environments=project_environments,
+                    parameters=parameters,
+                    http_client=client,
+                )
+            except Exception as exc:
+                logger.debug('Dry-run check failed for %s: %s', action.description, exc)
+                result = SetupActionResult(action=action, success=False, message=str(exc))
+            result_slots[index] = result
+            if event_queue is not None:
+                event_queue.put_nowait(
+                    ProgressEvent(
+                        kind=ProgressEventKind.ACTION_COMPLETED,
+                        action=action,
+                        result=result,
+                    )
+                )
+        finally:
+            if semaphore is not None:
+                semaphore.release()
+
+    async with httpx.AsyncClient(timeout=10.0) as shared_client, asyncio.TaskGroup() as tg:
         for i, action in enumerate(package_actions):
-            tg.create_task(_check(i, action))
+            tg.create_task(_check(i, action, shared_client))
 
     # All tasks completed — return results in original order.
     # Replace any unfilled slots (e.g. from cancellation) with
@@ -903,29 +914,37 @@ async def _run_parallel_packages(
     """
     results: dict[int, SetupActionResult] = {}
     action_indices = {id(action): i for i, action in enumerate(parallel_actions)}
+    max_concurrency = parameters.max_concurrency
+    semaphore: asyncio.Semaphore | None = asyncio.Semaphore(max_concurrency) if max_concurrency > 0 else None
 
     async def package_with_event(action: SetupAction) -> None:
-        if event_queue is not None:
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+        if semaphore is not None:
+            await semaphore.acquire()
         try:
-            result = await execute_package(
-                action,
-                environments,
-                parameters.strategy,
-                event_queue,
-                plugin_context,
-            )
-        except Exception as e:
-            result = SetupActionResult(action=action, success=False, message=str(e))
-        if event_queue is not None:
-            event_queue.put_nowait(
-                ProgressEvent(
-                    kind=ProgressEventKind.ACTION_COMPLETED,
-                    action=action,
-                    result=result,
+            if event_queue is not None:
+                event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            try:
+                result = await execute_package(
+                    action,
+                    environments,
+                    parameters.strategy,
+                    event_queue,
+                    plugin_context,
                 )
-            )
-        results[action_indices[id(action)]] = result
+            except Exception as e:
+                result = SetupActionResult(action=action, success=False, message=str(e))
+            if event_queue is not None:
+                event_queue.put_nowait(
+                    ProgressEvent(
+                        kind=ProgressEventKind.ACTION_COMPLETED,
+                        action=action,
+                        result=result,
+                    )
+                )
+            results[action_indices[id(action)]] = result
+        finally:
+            if semaphore is not None:
+                semaphore.release()
 
     try:
         async with asyncio.TaskGroup() as tg:
@@ -1199,7 +1218,7 @@ def _populate_cli_commands(actions: list[SetupAction], state: ExecutionState) ->
         )
 
 
-def _propagate_runtime(
+async def _propagate_runtime(
     runtime_actions: list[SetupAction],
     plugins: DiscoveredPlugins,
 ) -> tuple[str, Path] | None:
@@ -1227,7 +1246,7 @@ def _propagate_runtime(
 
         kind = cast(type[RuntimeProvider], type(env)).provided_runtime_kind()
         tag = action.package.name
-        executable = env.resolve_executable(tag)
+        executable = await env.resolve_executable(tag)
         if executable is None:
             logger.debug(
                 'RuntimeProvider %s could not resolve executable for tag %s',
@@ -1435,7 +1454,7 @@ async def _execute_project_sync(
     ``stream_command`` so that stdout/stderr lines are emitted as
     ``SUB_ACTION_PROGRESS`` events in real time.  Otherwise the
     plugin's synchronous ``sync()`` method is called via
-    ``run_in_executor``.
+    ``asyncio.to_thread``.
 
     When `parameters.project_directory` is an explicit `Path`
     it is used unconditionally.  Otherwise the plugin's
@@ -1523,8 +1542,7 @@ async def _execute_project_sync(
             success = cmd_result.returncode == 0
         else:
             # Non-streaming — delegate to the plugin's synchronous sync()
-            loop = asyncio.get_running_loop()
-            success = await loop.run_in_executor(None, proj_env.sync, params)
+            success = await proj_env.sync(params)
 
         if success:
             return SetupActionResult(
@@ -1612,7 +1630,7 @@ async def _execute_scm_clone(
     clone is run via ``stream_command`` with ``--progress`` so that
     stderr progress lines (``Receiving objects: 42%``) are emitted
     as ``SUB_ACTION_PROGRESS`` events in real time.  Otherwise the
-    plugin's synchronous ``clone()`` is called via ``run_in_executor``.
+    plugin's synchronous ``clone()`` is called via ``asyncio.to_thread``.
 
     Args:
         action: The SCM clone action.
@@ -1648,7 +1666,7 @@ async def _execute_scm_clone(
     destination = working_dir
 
     # Skip if already cloned (checks all remotes and walks up to repo root)
-    clone_status = scm_env.is_cloned(url, destination)
+    clone_status = await scm_env.is_cloned(url, destination)
 
     skip_result = clone_status_to_result(action, clone_status, url, destination)
     if skip_result is not None:
@@ -1689,8 +1707,7 @@ async def _execute_scm_clone(
             success = cmd_result.returncode == 0
         else:
             # Non-streaming fallback
-            loop = asyncio.get_running_loop()
-            success = await loop.run_in_executor(None, lambda: scm_env.clone(url, destination, dry=False))
+            success = await scm_env.clone(url, destination, dry=False)
 
         message = (
             f"Cloned '{url}' via {action.installer}" if success else f"Clone failed for '{url}' via {action.installer}"

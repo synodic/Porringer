@@ -5,7 +5,6 @@ import json
 import logging
 import re
 import shutil
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import override
@@ -310,7 +309,7 @@ class PIPEnvironment(PythonEnvironment):
             return
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates using ``pip list --outdated``.
 
         Uses the native ``pip list --outdated --format=json`` command
@@ -334,17 +333,19 @@ class PIPEnvironment(PythonEnvironment):
             cmd.append('--pre')
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=60,
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            entries: list[dict[str, str]] = json.loads(result.stdout)
-        except (subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError) as exc:
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+            if proc.returncode != 0:
+                raise RuntimeError('pip list --outdated exited with non-zero status')
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+            entries: list[dict[str, str]] = json.loads(stdout)
+        except (OSError, RuntimeError, json.JSONDecodeError) as exc:
             logger.debug('pip list --outdated failed, falling back to PyPI: %s', exc)
-            return self._check_pypi_updates(params)
+            return await self._check_pypi_updates(params)
 
         # Filter to requested packages if specified
         requested = {p.name.lower() for p in params.packages} if params.packages else None
@@ -357,7 +358,7 @@ class PIPEnvironment(PythonEnvironment):
         return results
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages visible to the active Python.
 
         When *project_path* is provided, the method discovers the
@@ -394,7 +395,7 @@ class PIPEnvironment(PythonEnvironment):
         logger = logging.getLogger('porringer.pip.packages')
 
         # Try pip list first
-        packages = self._list_packages_via_pip(logger, effective_python)
+        packages = await self._list_packages_via_pip(logger, effective_python)
         if packages is not None:
             self._cached_packages = packages
             self._cached_python = effective_python
@@ -402,7 +403,7 @@ class PIPEnvironment(PythonEnvironment):
 
         # Fallback: importlib.metadata (works without pip module installed)
         logger.warning('pip module unavailable for %s, falling back to importlib.metadata', effective_python)
-        packages = self._list_packages_via_importlib(logger, effective_python)
+        packages = await self._list_packages_via_importlib(logger, effective_python)
         if packages is not None:
             self._cached_packages = packages
             self._cached_python = effective_python
@@ -413,7 +414,7 @@ class PIPEnvironment(PythonEnvironment):
         return self._cached_packages
 
     @staticmethod
-    def _list_packages_via_pip(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
+    async def _list_packages_via_pip(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
         """List packages using `python -m pip list --format=json`.
 
         Args:
@@ -424,22 +425,26 @@ class PIPEnvironment(PythonEnvironment):
             A list of packages, or `None` if pip is not usable.
         """
         try:
-            result = subprocess.run(
-                [python, '-m', 'pip', 'list', '--format=json'],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                python,
+                '-m',
+                'pip',
+                'list',
+                '--format=json',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            entries: list[dict[str, str]] = json.loads(result.stdout)
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                logger.debug('pip list failed (pip module may not be installed)')
+                return None
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+            entries: list[dict[str, str]] = json.loads(stdout)
             return [
                 Package(name=entry['name'], version=entry.get('version'))
                 for entry in entries
                 if entry.get('name') is not None
             ]
-        except subprocess.CalledProcessError as e:
-            logger.debug(f'pip list failed (pip module may not be installed): {e}')
-            return None
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning(f'Failed to parse pip package list: {e}')
             return []
@@ -448,7 +453,7 @@ class PIPEnvironment(PythonEnvironment):
             return []
 
     @staticmethod
-    def _list_packages_via_importlib(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
+    async def _list_packages_via_importlib(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
         """List packages using `importlib.metadata` via subprocess.
 
         This fallback works in any Python environment, even when the pip
@@ -468,22 +473,24 @@ class PIPEnvironment(PythonEnvironment):
             'if d.metadata.get("Name") is not None]))'
         )
         try:
-            result = subprocess.run(
-                [python, '-c', script],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                python,
+                '-c',
+                script,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            entries: list[dict[str, str]] = json.loads(result.stdout)
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                logger.warning('importlib.metadata fallback failed')
+                return None
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+            entries: list[dict[str, str]] = json.loads(stdout)
             return [
                 Package(name=entry['name'], version=entry.get('version'))
                 for entry in entries
                 if entry.get('name') is not None
             ]
-        except subprocess.CalledProcessError as e:
-            logger.warning(f'importlib.metadata fallback failed: {e}')
-            return None
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning(f'Failed to parse importlib.metadata output: {e}')
             return None

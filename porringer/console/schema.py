@@ -11,7 +11,7 @@ from porringer.schema import LocalConfiguration
 MAX_VERBOSITY_LEVEL = 3
 
 
-@dataclass
+@dataclass(slots=True)
 class LogLevel:
     """Log level metadata"""
 

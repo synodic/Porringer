@@ -124,7 +124,7 @@ class TestSetupParametersPlugins:
                 assert len(command_actions) == expected_command_count
 
     @staticmethod
-    def test_plugins_filter_applies_in_execute_stream(test_api: API) -> None:
+    async def test_plugins_filter_applies_in_execute_stream(test_api: API) -> None:
         """The plugins filter also applies when using execute_stream."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -140,7 +140,7 @@ class TestSetupParametersPlugins:
                 dry_run=True,
                 plugins=['nonexistent_plugin_xyz'],
             )
-            batch = execute_via_stream(test_api, params)
+            batch = await execute_via_stream(test_api, params)
             for manifest_result in batch.manifest_results:
                 for action in manifest_result.actions:
                     assert action.installer is None

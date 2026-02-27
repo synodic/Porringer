@@ -69,7 +69,7 @@ class PIPXEnvironment(PythonEnvironment):
         return cmd
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages in the given environment.
 
         pipx manages isolated CLI tool installations globally, so

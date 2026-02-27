@@ -8,6 +8,8 @@ import asyncio
 import logging
 from pathlib import Path
 
+import httpx
+
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
@@ -38,6 +40,7 @@ async def async_dry_run_action(
     scm_environments: dict[str, ScmEnvironment] | None = None,
     working_dir: Path | None = None,
     parameters: SetupParameters | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> SetupActionResult:
     """Simulate executing an action in dry-run mode (async).
 
@@ -65,6 +68,8 @@ async def async_dry_run_action(
         parameters: Full setup parameters.  When provided, ``strategy``
             and ``detect_updates`` are read from it.  When ``None``,
             ``SyncStrategy.MINIMAL`` is used.
+        http_client: Shared ``httpx.AsyncClient`` for connection pooling.
+            When ``None``, each update check creates its own client.
 
     Returns:
         The simulated result.
@@ -77,6 +82,7 @@ async def async_dry_run_action(
                 project_path=project_path,
                 project_environments=project_environments,
                 parameters=parameters,
+                http_client=http_client,
             )
         case PluginKind.SCM:
             return await _async_dry_run_scm_action(
@@ -171,8 +177,7 @@ async def _async_dry_run_scm_action(
     scm_env = scm_envs[action.installer]
     url = action.package.name
 
-    loop = asyncio.get_running_loop()
-    clone_status = await loop.run_in_executor(None, lambda: scm_env.is_cloned(url, working_dir))
+    clone_status = await scm_env.is_cloned(url, working_dir)
 
     return clone_status_to_result(action, clone_status, url, working_dir) or SetupActionResult(
         action=action, success=True
@@ -232,6 +237,7 @@ async def _async_dry_run_package_action(
     project_path: Path | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
     parameters: SetupParameters | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> SetupActionResult:
     """Simulate a package or plugin action in dry-run mode.
 
@@ -248,6 +254,7 @@ async def _async_dry_run_package_action(
         project_path=project_path,
         project_environments=project_environments,
         detect_updates=detect_updates,
+        http_client=http_client,
     )
 
     resolved = await resolve_operation(action, environments, strategy, ctx)

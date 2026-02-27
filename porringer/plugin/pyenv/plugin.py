@@ -1,7 +1,7 @@
 """Plugin implementation for pyenv-managed Python runtimes."""
 
+import asyncio
 import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import override
@@ -78,7 +78,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     # ------------------------------------------------------------------
 
     @override
-    def resolve_executable(self, tag: str) -> Path | None:
+    async def resolve_executable(self, tag: str) -> Path | None:
         """Return the path to the Python interpreter for a pyenv-managed runtime.
 
         Uses `pyenv prefix <tag>` to find the install directory, then
@@ -92,20 +92,24 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         """
         logger = logging.getLogger('porringer.pyenv.resolve_executable')
         try:
-            result = subprocess.run(
-                ['pyenv', 'prefix', tag],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                'pyenv',
+                'prefix',
+                tag,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            prefix = Path(result.stdout.strip())
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ''
+                logger.debug('pyenv prefix %s failed: %s', tag, stderr)
+                return None
+            stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
+            prefix = Path(stdout)
             executable = prefix / 'bin' / 'python'
             if executable.exists():
                 return executable
             logger.warning('pyenv prefix %s resolved to %s but bin/python missing', tag, prefix)
-        except subprocess.CalledProcessError as e:
-            logger.debug('pyenv prefix %s failed: %s', tag, e.stderr.strip() if e.stderr else e)
         except FileNotFoundError:
             logger.debug('pyenv not found on PATH')
         except Exception as e:
@@ -117,7 +121,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     # ------------------------------------------------------------------
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for newer Python versions via ``pyenv install --list``.
 
         Parses the available versions from ``pyenv install --list`` and
@@ -130,7 +134,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         Returns:
             A list of packages with their latest available version.
         """
-        output = self._run_text_command(['pyenv', 'install', '--list'])
+        output = await self._run_text_command(['pyenv', 'install', '--list'])
         if output is None:
             return []
 
@@ -162,7 +166,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         return results
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Lists installed Python runtimes via `pyenv versions --bare`.
 
         pyenv manages Python runtimes globally; *project_path* is
@@ -174,7 +178,7 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         Returns:
             A list of installed Python runtime packages.
         """
-        output = self._run_text_command(['pyenv', 'versions', '--bare'])
+        output = await self._run_text_command(['pyenv', 'versions', '--bare'])
         if output is None:
             return []
 

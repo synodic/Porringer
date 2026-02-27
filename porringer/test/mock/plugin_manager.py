@@ -70,7 +70,7 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
     # -- query / execution (fully in-memory) ---------------------------------
 
     @override
-    def installed_plugins(self) -> list[Package]:
+    async def installed_plugins(self) -> list[Package]:
         return list(self._plugins)
 
     @override

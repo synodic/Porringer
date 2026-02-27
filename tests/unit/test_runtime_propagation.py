@@ -66,7 +66,7 @@ class _MockRuntimeProvider(Environment):
         """Return the kind of runtime this provider supplies."""
         return 'python'
 
-    def resolve_executable(self, tag: str) -> Path | None:
+    async def resolve_executable(self, tag: str) -> Path | None:
         """Resolve a tagged runtime to a mock path."""
         return self._resolved
 
@@ -79,11 +79,11 @@ class _MockRuntimeProvider(Environment):
         return ['mock-pim', 'upgrade', str(package)]
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         return []
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         return []
 
 
@@ -108,7 +108,7 @@ class _MockPythonEnv(PythonEnvironment):
         return ['mock-pip', 'upgrade', str(package)]
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         return []
 
 
@@ -158,11 +158,11 @@ class _MockNodeConsumer(Environment, RuntimeConsumer):
         return []
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         return []
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         return []
 
 
@@ -208,7 +208,7 @@ class TestRuntimePropagationAfterPluginRefresh:
     """Verify cached runtime is re-applied after plugin re-discovery."""
 
     @staticmethod
-    def test_refresh_all_plugins_re_propagates_runtime() -> None:
+    async def test_refresh_all_plugins_re_propagates_runtime() -> None:
         """Fresh consumers created by refresh_all_plugins receive the cached runtime."""
         provider = _MockRuntimeProvider(_MOCK_DIST)
         consumer = _MockPythonEnv(_MOCK_DIST)
@@ -218,7 +218,7 @@ class TestRuntimePropagationAfterPluginRefresh:
         )
 
         with _preserve_path():
-            state.propagate_runtime()
+            await state.propagate_runtime()
 
         assert consumer.runtime_executable == _MOCK_RUNTIME_EXE
         assert state._resolved_runtime == ('python', _MOCK_RUNTIME_EXE)
@@ -264,7 +264,7 @@ class TestRuntimePropagationAfterPluginRefresh:
         assert new_consumer.runtime_executable is None
 
     @staticmethod
-    def test_refresh_all_plugins_re_propagates_to_project_environments() -> None:
+    async def test_refresh_all_plugins_re_propagates_to_project_environments() -> None:
         """Fresh project environments from refresh receive the cached runtime."""
         provider = _MockRuntimeProvider(_MOCK_DIST)
         consumer = _MockPythonEnv(_MOCK_DIST)
@@ -276,7 +276,7 @@ class TestRuntimePropagationAfterPluginRefresh:
         )
 
         with _preserve_path():
-            state.propagate_runtime()
+            await state.propagate_runtime()
         assert proj_env.runtime_executable == _MOCK_RUNTIME_EXE
 
         new_proj_env = _MockProjectEnv(_MOCK_DIST)
@@ -299,7 +299,7 @@ class TestRuntimePropagationAfterPluginRefresh:
         assert new_proj_env.runtime_executable == _MOCK_RUNTIME_EXE
 
     @staticmethod
-    def test_non_matching_runtime_kind_not_propagated() -> None:
+    async def test_non_matching_runtime_kind_not_propagated() -> None:
         """A Node consumer does not receive the Python runtime."""
         provider = _MockRuntimeProvider(_MOCK_DIST)
         node_env = _MockNodeConsumer(_MOCK_DIST)
@@ -309,7 +309,7 @@ class TestRuntimePropagationAfterPluginRefresh:
         )
 
         with _preserve_path():
-            state.propagate_runtime()
+            await state.propagate_runtime()
         assert node_env.runtime_executable is None
 
         new_node_env = _MockNodeConsumer(_MOCK_DIST)

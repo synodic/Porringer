@@ -47,7 +47,7 @@ class YarnProjectEnvironment(ProjectEnvironment):
         return 'yarn'
 
     @override
-    def sync(self, params: ProjectSyncParameters) -> bool:
+    async def sync(self, params: ProjectSyncParameters) -> bool:
         """Run `yarn install` in the project directory.
 
         Yarn Berry does not support `--dry-run`.  In dry-run mode the
@@ -63,4 +63,4 @@ class YarnProjectEnvironment(ProjectEnvironment):
         if params.dry:
             logger.info('Dry run: %s', ' '.join(args))
             return True
-        return self._run_sync(args, params.directory)
+        return await self._run_sync(args, params.directory)

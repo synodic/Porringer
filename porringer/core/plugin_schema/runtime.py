@@ -43,7 +43,7 @@ class RuntimeProvider(Protocol):
         ...
 
     @abstractmethod
-    def resolve_executable(self, tag: str) -> Path | None:
+    async def resolve_executable(self, tag: str) -> Path | None:
         """Return the filesystem path to the interpreter for *tag*.
 
         Args:

@@ -1,7 +1,7 @@
 """Plugin implementation for Python Install Manager (pymanager)"""
 
+import asyncio
 import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import override
@@ -86,7 +86,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         ]
 
     @override
-    def resolve_executable(self, tag: str) -> Path | None:
+    async def resolve_executable(self, tag: str) -> Path | None:
         """Return the path to the Python interpreter for a managed runtime.
 
         Uses `py -<tag> -c "import sys; print(sys.executable)"` to ask
@@ -100,19 +100,24 @@ class PIMEnvironment(Environment, RuntimeProvider):
         """
         logger = logging.getLogger('porringer.pim.resolve_executable')
         try:
-            result = subprocess.run(
-                ['py', f'-{tag}', '-c', 'import sys; print(sys.executable)'],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                'py',
+                f'-{tag}',
+                '-c',
+                'import sys; print(sys.executable)',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            path = Path(result.stdout.strip())
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ''
+                logger.debug('py -%s failed: %s', tag, stderr)
+                return None
+            stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
+            path = Path(stdout)
             if path.exists():
                 return path
             logger.warning('py -%s resolved to %s but it does not exist', tag, path)
-        except subprocess.CalledProcessError as e:
-            logger.debug('py -%s failed: %s', tag, e.stderr.strip() if e.stderr else e)
         except FileNotFoundError:
             logger.debug('py launcher not found')
         except Exception as e:
@@ -130,7 +135,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         return ['py', 'install', '--update', package.name]
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for newer Python runtimes via ``py list --online``.
 
         Queries the Python Install Manager's online listing and finds
@@ -142,7 +147,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         Returns:
             A list of packages with their latest available version.
         """
-        data = self._run_json_command(['py', 'list', '--online', '-f', 'json'])
+        data = await self._run_json_command(['py', 'list', '--online', '-f', 'json'])
         if not isinstance(data, dict):
             return []
 
@@ -161,7 +166,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         return results
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Lists all installed Python runtimes.
 
         pim manages Python runtimes globally; *project_path* is
@@ -173,7 +178,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         Returns:
             A list of installed Python runtime packages
         """
-        data = self._run_json_command(['py', 'list', '--only-managed', '-f', 'json'])
+        data = await self._run_json_command(['py', 'list', '--only-managed', '-f', 'json'])
         if not isinstance(data, dict):
             return []
 
@@ -185,7 +190,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         return packages
 
     @classmethod
-    def _get_runtime_version(cls, tag: str) -> str | None:
+    async def _get_runtime_version(cls, tag: str) -> str | None:
         """Gets the actual version string for an installed runtime.
 
         Args:
@@ -194,7 +199,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         Returns:
             The version string, or None if not found
         """
-        data = cls._run_json_command(['py', 'list', '--only-managed', '-f', 'json', tag])
+        data = await cls._run_json_command(['py', 'list', '--only-managed', '-f', 'json', tag])
         if not isinstance(data, dict):
             return None
         runtimes = data.get('versions', [])

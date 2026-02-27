@@ -63,11 +63,11 @@ class _StubPlugin(Environment):
         return ['stub', 'upgrade', package.name]
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         return []
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         return []
 
 
@@ -114,9 +114,11 @@ class TestBuildActionsFailFast:
     @staticmethod
     def test_unregistered_ecosystem_produces_no_plugin_actions() -> None:
         """Requesting an ecosystem with no registered plugin produces actions with '(no plugin)' suffix."""
-        manifest = SetupManifest.model_validate({
-            'packages': {'ruby': ['rails']},
-        })
+        manifest = SetupManifest.model_validate(
+            {
+                'packages': {'ruby': ['rails']},
+            }
+        )
         # Only a Python plugin is registered — 'ruby' has no plugin at all.
         environments: dict[str, Environment] = {'pip': _make(ecosystem=Ecosystem('python'))}
         actions = build_actions(manifest, environments)
@@ -127,9 +129,11 @@ class TestBuildActionsFailFast:
     @staticmethod
     def test_registered_but_unavailable_defers() -> None:
         """Requesting an ecosystem whose plugin is registered but unavailable produces deferred actions."""
-        manifest = SetupManifest.model_validate({
-            'packages': {'python': ['requests']},
-        })
+        manifest = SetupManifest.model_validate(
+            {
+                'packages': {'python': ['requests']},
+            }
+        )
         # Plugin is registered for python but not available (tool missing).
         environments: dict[str, Environment] = {'pip': _make(ecosystem=Ecosystem('python'), available=False)}
         actions = build_actions(manifest, environments)
@@ -141,9 +145,11 @@ class TestBuildActionsFailFast:
     @staticmethod
     def test_registered_and_available_resolves() -> None:
         """Requesting an ecosystem with an available plugin produces resolved actions."""
-        manifest = SetupManifest.model_validate({
-            'packages': {'python': ['requests']},
-        })
+        manifest = SetupManifest.model_validate(
+            {
+                'packages': {'python': ['requests']},
+            }
+        )
         environments: dict[str, Environment] = {'pip': _make(ecosystem=Ecosystem('python'))}
         actions = build_actions(manifest, environments)
         assert len(actions) == 1
@@ -152,9 +158,11 @@ class TestBuildActionsFailFast:
 
 def test_unregistered_ecosystem_logs_error(caplog: pytest.LogCaptureFixture) -> None:
     """Requesting an ecosystem with no registered plugin logs an ERROR."""
-    manifest = SetupManifest.model_validate({
-        'packages': {'ruby': ['rails']},
-    })
+    manifest = SetupManifest.model_validate(
+        {
+            'packages': {'ruby': ['rails']},
+        }
+    )
     environments: dict[str, Environment] = {'pip': _make(ecosystem=Ecosystem('python'))}
     with caplog.at_level(logging.DEBUG):
         build_actions(manifest, environments)

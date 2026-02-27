@@ -1,6 +1,5 @@
 """Tests for the PluginManager protocol and native plugin management routing."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from packaging.version import Version
@@ -125,7 +124,7 @@ class TestAsyncPluginAdd:
     """Test the async_plugin_add default implementation."""
 
     @staticmethod
-    def test_async_plugin_add_success() -> None:
+    async def test_async_plugin_add_success() -> None:
         """async_plugin_add returns Package on success."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
@@ -136,17 +135,14 @@ class TestAsyncPluginAdd:
         mock_result.stdout = 'Added cppython'
         mock_result.stderr = ''
 
-        async def _run() -> Package | None:
-            with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
-                mock_cmd.return_value = mock_result
-                return await plugin.async_plugin_add(params)
-
-        result = asyncio.run(_run())
+        with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
+            mock_cmd.return_value = mock_result
+            result = await plugin.async_plugin_add(params)
         assert result is not None
         assert result.name == 'cppython'
 
     @staticmethod
-    def test_async_plugin_add_failure() -> None:
+    async def test_async_plugin_add_failure() -> None:
         """async_plugin_add returns None on non-zero exit."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
@@ -157,30 +153,24 @@ class TestAsyncPluginAdd:
         mock_result.stdout = ''
         mock_result.stderr = 'Error: package not found'
 
-        async def _run() -> Package | None:
-            with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
-                mock_cmd.return_value = mock_result
-                return await plugin.async_plugin_add(params)
-
-        result = asyncio.run(_run())
+        with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
+            mock_cmd.return_value = mock_result
+            result = await plugin.async_plugin_add(params)
         assert result is None
 
     @staticmethod
-    def test_async_plugin_add_file_not_found() -> None:
+    async def test_async_plugin_add_file_not_found() -> None:
         """async_plugin_add returns None when tool is not on PATH."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
-        async def _run() -> Package | None:
-            with patch(
-                'porringer.core.plugin_schema.plugin_manager.run_command',
-                new_callable=AsyncMock,
-                side_effect=FileNotFoundError,
-            ):
-                return await plugin.async_plugin_add(params)
-
-        result = asyncio.run(_run())
+        with patch(
+            'porringer.core.plugin_schema.plugin_manager.run_command',
+            new_callable=AsyncMock,
+            side_effect=FileNotFoundError,
+        ):
+            result = await plugin.async_plugin_add(params)
         assert result is None
 
 
@@ -268,7 +258,7 @@ class TestPluginAddRouting:
     """Test that execute_package routes to PluginManager for plugin actions."""
 
     @staticmethod
-    def test_routes_to_native_when_plugin_manager_available() -> None:
+    async def test_routes_to_native_when_plugin_manager_available() -> None:
         """execute_package uses PluginManager for plugin_target actions."""
         mock_pm = MockPluginManager(_MOCK_PARAMS)
 
@@ -284,10 +274,7 @@ class TestPluginAddRouting:
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        async def _run():
-            return await execute_package(action, {}, SyncStrategy.MINIMAL, None, context)
-
-        result = asyncio.run(_run())
+        result = await execute_package(action, {}, SyncStrategy.MINIMAL, None, context)
         assert result.success is True
         assert result.message is not None
         assert 'native' in result.message.lower()
@@ -295,7 +282,7 @@ class TestPluginAddRouting:
         assert mock_pm.operations[0][0] == 'add'
 
     @staticmethod
-    def test_fails_when_no_plugin_manager() -> None:
+    async def test_fails_when_no_plugin_manager() -> None:
         """execute_package fails when no PluginManager is found for plugin_target."""
         action = SetupAction(
             description="Add 'cppython' to 'pdm'",
@@ -306,10 +293,7 @@ class TestPluginAddRouting:
             plugin_target=PackageRef.model_validate('pdm'),
         )
 
-        async def _run():
-            return await execute_package(action, {}, SyncStrategy.MINIMAL)
-
-        result = asyncio.run(_run())
+        result = await execute_package(action, {}, SyncStrategy.MINIMAL)
         assert result.success is False
         assert result.message is not None
         assert 'No PluginManager found' in result.message
@@ -401,44 +385,42 @@ class TestInstalledPlugins:
     """Test the installed_plugins default implementation."""
 
     @staticmethod
-    def test_installed_plugins_success() -> None:
+    async def test_installed_plugins_success() -> None:
         """installed_plugins parses subprocess output on success."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = 'cppython 0.9.14 desc\n'
-        mock_result.stderr = ''
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b'cppython 0.9.14 desc\n', b''))
 
-        with patch('porringer.core.plugin_schema.plugin_manager.subprocess.run', return_value=mock_result):
-            result = plugin.installed_plugins()
+        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
+            result = await plugin.installed_plugins()
 
         assert len(result) == 1
         assert result[0].name == 'cppython'
 
     @staticmethod
-    def test_installed_plugins_failure_returns_empty() -> None:
+    async def test_installed_plugins_failure_returns_empty() -> None:
         """installed_plugins returns empty list on non-zero exit."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ''
-        mock_result.stderr = 'error'
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(return_value=(b'', b'error'))
 
-        with patch('porringer.core.plugin_schema.plugin_manager.subprocess.run', return_value=mock_result):
-            result = plugin.installed_plugins()
+        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
+            result = await plugin.installed_plugins()
 
         assert result == []
 
     @staticmethod
-    def test_installed_plugins_file_not_found() -> None:
+    async def test_installed_plugins_file_not_found() -> None:
         """installed_plugins returns empty list when tool is missing."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
 
         with patch(
-            'porringer.core.plugin_schema.plugin_manager.subprocess.run',
+            'asyncio.create_subprocess_exec',
             side_effect=FileNotFoundError,
         ):
-            result = plugin.installed_plugins()
+            result = await plugin.installed_plugins()
 
         assert result == []
 
@@ -556,32 +538,26 @@ class TestExecutePackagePluginPresence:
     """Test that execute_package skips already-installed plugins."""
 
     @staticmethod
-    def test_skips_installed_plugin_on_minimal() -> None:
+    async def test_skips_installed_plugin_on_minimal() -> None:
         """execute_package skips plugin-target action when already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        async def _run():
-            return await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
-
-        result = asyncio.run(_run())
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
         assert result.success is True
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
         assert len(mock_pm.operations) == 0
 
     @staticmethod
-    def test_installs_missing_plugin_on_minimal() -> None:
+    async def test_installs_missing_plugin_on_minimal() -> None:
         """execute_package installs plugin when not already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        async def _run():
-            return await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
-
-        result = asyncio.run(_run())
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
         assert result.success is True
         assert result.skipped is not True
         assert len(mock_pm.operations) == 1
@@ -670,7 +646,7 @@ class TestAsyncPluginUpdate:
     """Test the async_plugin_update default implementation."""
 
     @staticmethod
-    def test_async_plugin_update_success() -> None:
+    async def test_async_plugin_update_success() -> None:
         """async_plugin_update returns Package on success."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
@@ -681,17 +657,14 @@ class TestAsyncPluginUpdate:
         mock_result.stdout = 'Updated cppython'
         mock_result.stderr = ''
 
-        async def _run() -> Package | None:
-            with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
-                mock_cmd.return_value = mock_result
-                return await plugin.async_plugin_update(params)
-
-        result = asyncio.run(_run())
+        with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
+            mock_cmd.return_value = mock_result
+            result = await plugin.async_plugin_update(params)
         assert result is not None
         assert result.name == 'cppython'
 
     @staticmethod
-    def test_async_plugin_update_failure() -> None:
+    async def test_async_plugin_update_failure() -> None:
         """async_plugin_update returns None on non-zero exit."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
@@ -702,34 +675,28 @@ class TestAsyncPluginUpdate:
         mock_result.stdout = ''
         mock_result.stderr = 'Error: no such plugin'
 
-        async def _run() -> Package | None:
-            with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
-                mock_cmd.return_value = mock_result
-                return await plugin.async_plugin_update(params)
-
-        result = asyncio.run(_run())
+        with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
+            mock_cmd.return_value = mock_result
+            result = await plugin.async_plugin_update(params)
         assert result is None
 
     @staticmethod
-    def test_async_plugin_update_file_not_found() -> None:
+    async def test_async_plugin_update_file_not_found() -> None:
         """async_plugin_update returns None when tool is not on PATH."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
 
-        async def _run() -> Package | None:
-            with patch(
-                'porringer.core.plugin_schema.plugin_manager.run_command',
-                new_callable=AsyncMock,
-                side_effect=FileNotFoundError,
-            ):
-                return await plugin.async_plugin_update(params)
-
-        result = asyncio.run(_run())
+        with patch(
+            'porringer.core.plugin_schema.plugin_manager.run_command',
+            new_callable=AsyncMock,
+            side_effect=FileNotFoundError,
+        ):
+            result = await plugin.async_plugin_update(params)
         assert result is None
 
     @staticmethod
-    def test_async_plugin_update_uses_update_command() -> None:
+    async def test_async_plugin_update_uses_update_command() -> None:
         """async_plugin_update delegates to plugin_update_command."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
@@ -740,13 +707,10 @@ class TestAsyncPluginUpdate:
         mock_result.stdout = 'Updated cppython'
         mock_result.stderr = ''
 
-        async def _run() -> list[str]:
-            with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
-                mock_cmd.return_value = mock_result
-                await plugin.async_plugin_update(params)
-                return mock_cmd.call_args[0][0]
-
-        called_args = asyncio.run(_run())
+        with patch('porringer.core.plugin_schema.plugin_manager.run_command', new_callable=AsyncMock) as mock_cmd:
+            mock_cmd.return_value = mock_result
+            await plugin.async_plugin_update(params)
+            called_args = mock_cmd.call_args[0][0]
         # The default implementation delegates to plugin_update_command
         assert called_args == plugin.plugin_update_command(ref)
 
@@ -789,123 +753,123 @@ class TestResolveOperation:
 
     # --- Normal package resolution ---
 
-    def test_minimal_installed_skips(self) -> None:
+    async def test_minimal_installed_skips(self) -> None:
         """MINIMAL + installed → SKIP."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
-        resolved = asyncio.run(resolve_operation(action, envs, SyncStrategy.MINIMAL))
+        resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
         assert resolved.operation == OperationKind.SKIP
         assert resolved.skip_reason == SkipReason.ALREADY_INSTALLED
 
-    def test_minimal_not_installed_installs(self) -> None:
+    async def test_minimal_not_installed_installs(self) -> None:
         """MINIMAL + not installed → INSTALL."""
         action = self._make_action()
         envs = self._make_envs(installed=[])
 
-        resolved = asyncio.run(resolve_operation(action, envs, SyncStrategy.MINIMAL))
+        resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
         assert resolved.operation == OperationKind.INSTALL
 
-    def test_latest_installed_upgrades(self) -> None:
+    async def test_latest_installed_upgrades(self) -> None:
         """LATEST + installed + no newer version → SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
-        resolved = asyncio.run(resolve_operation(action, envs, SyncStrategy.LATEST))
+        resolved = await resolve_operation(action, envs, SyncStrategy.LATEST)
         assert resolved.operation == OperationKind.SKIP
         assert resolved.skip_reason == SkipReason.ALREADY_LATEST
 
-    def test_latest_not_installed_installs(self) -> None:
+    async def test_latest_not_installed_installs(self) -> None:
         """LATEST + not installed → INSTALL (fallback)."""
         action = self._make_action()
         envs = self._make_envs(installed=[])
 
-        resolved = asyncio.run(resolve_operation(action, envs, SyncStrategy.LATEST))
+        resolved = await resolve_operation(action, envs, SyncStrategy.LATEST)
         assert resolved.operation == OperationKind.INSTALL
 
-    def test_exact_installed_upgrades(self) -> None:
+    async def test_exact_installed_upgrades(self) -> None:
         """EXACT + installed + no newer version → SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
-        resolved = asyncio.run(resolve_operation(action, envs, SyncStrategy.EXACT))
+        resolved = await resolve_operation(action, envs, SyncStrategy.EXACT)
         assert resolved.operation == OperationKind.SKIP
         assert resolved.skip_reason == SkipReason.ALREADY_LATEST
 
     # --- Plugin-management resolution ---
 
-    def test_plugin_minimal_installed_skips(self) -> None:
+    async def test_plugin_minimal_installed_skips(self) -> None:
         """Plugin: MINIMAL + installed → SKIP."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
-        resolved = asyncio.run(
-            resolve_operation(action, {}, SyncStrategy.MINIMAL, ResolutionContext(project_environments=proj_envs))
+        resolved = await resolve_operation(
+            action, {}, SyncStrategy.MINIMAL, ResolutionContext(project_environments=proj_envs)
         )
 
         assert resolved.operation == OperationKind.SKIP
         assert resolved.skip_reason == SkipReason.ALREADY_INSTALLED
         assert resolved.plugin_manager is mock_pm
 
-    def test_plugin_minimal_not_installed_installs(self) -> None:
+    async def test_plugin_minimal_not_installed_installs(self) -> None:
         """Plugin: MINIMAL + not installed → INSTALL."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
-        resolved = asyncio.run(
-            resolve_operation(action, {}, SyncStrategy.MINIMAL, ResolutionContext(project_environments=proj_envs))
+        resolved = await resolve_operation(
+            action, {}, SyncStrategy.MINIMAL, ResolutionContext(project_environments=proj_envs)
         )
 
         assert resolved.operation == OperationKind.INSTALL
         assert resolved.plugin_manager is mock_pm
 
-    def test_plugin_latest_installed_upgrades(self) -> None:
+    async def test_plugin_latest_installed_upgrades(self) -> None:
         """Plugin: LATEST + installed → UPGRADE."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
-        resolved = asyncio.run(
-            resolve_operation(action, {}, SyncStrategy.LATEST, ResolutionContext(project_environments=proj_envs))
+        resolved = await resolve_operation(
+            action, {}, SyncStrategy.LATEST, ResolutionContext(project_environments=proj_envs)
         )
 
         assert resolved.operation == OperationKind.UPGRADE
         assert resolved.plugin_manager is mock_pm
 
-    def test_plugin_latest_not_installed_installs(self) -> None:
+    async def test_plugin_latest_not_installed_installs(self) -> None:
         """Plugin: LATEST + not installed → INSTALL (fallback)."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
-        resolved = asyncio.run(
-            resolve_operation(action, {}, SyncStrategy.LATEST, ResolutionContext(project_environments=proj_envs))
+        resolved = await resolve_operation(
+            action, {}, SyncStrategy.LATEST, ResolutionContext(project_environments=proj_envs)
         )
 
         assert resolved.operation == OperationKind.INSTALL
 
-    def test_plugin_no_manager_defaults_to_install(self) -> None:
+    async def test_plugin_no_manager_defaults_to_install(self) -> None:
         """Plugin: no PluginManager → INSTALL."""
         action = self._make_action(plugin_target='mock-pm')
 
-        resolved = asyncio.run(resolve_operation(action, {}, SyncStrategy.MINIMAL))
+        resolved = await resolve_operation(action, {}, SyncStrategy.MINIMAL)
 
         assert resolved.operation == OperationKind.INSTALL
         assert resolved.plugin_manager is None
 
-    def test_skip_returns_installed_version(self) -> None:
+    async def test_skip_returns_installed_version(self) -> None:
         """SKIP result carries installed_version metadata."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='2.3.1')])
 
-        resolved = asyncio.run(resolve_operation(action, envs, SyncStrategy.MINIMAL))
+        resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
         assert resolved.operation == OperationKind.SKIP
         assert resolved.installed_version == '2.3.1'
 
     @staticmethod
-    def test_missing_installer_skips() -> None:
+    async def test_missing_installer_skips() -> None:
         """Action with no installer/package → SKIP."""
         action = SetupAction(
             description='Bad action',
@@ -914,7 +878,7 @@ class TestResolveOperation:
             installer=None,
             package=None,
         )
-        resolved = asyncio.run(resolve_operation(action, {}, SyncStrategy.MINIMAL))
+        resolved = await resolve_operation(action, {}, SyncStrategy.MINIMAL)
         assert resolved.operation == OperationKind.SKIP
 
 
@@ -927,38 +891,38 @@ class TestPluginUpgradeRouting:
     """Test that execute_package routes to async_plugin_update for LATEST strategy."""
 
     @staticmethod
-    def test_latest_routes_to_update() -> None:
+    async def test_latest_routes_to_update() -> None:
         """execute_package with LATEST calls async_plugin_update for installed plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        result = asyncio.run(execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context))
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'update'
         assert mock_pm.operations[0][1].name == 'cppython'
 
     @staticmethod
-    def test_latest_installs_when_not_present() -> None:
+    async def test_latest_installs_when_not_present() -> None:
         """execute_package with LATEST calls async_plugin_add for missing plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        result = asyncio.run(execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context))
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'add'
 
     @staticmethod
-    def test_minimal_always_uses_add() -> None:
+    async def test_minimal_always_uses_add() -> None:
         """execute_package with MINIMAL uses async_plugin_add for new plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = PluginContext(project_environments=project_environments)
 
-        result = asyncio.run(execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context))
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'add'

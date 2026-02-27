@@ -42,7 +42,7 @@ class BunEnvironment(Environment):
         return ['bun', 'add', '-g', f'{package.name}@latest']
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying the npm registry.
 
         Bun uses the npm registry; delegates to the shared
@@ -54,13 +54,14 @@ class BunEnvironment(Environment):
         Returns:
             A list of packages with their latest available version.
         """
-        return self._check_npm_registry(
+        return await self._check_npm_registry(
             params.packages,
             include_prereleases=params.include_prereleases,
+            http_client=params.http_client,
         )
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed Bun packages.
 
         Bun does not provide a JSON list for globally installed packages;

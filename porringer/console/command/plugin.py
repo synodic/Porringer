@@ -1,5 +1,6 @@
 """Porringer CLI plugin command module"""
 
+import asyncio
 from pathlib import Path
 from typing import Annotated
 
@@ -57,7 +58,7 @@ def plugin_packages(
     resolved_path = project_path.resolve()
 
     try:
-        packages = PluginCommands.list_packages(plugin_name, resolved_path)
+        packages = asyncio.run(PluginCommands.list_packages(plugin_name, resolved_path))
     except PluginError as e:
         configuration.console.print(f'[red]Error: {e.error}[/red]')
         raise typer.Exit(code=1) from None

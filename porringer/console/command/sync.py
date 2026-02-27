@@ -34,7 +34,7 @@ DEFAULT_TIMEOUT = 300
 ARROW = '→'
 
 
-@dataclass
+@dataclass(slots=True)
 class _ProgressState:
     """Execution progress state for streaming updates."""
 
@@ -46,7 +46,7 @@ class _ProgressState:
     overall_task: TaskID | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class _SyncOptions:
     """Bundled options for manifest sync execution."""
 
@@ -86,7 +86,7 @@ def _action_description(action: SetupAction) -> str:
     return str(action.package) if action.package else action.description[:30]
 
 
-@dataclass
+@dataclass(slots=True)
 class _ProgressTracker:
     """Tracks progress during streaming execution, reducing parameter passing."""
 
