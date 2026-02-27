@@ -83,12 +83,7 @@ class TestIncludePackages:
                 include_packages={'REQUESTS'},
             )
             batch = test_api.sync.run(params)
-            package_actions = [
-                a
-                for m in batch.manifest_results
-                for a in m.actions
-                if a.package is not None
-            ]
+            package_actions = [a for m in batch.manifest_results for a in m.actions if a.package is not None]
             assert len(package_actions) > 0
             for action in package_actions:
                 assert action.package is not None
