@@ -21,7 +21,7 @@ class ManifestDiagnosticSeverity(Enum):
     WARNING = auto()
 
 
-@dataclass
+@dataclass(slots=True)
 class ManifestDiagnostic:
     """A single diagnostic produced by manifest validation.
 
@@ -38,7 +38,7 @@ class ManifestDiagnostic:
     severity: ManifestDiagnosticSeverity
 
 
-@dataclass
+@dataclass(slots=True)
 class ManifestValidationResult:
     """Structured result of manifest validation.
 
@@ -186,7 +186,7 @@ class SetupManifest(PorringerModel):
                 yield kind, ecosystem, packages
 
 
-@dataclass
+@dataclass(slots=True)
 class ManifestResult:
     """Result of locating and loading a manifest.
 
@@ -209,7 +209,7 @@ class ManifestResult:
     manifest: SetupManifest
 
 
-@dataclass
+@dataclass(slots=True)
 class ManifestMetadata:
     """Display metadata from a setup manifest.
 

@@ -9,12 +9,12 @@ Also hosts :func:`is_package_installed`, the shared presence-detection
 helper used by resolution, dry-run, and execution paths.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 
+import httpx
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
@@ -42,7 +42,7 @@ class OperationKind(Enum):
     SKIP = auto()
 
 
-@dataclass
+@dataclass(slots=True)
 class ResolvedOperation:
     """Result of resolving what operation an action requires.
 
@@ -90,7 +90,7 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class ResolutionContext:
     """Optional context for :func:`resolve_operation`.
 
@@ -105,6 +105,10 @@ class ResolutionContext:
     detect_updates: bool = False
     """When ``True`` and the package is already installed under
     ``MINIMAL`` strategy, check for newer upstream versions."""
+    http_client: httpx.AsyncClient | None = None
+    """Shared ``httpx.AsyncClient`` for connection pooling across
+    concurrent update checks.  ``None`` means each check creates
+    its own short-lived client."""
 
 
 async def resolve_operation(
@@ -151,6 +155,7 @@ async def resolve_operation(
             strategy,
             project_environments=ctx.project_environments,
             detect_updates=ctx.detect_updates,
+            http_client=ctx.http_client,
         )
 
     # --- Normal package actions --------------------------------------------
@@ -160,6 +165,7 @@ async def resolve_operation(
         strategy,
         project_path=ctx.project_path,
         detect_updates=ctx.detect_updates,
+        http_client=ctx.http_client,
     )
 
 
@@ -170,6 +176,7 @@ async def _resolve_plugin_operation(
     *,
     project_environments: dict[str, ProjectEnvironment] | None = None,
     detect_updates: bool = False,
+    http_client: httpx.AsyncClient | None = None,
 ) -> ResolvedOperation:
     """Resolve the operation for a plugin-management action."""
     assert action.plugin_target is not None
@@ -190,8 +197,7 @@ async def _resolve_plugin_operation(
         env_for_updates=environments.get(action.installer) if action.installer else None,
     )
     try:
-        loop = asyncio.get_running_loop()
-        installed = await loop.run_in_executor(None, manager.installed_plugins)
+        installed = await manager.installed_plugins()
         presence.is_installed, presence.detail, presence.matched = is_package_installed(action.package, installed)
     except Exception as e:
         logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
@@ -202,6 +208,7 @@ async def _resolve_plugin_operation(
         presence=presence,
         detect_updates=detect_updates,
         plugin_manager=manager,
+        http_client=http_client,
     )
 
 
@@ -212,6 +219,7 @@ async def _resolve_package_operation(
     *,
     project_path: Path | None = None,
     detect_updates: bool = False,
+    http_client: httpx.AsyncClient | None = None,
 ) -> ResolvedOperation:
     """Resolve the operation for a normal package action."""
     assert action.installer is not None
@@ -229,8 +237,7 @@ async def _resolve_package_operation(
 
     presence = _PresenceResult(env_for_updates=environment)
     try:
-        loop = asyncio.get_running_loop()
-        installed_packages = await loop.run_in_executor(None, lambda: environment.packages(project_path=project_path))
+        installed_packages = await environment.packages(project_path=project_path)
         presence.is_installed, presence.detail, presence.matched = is_package_installed(
             action.package, installed_packages, validator, action.kind
         )
@@ -244,10 +251,11 @@ async def _resolve_package_operation(
         strategy=strategy,
         presence=presence,
         detect_updates=detect_updates,
+        http_client=http_client,
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class _PresenceResult:
     """Result of querying whether a package/plugin is installed."""
 
@@ -265,6 +273,7 @@ async def _apply_strategy(
     presence: _PresenceResult,
     detect_updates: bool,
     plugin_manager: PluginManager | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> ResolvedOperation:
     """Apply the sync strategy to determine the operation.
 
@@ -288,6 +297,7 @@ async def _apply_strategy(
                         action.package,
                         installed_ver,
                         include_prereleases=action.include_prereleases,
+                        http_client=http_client,
                     )
                 except UpdateCheckError:
                     newer = None
@@ -328,6 +338,7 @@ async def _apply_strategy(
                     action.package,
                     installed_ver,
                     include_prereleases=action.include_prereleases,
+                    http_client=http_client,
                 )
             except UpdateCheckError:
                 pass  # Fall through to unconditional upgrade
@@ -384,11 +395,14 @@ async def check_for_newer_version(
     installed_version: str | None,
     *,
     include_prereleases: bool = False,
+    http_client: httpx.AsyncClient | None = None,
 ) -> str | None:
     """Query the plugin for a newer upstream version.
 
-    Runs the plugin's ``check_updates()`` in a thread executor so
-    the event loop is never blocked by subprocess or HTTP calls.
+    Uses the plugin's ``check_updates()`` coroutine.  When
+    *http_client* is provided it is forwarded via
+    ``CheckUpdatesParameters`` so that concurrent checks share a
+    single connection pool.
 
     Returns the newer version string when one is available, or ``None``
     when the installed version is confirmed up-to-date.
@@ -401,12 +415,12 @@ async def check_for_newer_version(
         raise UpdateCheckError('no package reference')
 
     try:
-        loop = asyncio.get_running_loop()
         params = CheckUpdatesParameters(
             packages=[package],
             include_prereleases=include_prereleases,
+            http_client=http_client,
         )
-        updates = await loop.run_in_executor(None, env.check_updates, params)
+        updates = await env.check_updates(params)
     except Exception as e:
         logger.debug('check_updates failed for %s via %s: %s', package, env.tool_name(), e)
         raise UpdateCheckError(str(e)) from e

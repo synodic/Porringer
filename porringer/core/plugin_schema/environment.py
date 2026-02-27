@@ -44,6 +44,15 @@ class CheckUpdatesParameters(PorringerModel):
         default_factory=list, description='Packages to check for updates. Empty means check all installed packages.'
     )
     include_prereleases: bool = Field(default=False, description='Include pre-release versions')
+    http_client: httpx.AsyncClient | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            'Shared ``httpx.AsyncClient`` for connection pooling. '
+            'When ``None`` (default), each check creates its own '
+            'short-lived client.'
+        ),
+    )
 
 
 class Environment(ToolBasedPlugin):
@@ -185,8 +194,7 @@ class Environment(ToolBasedPlugin):
     ) -> Package | None:
         """Run *args* as a native async subprocess without streaming.
 
-        Replaces the legacy `run_in_executor(self.install)` pattern with
-        a truly non-blocking async subprocess.
+        Provides a truly non-blocking async subprocess execution path.
 
         Args:
             args: Command and arguments to run.
@@ -261,15 +269,19 @@ class Environment(ToolBasedPlugin):
         return Package(name=params.package.name, version=None)
 
     @abstractmethod
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages in the given environment.
 
         When *project_path* is provided, plugins that manage
         project-scoped virtual environments (pip, uv) should discover
-        the project's venv (e.g. `<project_path>/.venv`) and list
+        the project's venv (e.g. ``<project_path>/.venv``) and list
         packages from that interpreter instead of the global/PATH one.
         Plugins that are inherently global (pipx, apt, brew, winget)
         may ignore this parameter.
+
+        Implementations should use the async helper methods
+        (``_run_json_command``, ``_run_text_command``) instead of
+        ``subprocess.run`` so the event loop is never blocked.
 
         Args:
             project_path: Optional path to a project directory.  When
@@ -282,7 +294,7 @@ class Environment(ToolBasedPlugin):
         raise NotImplementedError
 
     @abstractmethod
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Check for available updates using the plugin's native tooling.
 
         Every ``Environment`` subclass **must** implement this method.
@@ -291,6 +303,10 @@ class Environment(ToolBasedPlugin):
 
         Use the shared helpers ``_check_npm_registry()`` or
         ``PythonEnvironment._check_pypi_updates()`` where applicable.
+
+        Implementations should use async I/O (``_run_json_command``,
+        ``_run_text_command``, ``httpx.AsyncClient``) instead of
+        blocking calls so the event loop is never blocked.
 
         Args:
             params: The check parameters including which packages to check.
@@ -303,16 +319,20 @@ class Environment(ToolBasedPlugin):
         ...
 
     @staticmethod
-    def _check_npm_registry(
+    async def _check_npm_registry(
         packages: list[PackageRef],
         *,
         include_prereleases: bool = False,
         logger: logging.Logger | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> list[Package]:
         """Query the npm registry for the latest versions of the given packages.
 
         Shared helper for plugins that install from the npm registry
         (npm, pnpm, bun, and the npm branch of deno).
+
+        Uses ``httpx.AsyncClient`` so the event loop is never blocked
+        by network I/O.
 
         For each package, fetches
         ``https://registry.npmjs.org/{name}`` and extracts:
@@ -325,6 +345,8 @@ class Environment(ToolBasedPlugin):
             include_prereleases: When ``True``, return pre-release versions.
             logger: Optional logger for debug messages. Falls back to
                 ``logging.getLogger('porringer.npm_registry')``.
+            http_client: Shared ``httpx.AsyncClient`` for connection pooling.
+                When ``None``, a short-lived client is created per call.
 
         Returns:
             A list of packages with their latest available version.
@@ -333,10 +355,12 @@ class Environment(ToolBasedPlugin):
             logger = logging.getLogger('porringer.npm_registry')
 
         results: list[Package] = []
-        with httpx.Client(timeout=10.0) as client:
+
+        async def _run(client: httpx.AsyncClient) -> list[Package]:
+            inner: list[Package] = []
             for pkg_ref in packages:
                 try:
-                    response = client.get(f'https://registry.npmjs.org/{pkg_ref.name}')
+                    response = await client.get(f'https://registry.npmjs.org/{pkg_ref.name}')
                     response.raise_for_status()
                     data = response.json()
                 except (httpx.HTTPError, ValueError) as exc:
@@ -347,11 +371,18 @@ class Environment(ToolBasedPlugin):
                     versions = data.get('versions', {})
                     if versions:
                         latest = list(versions.keys())[-1]
-                        results.append(Package(name=pkg_ref.name, version=latest))
+                        inner.append(Package(name=pkg_ref.name, version=latest))
                 else:
                     dist_tags = data.get('dist-tags', {})
                     latest = dist_tags.get('latest')
                     if latest:
-                        results.append(Package(name=pkg_ref.name, version=latest))
+                        inner.append(Package(name=pkg_ref.name, version=latest))
+            return inner
+
+        if http_client is not None:
+            results = await _run(http_client)
+        else:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                results = await _run(client)
 
         return results

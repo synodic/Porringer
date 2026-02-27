@@ -229,7 +229,7 @@ class SyncCommands:
         async def _run() -> None:
             """Load manifests, emit events, and execute."""
             try:
-                previews, failed = self._load_manifests(parameters)
+                previews, failed = await asyncio.to_thread(self._load_manifests, parameters)
 
                 for path, error in failed:
                     queue.put_nowait(
@@ -253,12 +253,12 @@ class SyncCommands:
                 # the cache to avoid redundant entry-point scanning.
                 if not parameters.dry_run:
                     invalidate_plugin_cache()
-                shared_plugins = discover_all_plugins(use_cache=parameters.dry_run)
+                shared_plugins = await asyncio.to_thread(discover_all_plugins, use_cache=parameters.dry_run)
 
                 # Emit PLUGINS_DISCOVERED once for the batch — before
                 # any per-manifest work so the GUI gets the availability
                 # map as early as possible.
-                queue.put_nowait(_plugins_discovered_event(shared_plugins))
+                queue.put_nowait(await asyncio.to_thread(_plugins_discovered_event, shared_plugins))
 
                 for preview in previews:
                     # Stage 2 + 3: execute_single populates CLI commands,

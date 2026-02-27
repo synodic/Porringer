@@ -27,7 +27,7 @@ class DirectoryCache(BaseModel):
     directories: list[ManifestDirectory] = Field(default_factory=list, description='Registered directories')
 
 
-@dataclass
+@dataclass(slots=True)
 class DirectoryValidationResult:
     """Result of validating a single cached directory entry.
 

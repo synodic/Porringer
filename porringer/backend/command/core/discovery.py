@@ -21,7 +21,7 @@ from porringer.core.schema import Plugin
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class DiscoveredPlugins:
     """Result of discovering all three plugin groups at once.
 
@@ -60,7 +60,7 @@ class DiscoveredPlugins:
 CACHE_TTL: float = 30.0  # seconds
 
 
-@dataclass
+@dataclass(slots=True)
 class _PluginCache:
     """Mutable container for the in-memory plugin cache."""
 

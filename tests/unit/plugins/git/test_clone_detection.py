@@ -1,8 +1,7 @@
 """Unit tests for Git SCM clone detection and URL comparison."""
 
-import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from packaging.version import Version
@@ -13,6 +12,14 @@ from porringer.plugin.git.plugin import GitScm
 from porringer.schema.execution import CloneStatusKind
 
 _PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+
+
+def _fake_proc(returncode: int = 0, stdout: str = '', stderr: str = '') -> AsyncMock:
+    """Create a mock asyncio subprocess process with given results."""
+    proc = AsyncMock()
+    proc.returncode = returncode
+    proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
+    return proc
 
 
 # -- urls_match tests -------------------------------------------------
@@ -73,7 +80,7 @@ class TestGetRemoteUrls:
     """Tests for GitScm.get_remote_urls."""
 
     @staticmethod
-    def test_returns_all_fetch_urls(tmp_path: Path) -> None:
+    async def test_returns_all_fetch_urls(tmp_path: Path) -> None:
         """get_remote_urls returns a dict of remote name → fetch URL."""
         scm = GitScm(_PARAMS)
         git_output = (
@@ -82,40 +89,40 @@ class TestGetRemoteUrls:
             'upstream\thttps://github.com/org/repo.git (fetch)\n'
             'upstream\thttps://github.com/org/repo.git (push)\n'
         )
-        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=git_output, stderr='')
-        with patch('subprocess.run', return_value=fake_result) as mock_run:
-            result = scm.get_remote_urls(tmp_path)
-            mock_run.assert_called_once()
+        fake_proc = _fake_proc(returncode=0, stdout=git_output)
+        with patch('asyncio.create_subprocess_exec', return_value=fake_proc) as mock_exec:
+            result = await scm.get_remote_urls(tmp_path)
+            mock_exec.assert_called_once()
         assert result == {
             'origin': 'https://github.com/fork/repo.git',
             'upstream': 'https://github.com/org/repo.git',
         }
 
     @staticmethod
-    def test_returns_empty_dict_on_failure(tmp_path: Path) -> None:
+    async def test_returns_empty_dict_on_failure(tmp_path: Path) -> None:
         """get_remote_urls returns empty dict when git exits non-zero."""
         scm = GitScm(_PARAMS)
-        fake_result = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='error')
-        with patch('subprocess.run', return_value=fake_result):
-            result = scm.get_remote_urls(tmp_path)
+        fake_proc = _fake_proc(returncode=1, stderr='error')
+        with patch('asyncio.create_subprocess_exec', return_value=fake_proc):
+            result = await scm.get_remote_urls(tmp_path)
         assert result == {}
 
     @staticmethod
-    def test_returns_empty_dict_on_missing_git(tmp_path: Path) -> None:
+    async def test_returns_empty_dict_on_missing_git(tmp_path: Path) -> None:
         """get_remote_urls returns empty dict when git is not found."""
         scm = GitScm(_PARAMS)
-        with patch('subprocess.run', side_effect=FileNotFoundError):
-            result = scm.get_remote_urls(tmp_path)
+        with patch('asyncio.create_subprocess_exec', side_effect=FileNotFoundError):
+            result = await scm.get_remote_urls(tmp_path)
         assert result == {}
 
     @staticmethod
-    def test_single_remote(tmp_path: Path) -> None:
+    async def test_single_remote(tmp_path: Path) -> None:
         """get_remote_urls handles a single remote correctly."""
         scm = GitScm(_PARAMS)
         git_output = 'origin\thttps://github.com/org/repo.git (fetch)\norigin\thttps://github.com/org/repo.git (push)\n'
-        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=git_output, stderr='')
-        with patch('subprocess.run', return_value=fake_result):
-            result = scm.get_remote_urls(tmp_path)
+        fake_proc = _fake_proc(returncode=0, stdout=git_output)
+        with patch('asyncio.create_subprocess_exec', return_value=fake_proc):
+            result = await scm.get_remote_urls(tmp_path)
         assert result == {'origin': 'https://github.com/org/repo.git'}
 
 
@@ -126,30 +133,30 @@ class TestFindRepoRoot:
     """Tests for GitScm.find_repo_root."""
 
     @staticmethod
-    def test_returns_root_when_inside_repo(tmp_path: Path) -> None:
+    async def test_returns_root_when_inside_repo(tmp_path: Path) -> None:
         """find_repo_root returns the repository root path."""
         scm = GitScm(_PARAMS)
         root = str(tmp_path / 'my-repo')
-        fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout=f'{root}\n', stderr='')
-        with patch('subprocess.run', return_value=fake_result):
-            result = scm.find_repo_root(tmp_path / 'my-repo' / 'subdir')
+        fake_proc = _fake_proc(returncode=0, stdout=f'{root}\n')
+        with patch('asyncio.create_subprocess_exec', return_value=fake_proc):
+            result = await scm.find_repo_root(tmp_path / 'my-repo' / 'subdir')
         assert result == Path(root)
 
     @staticmethod
-    def test_returns_none_when_not_in_repo(tmp_path: Path) -> None:
+    async def test_returns_none_when_not_in_repo(tmp_path: Path) -> None:
         """find_repo_root returns None when path is not inside a repository."""
         scm = GitScm(_PARAMS)
-        fake_result = subprocess.CompletedProcess(args=[], returncode=128, stdout='', stderr='fatal: not a git repo')
-        with patch('subprocess.run', return_value=fake_result):
-            result = scm.find_repo_root(tmp_path)
+        fake_proc = _fake_proc(returncode=128, stderr='fatal: not a git repo')
+        with patch('asyncio.create_subprocess_exec', return_value=fake_proc):
+            result = await scm.find_repo_root(tmp_path)
         assert result is None
 
     @staticmethod
-    def test_returns_none_on_missing_git(tmp_path: Path) -> None:
+    async def test_returns_none_on_missing_git(tmp_path: Path) -> None:
         """find_repo_root returns None when git is not found."""
         scm = GitScm(_PARAMS)
-        with patch('subprocess.run', side_effect=FileNotFoundError):
-            result = scm.find_repo_root(tmp_path)
+        with patch('asyncio.create_subprocess_exec', side_effect=FileNotFoundError):
+            result = await scm.find_repo_root(tmp_path)
         assert result is None
 
 
@@ -160,31 +167,31 @@ class TestIsCloned:
     """Tests for the base ScmEnvironment.is_cloned (exercised via GitScm)."""
 
     @staticmethod
-    def test_missing_when_no_repo_root(tmp_path: Path) -> None:
+    async def test_missing_when_no_repo_root(tmp_path: Path) -> None:
         """is_cloned returns MISSING when find_repo_root returns None."""
         scm = GitScm(_PARAMS)
-        with patch.object(scm, 'find_repo_root', return_value=None):
-            result = scm.is_cloned('https://github.com/org/repo', tmp_path / 'nonexistent')
+        with patch.object(scm, 'find_repo_root', new_callable=AsyncMock, return_value=None):
+            result = await scm.is_cloned('https://github.com/org/repo', tmp_path / 'nonexistent')
         assert result.kind == CloneStatusKind.MISSING
         assert result.remote_url is None
 
     @staticmethod
-    def test_cloned_when_origin_matches(tmp_path: Path) -> None:
+    async def test_cloned_when_origin_matches(tmp_path: Path) -> None:
         """is_cloned returns CLONED when origin remote URL matches."""
         scm = GitScm(_PARAMS)
         url = 'https://github.com/org/repo'
         remotes = {'origin': 'https://github.com/org/repo.git'}
         with (
-            patch.object(scm, 'find_repo_root', return_value=tmp_path),
-            patch.object(scm, 'get_remote_urls', return_value=remotes),
+            patch.object(scm, 'find_repo_root', new_callable=AsyncMock, return_value=tmp_path),
+            patch.object(scm, 'get_remote_urls', new_callable=AsyncMock, return_value=remotes),
         ):
-            result = scm.is_cloned(url, tmp_path)
+            result = await scm.is_cloned(url, tmp_path)
         assert result.kind == CloneStatusKind.CLONED
         assert result.remote_url == 'https://github.com/org/repo.git'
         assert result.matched_remote == 'origin'
 
     @staticmethod
-    def test_cloned_when_upstream_matches(tmp_path: Path) -> None:
+    async def test_cloned_when_upstream_matches(tmp_path: Path) -> None:
         """is_cloned returns CLONED when upstream (not origin) matches — fork workflow."""
         scm = GitScm(_PARAMS)
         url = 'https://github.com/org/repo'
@@ -193,42 +200,42 @@ class TestIsCloned:
             'upstream': 'https://github.com/org/repo.git',
         }
         with (
-            patch.object(scm, 'find_repo_root', return_value=tmp_path),
-            patch.object(scm, 'get_remote_urls', return_value=remotes),
+            patch.object(scm, 'find_repo_root', new_callable=AsyncMock, return_value=tmp_path),
+            patch.object(scm, 'get_remote_urls', new_callable=AsyncMock, return_value=remotes),
         ):
-            result = scm.is_cloned(url, tmp_path)
+            result = await scm.is_cloned(url, tmp_path)
         assert result.kind == CloneStatusKind.CLONED
         assert result.remote_url == 'https://github.com/org/repo.git'
         assert result.matched_remote == 'upstream'
 
     @staticmethod
-    def test_url_mismatch_when_no_remote_matches(tmp_path: Path) -> None:
+    async def test_url_mismatch_when_no_remote_matches(tmp_path: Path) -> None:
         """is_cloned returns URL_MISMATCH when no remote URL matches."""
         scm = GitScm(_PARAMS)
         url = 'https://github.com/org/repo'
         remotes = {'origin': 'https://github.com/other/different.git'}
         with (
-            patch.object(scm, 'find_repo_root', return_value=tmp_path),
-            patch.object(scm, 'get_remote_urls', return_value=remotes),
+            patch.object(scm, 'find_repo_root', new_callable=AsyncMock, return_value=tmp_path),
+            patch.object(scm, 'get_remote_urls', new_callable=AsyncMock, return_value=remotes),
         ):
-            result = scm.is_cloned(url, tmp_path)
+            result = await scm.is_cloned(url, tmp_path)
         assert result.kind == CloneStatusKind.URL_MISMATCH
         assert result.remote_url == 'https://github.com/other/different.git'
 
     @staticmethod
-    def test_url_mismatch_when_no_remotes(tmp_path: Path) -> None:
+    async def test_url_mismatch_when_no_remotes(tmp_path: Path) -> None:
         """is_cloned returns URL_MISMATCH when repo has no remotes."""
         scm = GitScm(_PARAMS)
         with (
-            patch.object(scm, 'find_repo_root', return_value=tmp_path),
-            patch.object(scm, 'get_remote_urls', return_value={}),
+            patch.object(scm, 'find_repo_root', new_callable=AsyncMock, return_value=tmp_path),
+            patch.object(scm, 'get_remote_urls', new_callable=AsyncMock, return_value={}),
         ):
-            result = scm.is_cloned('https://github.com/org/repo', tmp_path)
+            result = await scm.is_cloned('https://github.com/org/repo', tmp_path)
         assert result.kind == CloneStatusKind.URL_MISMATCH
         assert result.remote_url is None
 
     @staticmethod
-    def test_nested_manifest_uses_repo_root(tmp_path: Path) -> None:
+    async def test_nested_manifest_uses_repo_root(tmp_path: Path) -> None:
         """is_cloned finds the repo root when destination is a subdirectory."""
         scm = GitScm(_PARAMS)
         repo_root = tmp_path / 'my-repo'
@@ -236,9 +243,9 @@ class TestIsCloned:
         url = 'https://github.com/org/repo'
         remotes = {'origin': 'https://github.com/org/repo.git'}
         with (
-            patch.object(scm, 'find_repo_root', return_value=repo_root),
-            patch.object(scm, 'get_remote_urls', return_value=remotes),
+            patch.object(scm, 'find_repo_root', new_callable=AsyncMock, return_value=repo_root),
+            patch.object(scm, 'get_remote_urls', new_callable=AsyncMock, return_value=remotes),
         ):
-            result = scm.is_cloned(url, subdir)
+            result = await scm.is_cloned(url, subdir)
         assert result.kind == CloneStatusKind.CLONED
         assert result.repo_root == repo_root

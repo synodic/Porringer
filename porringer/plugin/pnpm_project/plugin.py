@@ -42,7 +42,7 @@ class PNPMProjectEnvironment(ProjectEnvironment):
         return 'pnpm'
 
     @override
-    def sync(self, params: ProjectSyncParameters) -> bool:
+    async def sync(self, params: ProjectSyncParameters) -> bool:
         """Run `pnpm install` in the project directory.
 
         pnpm does not support `--dry-run`.  In dry-run mode the
@@ -58,4 +58,4 @@ class PNPMProjectEnvironment(ProjectEnvironment):
         if params.dry:
             logger.info('Dry run: %s', ' '.join(args))
             return True
-        return self._run_sync(args, params.directory)
+        return await self._run_sync(args, params.directory)

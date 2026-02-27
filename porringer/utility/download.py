@@ -31,7 +31,7 @@ _RETRY_BACKOFF_BASE = 1.0  # seconds; doubles each attempt
 _SERVER_ERROR_THRESHOLD = 500  # HTTP status codes >= this are retryable
 
 
-@dataclass
+@dataclass(slots=True)
 class _DownloadState:
     """State for download operation.
 

@@ -233,7 +233,7 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
             cmd.extend(['--python', str(self.runtime_executable)])
         return cmd
 
-    def sync(self, params: ProjectSyncParameters) -> bool:
+    async def sync(self, params: ProjectSyncParameters) -> bool:
         """Run the tool's native sync/install in *params.directory*.
 
         The default implementation builds the command from
@@ -253,13 +253,13 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         args = list(self.sync_command())
         if params.dry:
             args.append('--dry-run')
-        return self._run_sync(args, params.directory)
+        return await self._run_sync(args, params.directory)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _run_sync(self, args: list[str], directory: Path) -> bool:
+    async def _run_sync(self, args: list[str], directory: Path) -> bool:
         """Run a sync subprocess and return success.
 
         Shared helper that handles logging and error handling so each
@@ -272,4 +272,4 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         Returns:
             `True` if the process exited cleanly.
         """
-        return self._run_bool_command(args, cwd=directory, label='sync')
+        return await self._run_bool_command(args, cwd=directory, label='sync')

@@ -1,5 +1,6 @@
 """Porringer CLI check command module for checking package updates via plugins."""
 
+import asyncio
 import logging
 from typing import Annotated
 
@@ -34,6 +35,22 @@ def _check_plugin_updates(
     Returns:
         List of check results per plugin.
     """
+    return asyncio.run(_async_check_plugin_updates(configuration, params))
+
+
+async def _async_check_plugin_updates(
+    configuration: ConsoleConfiguration,
+    params: CheckParameters,
+) -> list[CheckResult]:
+    """Check for updates across all plugins (async).
+
+    Args:
+        configuration: CLI configuration.
+        params: Check parameters.
+
+    Returns:
+        List of check results per plugin.
+    """
     logger = logging.getLogger('porringer')
 
     environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
@@ -55,11 +72,11 @@ def _check_plugin_updates(
             )
 
             # Get currently installed packages
-            installed = env.packages()
+            installed = await env.packages()
             installed_map = {str(p.name): p for p in installed}
 
             # Check for updates
-            updates = env.check_updates(check_params)
+            updates = await env.check_updates(check_params)
 
             # Build package update info
             package_infos: list[PackageUpdateInfo] = []

@@ -1,7 +1,7 @@
 """Git SCM plugin implementation."""
 
+import asyncio
 import logging
-import subprocess
 from pathlib import Path
 from typing import override
 
@@ -39,7 +39,7 @@ class GitScm(ScmEnvironment):
         return Ecosystem('git')
 
     @override
-    def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
+    async def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
         """Clone a Git repository from *url* into *destination*.
 
         Args:
@@ -54,10 +54,10 @@ class GitScm(ScmEnvironment):
             logger.info('Would clone %s into %s', url, destination)
             return True
 
-        return self._run_bool_command(['git', 'clone', url, str(destination)], label='clone')
+        return await self._run_bool_command(['git', 'clone', url, str(destination)], label='clone')
 
     @override
-    def get_remote_urls(self, destination: Path) -> dict[str, str]:
+    async def get_remote_urls(self, destination: Path) -> dict[str, str]:
         """Return all remote fetch URLs for the Git repository at *destination*.
 
         Parses ``git remote -v`` output, collecting only fetch URLs.
@@ -69,28 +69,32 @@ class GitScm(ScmEnvironment):
             A mapping of remote name to fetch URL.
         """
         try:
-            result = subprocess.run(
-                ['git', '-C', str(destination), 'remote', '-v'],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                'git',
+                '-C',
+                str(destination),
+                'remote',
+                '-v',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if result.returncode != 0:
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
                 return {}
-        except (FileNotFoundError, subprocess.SubprocessError):
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+        except FileNotFoundError, OSError:
             return {}
 
+        _min_remote_fields = 3  # "<name>\t<url> (fetch|push)" → at least 3 tokens
         remotes: dict[str, str] = {}
-        for line in result.stdout.splitlines():
-            # Format: "<name>\t<url> (fetch|push)"
+        for line in stdout.splitlines():
             parts = line.split()
-            if len(parts) >= 3 and parts[-1] == '(fetch)':
+            if len(parts) >= _min_remote_fields and parts[-1] == '(fetch)':
                 remotes[parts[0]] = parts[1]
         return remotes
 
     @override
-    def find_repo_root(self, path: Path) -> Path | None:
+    async def find_repo_root(self, path: Path) -> Path | None:
         """Find the Git repository root that contains *path*.
 
         Uses ``git rev-parse --show-toplevel`` to locate the root.
@@ -103,15 +107,19 @@ class GitScm(ScmEnvironment):
             not inside a Git repository.
         """
         try:
-            result = subprocess.run(
-                ['git', '-C', str(path), 'rev-parse', '--show-toplevel'],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                'git',
+                '-C',
+                str(path),
+                'rev-parse',
+                '--show-toplevel',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if result.returncode == 0:
-                return Path(result.stdout.strip())
-        except (FileNotFoundError, subprocess.SubprocessError):
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode == 0:
+                stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
+                return Path(stdout)
+        except FileNotFoundError, OSError:
             pass
         return None

@@ -95,7 +95,7 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
         return [self.tool_name(), self._sync_verb]
 
     @override
-    def sync(self, params: ProjectSyncParameters) -> bool:
+    async def sync(self, params: ProjectSyncParameters) -> bool:
         """Runs `poetry install` in the project directory.
 
         If a runtime provider has resolved a Python interpreter, calls
@@ -111,10 +111,10 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
         # Poetry requires `env use` to select a non-default interpreter
         if self.runtime_executable is not None:
             env_args = ['poetry', 'env', 'use', str(self.runtime_executable)]
-            if not self._run_sync(env_args, params.directory):
+            if not await self._run_sync(env_args, params.directory):
                 return False
 
         args = list(self.sync_command())
         if params.dry:
             args.append('--dry-run')
-        return self._run_sync(args, params.directory)
+        return await self._run_sync(args, params.directory)

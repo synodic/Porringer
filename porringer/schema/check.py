@@ -6,7 +6,7 @@ from packaging.version import Version
 from pydantic import BaseModel, Field
 
 
-@dataclass
+@dataclass(slots=True)
 class PackageUpdateInfo:
     """Update information for a single package.
 
@@ -23,7 +23,7 @@ class PackageUpdateInfo:
     update_available: bool
 
 
-@dataclass
+@dataclass(slots=True)
 class CheckResult:
     """Result of checking updates for a plugin.
 

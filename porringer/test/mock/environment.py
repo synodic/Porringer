@@ -21,7 +21,7 @@ class MockEnvironment(Environment):
         return ['mock', 'upgrade', str(package)]
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages in the given environment
 
         Args:
@@ -33,7 +33,7 @@ class MockEnvironment(Environment):
         return []
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Mock update check — always returns empty."""
         del params
         return []

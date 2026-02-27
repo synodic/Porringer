@@ -1,10 +1,17 @@
 """Shared base for plugins backed by a command-line tool.
 
-Provides the `tool_name()` / `is_available()` / `tool_version()` triple
-so that `Environment`, `ProjectEnvironment`, and `ScmEnvironment` share
-a single implementation instead of duplicating the `shutil.which` logic.
+Provides the ``tool_name()`` / ``is_available()`` / ``tool_version()``
+triple so that ``Environment``, ``ProjectEnvironment``, and
+``ScmEnvironment`` share a single implementation instead of duplicating
+the ``shutil.which`` logic.
+
+The three async helper class-methods — ``_run_json_command``,
+``_run_text_command``, and ``_run_bool_command`` — use native
+``asyncio.create_subprocess_exec`` so that plugin I/O never blocks
+the event loop.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -105,92 +112,104 @@ class ToolBasedPlugin(Plugin):
             return None
 
     @classmethod
-    def _run_json_command(cls, args: list[str], *, check: bool = False) -> Any | None:
+    async def _run_json_command(cls, args: list[str], *, check: bool = False) -> Any | None:
         """Run a CLI command and parse its stdout as JSON.
+
+        Uses ``asyncio.create_subprocess_exec`` so the event loop is
+        never blocked by subprocess I/O.
 
         Centralises the common pattern of running a subprocess, reading
         its standard output, and parsing it as JSON while handling the
         three failure modes every plugin must deal with:
 
-        * `FileNotFoundError` — the tool is not on PATH.
-        * `subprocess.SubprocessError` — the tool failed to run.
-        * `json.JSONDecodeError` — the output was not valid JSON.
+        * ``FileNotFoundError`` — the tool is not on PATH.
+        * ``OSError`` / ``TimeoutError`` — the tool failed or timed out.
+        * ``json.JSONDecodeError`` — the output was not valid JSON.
 
-        When *check* is `True` the call uses `check=True` so that a
-        non-zero exit code raises `subprocess.CalledProcessError` (which
-        is a `SubprocessError` subclass and therefore caught).
+        When *check* is ``True``, a non-zero exit code is treated as an
+        error and ``None`` is returned.
 
         Args:
-            args: Command and arguments (e.g. `['npm', 'ls', '-g', '--json']`).
-            check: Whether to raise on a non-zero exit code.
+            args: Command and arguments (e.g. ``['npm', 'ls', '-g', '--json']``).
+            check: Whether to treat a non-zero exit code as an error.
 
         Returns:
-            The parsed JSON value (dict, list, etc.), or `None` when
+            The parsed JSON value (dict, list, etc.), or ``None`` when
             the command cannot be executed or its output is not valid
             JSON.
         """
         logger = logging.getLogger(f'porringer.{cls.tool_name()}.json_command')
         try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                check=check,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if not check and result.returncode != 0:
-                logger.warning('%s exited with code %d', args[0], result.returncode)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+            if proc.returncode != 0:
+                if check:
+                    stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
+                    logger.error('%s exited with code %d: %s', args[0], proc.returncode, stderr)
+                else:
+                    logger.warning('%s exited with code %d', args[0], proc.returncode)
                 return None
-            return json.loads(result.stdout) if result.stdout.strip() else None
+            return json.loads(stdout) if stdout.strip() else None
         except FileNotFoundError:
             logger.error('%s not found on PATH', args[0])
-        except subprocess.SubprocessError as e:
+        except (OSError, TimeoutError) as e:
             logger.error('Failed to run %s: %s', args[0], e)
         except json.JSONDecodeError as e:
             logger.warning('Could not parse JSON output from %s: %s', args[0], e)
         return None
 
     @classmethod
-    def _run_text_command(cls, args: list[str], *, check: bool = False) -> str | None:
+    async def _run_text_command(cls, args: list[str], *, check: bool = False) -> str | None:
         """Run a CLI command and return its stdout as text.
+
+        Uses ``asyncio.create_subprocess_exec`` so the event loop is
+        never blocked by subprocess I/O.
 
         Centralises the common pattern of running a subprocess and
         returning its standard output while handling failure modes:
 
         * ``FileNotFoundError`` — the tool is not on PATH.
-        * ``subprocess.SubprocessError`` — the tool failed to run.
+        * ``OSError`` / ``TimeoutError`` — the tool failed or timed out.
 
-        When *check* is ``True`` the call uses ``check=True`` so that a
-        non-zero exit code raises ``subprocess.CalledProcessError``.
+        When *check* is ``True``, a non-zero exit code is treated as
+        an error and ``None`` is returned.
 
         Args:
             args: Command and arguments.
-            check: Whether to raise on a non-zero exit code.
+            check: Whether to treat a non-zero exit code as an error.
 
         Returns:
             The stdout string, or ``None`` on failure.
         """
         logger = logging.getLogger(f'porringer.{cls.tool_name()}.text_command')
         try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                check=check,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if not check and result.returncode != 0:
-                logger.warning('%s exited with code %d', args[0], result.returncode)
+            stdout_bytes, _stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+            if proc.returncode != 0:
+                if check:
+                    logger.error('%s exited with code %d', args[0], proc.returncode)
+                else:
+                    logger.warning('%s exited with code %d', args[0], proc.returncode)
                 return None
-            return result.stdout
+            return stdout
         except FileNotFoundError:
             logger.error('%s not found on PATH', args[0])
-        except subprocess.SubprocessError as e:
+        except (OSError, TimeoutError) as e:
             logger.error('Failed to run %s: %s', args[0], e)
         return None
 
     @classmethod
-    def _run_bool_command(
+    async def _run_bool_command(
         cls,
         args: list[str],
         *,
@@ -198,6 +217,9 @@ class ToolBasedPlugin(Plugin):
         label: str = 'command',
     ) -> bool:
         """Run a CLI command and return whether it succeeded.
+
+        Uses ``asyncio.create_subprocess_exec`` so the event loop is
+        never blocked by subprocess I/O.
 
         Logs stdout at info level and stderr at error level on failure.
         Returns ``True`` when the process exits with code 0.
@@ -212,22 +234,23 @@ class ToolBasedPlugin(Plugin):
         """
         logger = logging.getLogger(f'porringer.{cls.tool_name()}.{label}')
         try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                check=False,
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                timeout=300,
             )
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300)
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+            logger.info(stdout)
+            if proc.returncode != 0:
+                stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
+                logger.error(stderr)
                 return False
         except FileNotFoundError:
             logger.error('%s not found on PATH', args[0])
             return False
-        except subprocess.SubprocessError as e:
+        except (OSError, TimeoutError) as e:
             logger.error('Failed to run %s: %s', label, e)
             return False
         return True

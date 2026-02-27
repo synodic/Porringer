@@ -57,7 +57,7 @@ class ScmEnvironment(ToolBasedPlugin):
         ...
 
     @abstractmethod
-    def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
+    async def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
         """Clone a repository from *url* into *destination*.
 
         Args:
@@ -71,7 +71,7 @@ class ScmEnvironment(ToolBasedPlugin):
         ...
 
     @abstractmethod
-    def get_remote_urls(self, destination: Path) -> dict[str, str]:
+    async def get_remote_urls(self, destination: Path) -> dict[str, str]:
         """Return all remote fetch URLs for the repository at *destination*.
 
         Args:
@@ -84,7 +84,7 @@ class ScmEnvironment(ToolBasedPlugin):
         ...
 
     @abstractmethod
-    def find_repo_root(self, path: Path) -> Path | None:
+    async def find_repo_root(self, path: Path) -> Path | None:
         """Find the SCM repository root that contains *path*.
 
         Walks up from *path* to locate the root of the repository.
@@ -118,7 +118,7 @@ class ScmEnvironment(ToolBasedPlugin):
         """SCM environments always have kind `SCM`."""
         return PluginKind.SCM
 
-    def is_cloned(self, url: str, destination: Path) -> CloneStatus:
+    async def is_cloned(self, url: str, destination: Path) -> CloneStatus:
         """Check whether *url* has already been cloned at or above *destination*.
 
         The default implementation:
@@ -141,14 +141,14 @@ class ScmEnvironment(ToolBasedPlugin):
             A `CloneStatus` indicating the result.
         """
         # Walk up to find the actual repo root (handles nested manifests)
-        repo_root = self.find_repo_root(destination)
+        repo_root = await self.find_repo_root(destination)
 
         if repo_root is None:
             return CloneStatus(kind=CloneStatusKind.MISSING)
 
         effective_root = repo_root if repo_root != destination else None
 
-        remotes = self.get_remote_urls(repo_root)
+        remotes = await self.get_remote_urls(repo_root)
         if not remotes:
             return CloneStatus(kind=CloneStatusKind.URL_MISMATCH, repo_root=effective_root)
 

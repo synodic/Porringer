@@ -41,7 +41,7 @@ class PNPMEnvironment(Environment):
         return ['pnpm', 'update', '-g', '--latest', package.name]
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying the npm registry.
 
         pnpm uses the same npm registry; delegates to the shared
@@ -53,13 +53,14 @@ class PNPMEnvironment(Environment):
         Returns:
             A list of packages with their latest available version.
         """
-        return self._check_npm_registry(
+        return await self._check_npm_registry(
             params.packages,
             include_prereleases=params.include_prereleases,
+            http_client=params.http_client,
         )
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed pnpm packages.
 
         Uses `pnpm list -g --json --depth=0` to list top-level global
@@ -72,7 +73,7 @@ class PNPMEnvironment(Environment):
         Returns:
             A list of installed packages.
         """
-        entries = self._run_json_command(['pnpm', 'list', '-g', '--json', '--depth=0'])
+        entries = await self._run_json_command(['pnpm', 'list', '-g', '--json', '--depth=0'])
         if entries is None:
             return []
         # pnpm returns a JSON array; global store is usually the first entry

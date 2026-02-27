@@ -32,7 +32,7 @@ class DownloadParameters(BaseModel):
 ProgressCallback = Callable[[int, int | None], None]
 
 
-@dataclass
+@dataclass(slots=True)
 class DownloadResult:
     """Result of a download operation.
 

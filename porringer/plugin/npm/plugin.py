@@ -42,7 +42,7 @@ class NPMEnvironment(Environment):
         return ['npm', 'update', '-g', package.name]
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying the npm registry.
 
         Delegates to the shared ``_check_npm_registry`` helper.
@@ -53,13 +53,14 @@ class NPMEnvironment(Environment):
         Returns:
             A list of packages with their latest available version.
         """
-        return self._check_npm_registry(
+        return await self._check_npm_registry(
             params.packages,
             include_prereleases=params.include_prereleases,
+            http_client=params.http_client,
         )
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed npm packages.
 
         Uses `npm ls -g --json --depth=0` to list top-level global
@@ -72,7 +73,7 @@ class NPMEnvironment(Environment):
         Returns:
             A list of installed packages.
         """
-        data = self._run_json_command(['npm', 'ls', '-g', '--json', '--depth=0'])
+        data = await self._run_json_command(['npm', 'ls', '-g', '--json', '--depth=0'])
         if data is None or not isinstance(data, dict):
             return []
         deps = data.get('dependencies', {})

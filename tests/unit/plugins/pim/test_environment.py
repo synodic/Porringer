@@ -1,8 +1,7 @@
 """Unit tests for the PIMEnvironment plugin."""
 
-import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from packaging.version import Version
@@ -13,6 +12,14 @@ from porringer.plugin.pim.plugin import PIMEnvironment
 from porringer.test.pytest.tests import EnvironmentUnitTests
 
 _PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.1')))
+
+
+def _fake_proc(returncode: int = 0, stdout: str = '', stderr: str = '') -> AsyncMock:
+    """Create a mock asyncio subprocess process."""
+    proc = AsyncMock()
+    proc.returncode = returncode
+    proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
+    return proc
 
 
 @pytest.fixture
@@ -49,52 +56,38 @@ class TestResolveExecutable:
     """Tests for resolve_executable."""
 
     @staticmethod
-    def test_resolve_success(environment: PIMEnvironment) -> None:
+    async def test_resolve_success(environment: PIMEnvironment) -> None:
         """Successful resolution returns the executable path."""
         exe_path = r'C:\Users\user\AppData\Local\Programs\Python\Python314\python.exe'
         with (
-            patch('subprocess.run') as mock_run,
+            patch('asyncio.create_subprocess_exec', return_value=_fake_proc(stdout=f'{exe_path}\n')),
             patch.object(Path, 'exists', return_value=True),
         ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=f'{exe_path}\n', stderr=''
-            )
-            result = environment.resolve_executable('3.14')
+            result = await environment.resolve_executable('3.14')
             assert result == Path(exe_path)
-            mock_run.assert_called_once_with(
-                ['py', '-3.14', '-c', 'import sys; print(sys.executable)'],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
-            )
 
     @staticmethod
-    def test_resolve_not_installed(environment: PIMEnvironment) -> None:
+    async def test_resolve_not_installed(environment: PIMEnvironment) -> None:
         """Returns None when version is not installed."""
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(1, 'py', stderr='not found')
-            result = environment.resolve_executable('3.99')
+        with patch('asyncio.create_subprocess_exec', return_value=_fake_proc(returncode=1, stderr='not found')):
+            result = await environment.resolve_executable('3.99')
             assert result is None
 
     @staticmethod
-    def test_resolve_py_missing(environment: PIMEnvironment) -> None:
+    async def test_resolve_py_missing(environment: PIMEnvironment) -> None:
         """Returns None when py launcher is missing."""
-        with patch('subprocess.run', side_effect=FileNotFoundError):
-            result = environment.resolve_executable('3.14')
+        with patch('asyncio.create_subprocess_exec', side_effect=FileNotFoundError):
+            result = await environment.resolve_executable('3.14')
             assert result is None
 
     @staticmethod
-    def test_resolve_path_does_not_exist(environment: PIMEnvironment) -> None:
+    async def test_resolve_path_does_not_exist(environment: PIMEnvironment) -> None:
         """Returns None when resolved path does not exist."""
         with (
-            patch('subprocess.run') as mock_run,
+            patch('asyncio.create_subprocess_exec', return_value=_fake_proc(stdout='/bad/path/python\n')),
             patch.object(Path, 'exists', return_value=False),
         ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout='/bad/path/python\n', stderr=''
-            )
-            result = environment.resolve_executable('3.14')
+            result = await environment.resolve_executable('3.14')
             assert result is None
 
 

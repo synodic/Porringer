@@ -108,7 +108,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
 
         return python if python.is_file() else None
 
-    def _check_pypi_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def _check_pypi_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Query the PyPI JSON API for newer versions of the requested packages.
 
         For each package in *params.packages*, fetches
@@ -118,8 +118,8 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         returned.  When ``True``, the highest version across all
         ``releases`` keys is selected (including dev/alpha/beta/rc).
 
-        Uses a single ``httpx.Client`` session for all packages in the
-        batch so that TCP connections / TLS sessions are reused.
+        Uses ``httpx.AsyncClient`` so the event loop is never blocked
+        by network I/O.
 
         This helper is shared by pip, uv, and pipx plugins.
 
@@ -134,24 +134,34 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         logger = logging.getLogger(f'porringer.{self.tool_name()}.check_pypi')
         results: list[Package] = []
 
-        with httpx.Client(timeout=10.0) as client:
+        shared = params.http_client
+
+        async def _run(client: httpx.AsyncClient) -> list[Package]:
+            inner: list[Package] = []
             for pkg_ref in params.packages:
-                pkg = self._check_single_pypi_package(client, pkg_ref, params.include_prereleases, logger)
+                pkg = await self._check_single_pypi_package(client, pkg_ref, params.include_prereleases, logger)
                 if pkg is not None:
-                    results.append(pkg)
+                    inner.append(pkg)
+            return inner
+
+        if shared is not None:
+            results = await _run(shared)
+        else:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                results = await _run(client)
 
         return results
 
     @staticmethod
-    def _check_single_pypi_package(
-        client: httpx.Client,
+    async def _check_single_pypi_package(
+        client: httpx.AsyncClient,
         pkg_ref: PackageRef,
         include_prereleases: bool,
         logger: logging.Logger,
     ) -> Package | None:
         """Fetch one package from PyPI and return the latest version, or ``None``."""
         try:
-            response = client.get(f'https://pypi.org/pypi/{pkg_ref.name}/json')
+            response = await client.get(f'https://pypi.org/pypi/{pkg_ref.name}/json')
             response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, ValueError, KeyError) as exc:
@@ -177,7 +187,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
             return Package(name=pkg_ref.name, version=str(best_stable))
         return None
 
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying PyPI.
 
         Default implementation for all Python-ecosystem plugins.
@@ -190,4 +200,4 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         Returns:
             A list of packages that have updates available.
         """
-        return self._check_pypi_updates(params)
+        return await self._check_pypi_updates(params)

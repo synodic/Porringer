@@ -1,11 +1,13 @@
 """Tests for the pip environment plugin."""
 
+import asyncio
+import inspect
 import json
-import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from packaging.version import Version
@@ -47,17 +49,28 @@ def _make_env() -> PIPEnvironment:
     return PIPEnvironment(params)
 
 
-def _ok(stdout: str) -> subprocess.CompletedProcess[str]:
-    """Helper to build a successful CompletedProcess."""
-    return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr='')
+def _fake_proc(returncode: int = 0, stdout: str = '', stderr: str = '') -> AsyncMock:
+    """Create a mock asyncio subprocess process."""
+    proc = AsyncMock()
+    proc.returncode = returncode
+    proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
+    return proc
 
 
 def _mock_subprocess(
     monkeypatch: pytest.MonkeyPatch,
-    handler: Callable[..., subprocess.CompletedProcess[str]],
+    handler: Callable[..., AsyncMock],
 ) -> None:
-    """Replace subprocess.run with *handler*."""
-    monkeypatch.setattr(subprocess, 'run', handler)
+    """Replace asyncio.create_subprocess_exec with *handler*.
+
+    *handler* may be either a regular callable (lambda) or an async function.
+    We always wrap it in an ``AsyncMock`` so that the ``await`` on the call-site
+    resolves correctly.
+    """
+    if inspect.iscoroutinefunction(handler):
+        monkeypatch.setattr(asyncio, 'create_subprocess_exec', handler)
+    else:
+        monkeypatch.setattr(asyncio, 'create_subprocess_exec', AsyncMock(side_effect=handler))
 
 
 # ---------------------------------------------------------------------------
@@ -69,38 +82,38 @@ class TestVenvWithPip:
     """Simulate a virtual environment where `python -m pip` works normally."""
 
     @staticmethod
-    def test_lists_packages(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_lists_packages(monkeypatch: pytest.MonkeyPatch) -> None:
         """Pip list succeeds — packages returned directly, no fallback needed."""
         pip_json = json.dumps(_SAMPLE_PACKAGES)
 
-        def run(*a: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
-            return _ok(pip_json)
+        async def run(*a: Any, **kw: Any) -> AsyncMock:
+            return _fake_proc(stdout=pip_json)
 
         _mock_subprocess(monkeypatch, run)
-        result = _make_env().packages()
+        result = await _make_env().packages()
 
         assert result == [Package(name=p['name'], version=p['version']) for p in _SAMPLE_PACKAGES]
 
     @staticmethod
-    def test_skips_entries_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_skips_entries_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
         """Entries missing a `name` key are silently dropped."""
         pip_json = json.dumps([
             {'name': 'ruff', 'version': '0.15.0'},
             {'version': '1.0.0'},
             {'name': None, 'version': '2.0.0'},
         ])
-        _mock_subprocess(monkeypatch, lambda *a, **kw: _ok(pip_json))
+        _mock_subprocess(monkeypatch, lambda *a, **kw: _fake_proc(stdout=pip_json))
 
-        result = _make_env().packages()
+        result = await _make_env().packages()
         assert len(result) == 1
         assert result[0].name == 'ruff'
 
     @staticmethod
-    def test_empty_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_empty_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         """A venv with nothing installed returns an empty list."""
-        _mock_subprocess(monkeypatch, lambda *a, **kw: _ok('[]'))
+        _mock_subprocess(monkeypatch, lambda *a, **kw: _fake_proc(stdout='[]'))
 
-        assert _make_env().packages() == []
+        assert await _make_env().packages() == []
 
 
 # ---------------------------------------------------------------------------
@@ -116,34 +129,34 @@ class TestVenvWithoutPip:
     """
 
     @staticmethod
-    def test_fallback_lists_packages(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_fallback_lists_packages(monkeypatch: pytest.MonkeyPatch) -> None:
         """Pip list fails → importlib.metadata fallback returns packages."""
         importlib_json = json.dumps(_SAMPLE_PACKAGES)
         call_count = 0
 
-        def run(*a: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
+        async def run(*a: Any, **kw: Any) -> AsyncMock:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise subprocess.CalledProcessError(1, 'pip')
-            return _ok(importlib_json)
+                return _fake_proc(returncode=1, stderr='pip error')
+            return _fake_proc(stdout=importlib_json)
 
         _mock_subprocess(monkeypatch, run)
-        result = _make_env().packages()
+        result = await _make_env().packages()
 
         expected_call_count = 2  # pip list + importlib.metadata fallback
         assert call_count == expected_call_count
         assert result == [Package(name=p['name'], version=p['version']) for p in _SAMPLE_PACKAGES]
 
     @staticmethod
-    def test_both_methods_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_both_methods_fail(monkeypatch: pytest.MonkeyPatch) -> None:
         """Both pip list and importlib.metadata fail → empty list."""
 
-        def run(*a: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
-            raise subprocess.CalledProcessError(1, 'python')
+        async def run(*a: Any, **kw: Any) -> AsyncMock:
+            return _fake_proc(returncode=1, stderr='error')
 
         _mock_subprocess(monkeypatch, run)
-        assert _make_env().packages() == []
+        assert await _make_env().packages() == []
 
 
 # ---------------------------------------------------------------------------
@@ -155,32 +168,32 @@ class TestGlobalEnvironment:
     """Simulate global (system-wide) Python and edge cases around PATH."""
 
     @staticmethod
-    def test_python_not_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_python_not_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
         """When `python` is not found, return empty without crashing."""
 
-        def run(*a: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
+        async def run(*a: Any, **kw: Any) -> AsyncMock:
             raise FileNotFoundError
 
         _mock_subprocess(monkeypatch, run)
-        assert _make_env().packages() == []
+        assert await _make_env().packages() == []
 
     @staticmethod
-    def test_pip_returns_malformed_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_pip_returns_malformed_json(monkeypatch: pytest.MonkeyPatch) -> None:
         """Corrupt pip output is handled gracefully (returns empty, no fallback)."""
-        _mock_subprocess(monkeypatch, lambda *a, **kw: _ok('not json'))
+        _mock_subprocess(monkeypatch, lambda *a, **kw: _fake_proc(stdout='not json'))
 
-        assert _make_env().packages() == []
+        assert await _make_env().packages() == []
 
     @staticmethod
-    def test_pip_returns_global_packages(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_pip_returns_global_packages(monkeypatch: pytest.MonkeyPatch) -> None:
         """A global Python with pip works the same as a venv with pip."""
         global_pkgs = [
             {'name': 'setuptools', 'version': '75.0.0'},
             {'name': 'wheel', 'version': '0.45.0'},
         ]
-        _mock_subprocess(monkeypatch, lambda *a, **kw: _ok(json.dumps(global_pkgs)))
+        _mock_subprocess(monkeypatch, lambda *a, **kw: _fake_proc(stdout=json.dumps(global_pkgs)))
 
-        result = _make_env().packages()
+        result = await _make_env().packages()
         expected_package_count = 2
         assert len(result) == expected_package_count
         assert result[0] == Package(name='setuptools', version='75.0.0')
@@ -195,40 +208,40 @@ class TestCaching:
     """Verify that packages() results are cached per-instance."""
 
     @staticmethod
-    def test_caches_result(monkeypatch: pytest.MonkeyPatch) -> None:
-        """subprocess.run is only called once, subsequent calls use cache."""
+    async def test_caches_result(monkeypatch: pytest.MonkeyPatch) -> None:
+        """asyncio.create_subprocess_exec is only called once, subsequent calls use cache."""
         call_count = 0
 
-        def run(*a: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
+        async def run(*a: Any, **kw: Any) -> AsyncMock:
             nonlocal call_count
             call_count += 1
-            return _ok(json.dumps([{'name': 'ruff', 'version': '0.15.0'}]))
+            return _fake_proc(stdout=json.dumps([{'name': 'ruff', 'version': '0.15.0'}]))
 
         _mock_subprocess(monkeypatch, run)
         env = _make_env()
 
-        first = env.packages()
-        second = env.packages()
+        first = await env.packages()
+        second = await env.packages()
 
         assert first is second
         assert call_count == 1
 
     @staticmethod
-    def test_separate_instances_not_shared(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_separate_instances_not_shared(monkeypatch: pytest.MonkeyPatch) -> None:
         """Each PIPEnvironment instance has its own cache."""
         call_count = 0
 
-        def run(*a: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
+        async def run(*a: Any, **kw: Any) -> AsyncMock:
             nonlocal call_count
             call_count += 1
-            return _ok(json.dumps([{'name': 'ruff', 'version': '0.15.0'}]))
+            return _fake_proc(stdout=json.dumps([{'name': 'ruff', 'version': '0.15.0'}]))
 
         _mock_subprocess(monkeypatch, run)
         env1 = _make_env()
         env2 = _make_env()
 
-        env1.packages()
-        env2.packages()
+        await env1.packages()
+        await env2.packages()
 
         expected_calls = 2
         assert call_count == expected_calls
@@ -277,10 +290,10 @@ class TestLivePackages:
     """
 
     @staticmethod
-    def test_known_dev_dependencies_are_visible() -> None:
+    async def test_known_dev_dependencies_are_visible() -> None:
         """At least the known dev-dependencies must be discoverable."""
         env = _make_env()
-        installed = {p.name.lower() for p in env.packages()}
+        installed = {p.name.lower() for p in await env.packages()}
 
         # These are always present in the dev/test environment
         expected = {'pytest', 'packaging'}

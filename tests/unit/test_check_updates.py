@@ -6,7 +6,7 @@ error conditions, and package filtering.
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 from packaging.version import Version
@@ -30,6 +30,14 @@ from porringer.plugin.winget.plugin import WingetEnvironment
 _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
 
 
+def _fake_proc(returncode: int = 0, stdout: str = '', stderr: str = '') -> AsyncMock:
+    """Create a mock asyncio subprocess process."""
+    proc = AsyncMock()
+    proc.returncode = returncode
+    proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
+    return proc
+
+
 def _make_params(
     packages: list[str],
     *,
@@ -42,6 +50,13 @@ def _make_params(
     )
 
 
+def _setup_async_client(mock_client: MagicMock, response: MagicMock) -> None:
+    """Wire up an ``httpx.AsyncClient`` mock for async context manager usage."""
+    instance = MagicMock(get=AsyncMock(return_value=response))
+    mock_client.return_value.__aenter__ = AsyncMock(return_value=instance)
+    mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+
+
 # =========================================================================
 # PythonEnvironment._check_pypi_updates (shared by pip, pipx, uv)
 # =========================================================================
@@ -51,7 +66,7 @@ class TestCheckPypiUpdates:
     """Tests for the shared PyPI helper on PythonEnvironment."""
 
     @staticmethod
-    def test_stable_version_returned() -> None:
+    async def test_stable_version_returned() -> None:
         """Stable-only query returns info.version."""
         env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {'info': {'version': '1.2.3'}, 'releases': {'1.2.3': []}}
@@ -59,17 +74,16 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.Client') as mock_client:
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = env._check_pypi_updates(_make_params(['some-package']))
+        with patch('httpx.AsyncClient') as mock_client:
+            _setup_async_client(mock_client, response)
+            result = await env._check_pypi_updates(_make_params(['some-package']))
 
         assert len(result) == 1
         assert result[0].name == 'some-package'
         assert result[0].version == '1.2.3'
 
     @staticmethod
-    def test_prerelease_version_returned() -> None:
+    async def test_prerelease_version_returned() -> None:
         """Pre-release query scans all release keys for the highest."""
         env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {
@@ -85,30 +99,29 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.Client') as mock_client:
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = env._check_pypi_updates(_make_params(['some-package'], include_prereleases=True))
+        with patch('httpx.AsyncClient') as mock_client:
+            _setup_async_client(mock_client, response)
+            result = await env._check_pypi_updates(_make_params(['some-package'], include_prereleases=True))
 
         assert len(result) == 1
         assert result[0].version == '1.3.0a1'
 
     @staticmethod
-    def test_http_error_returns_empty() -> None:
+    async def test_http_error_returns_empty() -> None:
         """Network failures are handled gracefully."""
         env = PIPXEnvironment(_MOCK_PARAMS)
 
-        with patch('httpx.Client') as mock_client:
+        with patch('httpx.AsyncClient') as mock_client:
             mock_instance = MagicMock()
-            mock_instance.get.side_effect = httpx.HTTPError('timeout')
-            mock_client.return_value.__enter__ = MagicMock(return_value=mock_instance)
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = env._check_pypi_updates(_make_params(['some-package']))
+            mock_instance.get = AsyncMock(side_effect=httpx.HTTPError('timeout'))
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await env._check_pypi_updates(_make_params(['some-package']))
 
         assert result == []
 
     @staticmethod
-    def test_multiple_packages() -> None:
+    async def test_multiple_packages() -> None:
         """Multiple packages are queried independently."""
         env = PIPXEnvironment(_MOCK_PARAMS)
         data_a = {'info': {'version': '2.0.0'}, 'releases': {}}
@@ -116,7 +129,7 @@ class TestCheckPypiUpdates:
 
         call_count = 0
 
-        def mock_get(url: str) -> MagicMock:
+        async def mock_get(url: str) -> MagicMock:
             nonlocal call_count
             resp = MagicMock()
             resp.raise_for_status = MagicMock()
@@ -124,10 +137,11 @@ class TestCheckPypiUpdates:
             call_count += 1
             return resp
 
-        with patch('httpx.Client') as mock_client:
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=mock_get))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = env._check_pypi_updates(_make_params(['pkg-a', 'pkg-b']))
+        with patch('httpx.AsyncClient') as mock_client:
+            instance = MagicMock(get=mock_get)
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=instance)
+            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await env._check_pypi_updates(_make_params(['pkg-a', 'pkg-b']))
 
         expected_count = 2
         assert len(result) == expected_count
@@ -135,7 +149,7 @@ class TestCheckPypiUpdates:
         assert result[1].version == '3.0.0'
 
     @staticmethod
-    def test_prerelease_info_version_falls_back_to_stable_release() -> None:
+    async def test_prerelease_info_version_falls_back_to_stable_release() -> None:
         """When info.version is a pre-release and include_prereleases=False, scan releases for stable."""
         env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {
@@ -150,16 +164,15 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.Client') as mock_client:
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = env._check_pypi_updates(_make_params(['cppython']))
+        with patch('httpx.AsyncClient') as mock_client:
+            _setup_async_client(mock_client, response)
+            result = await env._check_pypi_updates(_make_params(['cppython']))
 
         assert len(result) == 1
         assert result[0].version == '0.9.14'
 
     @staticmethod
-    def test_prerelease_info_version_with_no_stable_releases() -> None:
+    async def test_prerelease_info_version_with_no_stable_releases() -> None:
         """When info.version is a pre-release and no stable releases exist, return empty."""
         env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {
@@ -173,15 +186,14 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.Client') as mock_client:
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = env._check_pypi_updates(_make_params(['some-package']))
+        with patch('httpx.AsyncClient') as mock_client:
+            _setup_async_client(mock_client, response)
+            result = await env._check_pypi_updates(_make_params(['some-package']))
 
         assert result == []
 
     @staticmethod
-    def test_stable_info_version_not_affected() -> None:
+    async def test_stable_info_version_not_affected() -> None:
         """When info.version is stable and include_prereleases=False, return it directly."""
         env = PIPXEnvironment(_MOCK_PARAMS)
         pypi_data = {
@@ -195,10 +207,9 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.Client') as mock_client:
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = env._check_pypi_updates(_make_params(['some-package']))
+        with patch('httpx.AsyncClient') as mock_client:
+            _setup_async_client(mock_client, response)
+            result = await env._check_pypi_updates(_make_params(['some-package']))
 
         assert len(result) == 1
         assert result[0].version == '2.0.0'
@@ -221,7 +232,7 @@ class TestPipCheckUpdates:
     """PIPEnvironment.check_updates uses native pip then falls back to PyPI."""
 
     @staticmethod
-    def test_native_pip_outdated() -> None:
+    async def test_native_pip_outdated() -> None:
         """Native pip outdated returns filtered results."""
         env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([
@@ -229,43 +240,46 @@ class TestPipCheckUpdates:
             {'name': 'black', 'version': '23.0', 'latest_version': '24.0', 'latest_filetype': 'wheel'},
         ])
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(stdout=outdated_json, returncode=0)
-            result = env.check_updates(_make_params(['ruff']))
+        with patch('asyncio.create_subprocess_exec', return_value=_fake_proc(stdout=outdated_json)):
+            result = await env.check_updates(_make_params(['ruff']))
 
         assert len(result) == 1
         assert result[0].name == 'ruff'
         assert result[0].version == '0.9.0'
 
     @staticmethod
-    def test_prereleases_flag_passed() -> None:
+    async def test_prereleases_flag_passed() -> None:
         """Prereleases flag is passed to pip command."""
         env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([])
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(stdout=outdated_json, returncode=0)
-            env.check_updates(_make_params(['ruff'], include_prereleases=True))
+        with patch('asyncio.create_subprocess_exec', return_value=_fake_proc(stdout=outdated_json)) as mock_exec:
+            await env.check_updates(_make_params(['ruff'], include_prereleases=True))
 
-        args = mock_run.call_args[0][0]
+        args = mock_exec.call_args[0]
         assert '--pre' in args
 
     @staticmethod
-    def test_falls_back_to_pypi_on_failure() -> None:
+    async def test_falls_back_to_pypi_on_failure() -> None:
         """Falls back to PyPI on pip command failure."""
         env = PIPEnvironment(_MOCK_PARAMS)
 
         with (
-            patch('subprocess.run', side_effect=FileNotFoundError),
-            patch.object(env, '_check_pypi_updates', return_value=[Package(name='ruff', version='1.0.0')]) as pypi_mock,
+            patch('asyncio.create_subprocess_exec', side_effect=FileNotFoundError),
+            patch.object(
+                env,
+                '_check_pypi_updates',
+                new_callable=AsyncMock,
+                return_value=[Package(name='ruff', version='1.0.0')],
+            ) as pypi_mock,
         ):
-            result = env.check_updates(_make_params(['ruff']))
+            result = await env.check_updates(_make_params(['ruff']))
 
         pypi_mock.assert_called_once()
         assert result[0].version == '1.0.0'
 
     @staticmethod
-    def test_all_packages_returned_when_no_filter() -> None:
+    async def test_all_packages_returned_when_no_filter() -> None:
         """All packages returned when no filter is specified."""
         env = PIPEnvironment(_MOCK_PARAMS)
         outdated_json = json.dumps([
@@ -273,9 +287,8 @@ class TestPipCheckUpdates:
             {'name': 'black', 'version': '23.0', 'latest_version': '24.0'},
         ])
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(stdout=outdated_json, returncode=0)
-            result = env.check_updates(CheckUpdatesParameters(packages=[], include_prereleases=False))
+        with patch('asyncio.create_subprocess_exec', return_value=_fake_proc(stdout=outdated_json)):
+            result = await env.check_updates(CheckUpdatesParameters(packages=[], include_prereleases=False))
 
         expected_count = 2
         assert len(result) == expected_count
@@ -290,23 +303,23 @@ class TestNpmCheckUpdates:
     """NPMEnvironment.check_updates delegates to _check_npm_registry."""
 
     @staticmethod
-    def test_stable_version() -> None:
+    async def test_stable_version() -> None:
         """Stable version is returned from npm registry."""
         env = NPMEnvironment(_MOCK_PARAMS)
         expected = [Package(name='typescript', version='10.0.0')]
 
-        with patch.object(env, '_check_npm_registry', return_value=expected) as mock:
-            result = env.check_updates(_make_params(['typescript']))
+        with patch.object(env, '_check_npm_registry', new_callable=AsyncMock, return_value=expected) as mock:
+            result = await env.check_updates(_make_params(['typescript']))
 
         mock.assert_called_once()
         assert result == expected
 
     @staticmethod
-    def test_prereleases_forwarded() -> None:
+    async def test_prereleases_forwarded() -> None:
         """Prereleases flag is forwarded to npm registry."""
         env = NPMEnvironment(_MOCK_PARAMS)
-        with patch.object(env, '_check_npm_registry', return_value=[]) as mock:
-            env.check_updates(_make_params(['typescript'], include_prereleases=True))
+        with patch.object(env, '_check_npm_registry', new_callable=AsyncMock, return_value=[]) as mock:
+            await env.check_updates(_make_params(['typescript'], include_prereleases=True))
 
         _, kwargs = mock.call_args
         assert kwargs['include_prereleases'] is True
@@ -330,14 +343,14 @@ class TestDenoCheckUpdates:
     """DenoEnvironment.check_updates handles npm: and jsr: prefixes."""
 
     @staticmethod
-    def test_npm_package() -> None:
+    async def test_npm_package() -> None:
         """npm-prefixed package queries npm registry."""
         env = DenoEnvironment(_MOCK_PARAMS)
 
         with patch.object(
-            env, '_check_npm_registry', return_value=[Package(name='chalk', version='2.0.0')]
+            env, '_check_npm_registry', new_callable=AsyncMock, return_value=[Package(name='chalk', version='2.0.0')]
         ) as mock_npm:
-            result = env.check_updates(_make_params(['npm:chalk']))
+            result = await env.check_updates(_make_params(['npm:chalk']))
 
         mock_npm.assert_called_once()
         assert len(result) == 1
@@ -345,7 +358,7 @@ class TestDenoCheckUpdates:
         assert result[0].version == '2.0.0'
 
     @staticmethod
-    def test_jsr_package() -> None:
+    async def test_jsr_package() -> None:
         """jsr-prefixed package queries JSR registry."""
         env = DenoEnvironment(_MOCK_PARAMS)
         jsr_data = {'latest': '0.5.0'}
@@ -354,25 +367,24 @@ class TestDenoCheckUpdates:
         response.raise_for_status = MagicMock()
 
         with (
-            patch.object(env, '_check_npm_registry', return_value=[]),
-            patch('porringer.plugin.deno.plugin.httpx.Client') as mock_client,
+            patch.object(env, '_check_npm_registry', new_callable=AsyncMock, return_value=[]),
+            patch('porringer.plugin.deno.plugin.httpx.AsyncClient') as mock_client,
         ):
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = env.check_updates(_make_params(['jsr:@std/path']))
+            _setup_async_client(mock_client, response)
+            result = await env.check_updates(_make_params(['jsr:@std/path']))
 
         assert len(result) == 1
         assert result[0].version == '0.5.0'
 
     @staticmethod
-    def test_bare_name_queries_npm() -> None:
+    async def test_bare_name_queries_npm() -> None:
         """Bare names (no prefix) should route to _check_npm_registry."""
         env = DenoEnvironment(_MOCK_PARAMS)
 
         with patch.object(
-            env, '_check_npm_registry', return_value=[Package(name='chalk', version='4.0.0')]
+            env, '_check_npm_registry', new_callable=AsyncMock, return_value=[Package(name='chalk', version='4.0.0')]
         ) as mock_npm:
-            result = env.check_updates(_make_params(['chalk']))
+            result = await env.check_updates(_make_params(['chalk']))
 
         mock_npm.assert_called_once()
         assert len(result) == 1
@@ -388,22 +400,22 @@ class TestBrewCheckUpdates:
     """BrewEnvironment.check_updates uses ``brew outdated --json``."""
 
     @staticmethod
-    def test_outdated_with_info() -> None:
+    async def test_outdated_with_info() -> None:
         """Outdated packages include info version."""
         env = BrewEnvironment(_MOCK_PARAMS)
         outdated_data = [{'name': 'git', 'current_version': '2.43.0'}]
         info_data = {'formulae': [{'versions': {'stable': '2.44.0'}}]}
 
-        with patch.object(env, '_run_json_command') as mock_cmd:
+        with patch.object(env, '_run_json_command', new_callable=AsyncMock) as mock_cmd:
             mock_cmd.side_effect = [outdated_data, info_data]
-            result = env.check_updates(_make_params(['git']))
+            result = await env.check_updates(_make_params(['git']))
 
         assert len(result) == 1
         assert result[0].name == 'git'
         assert result[0].version == '2.44.0'
 
     @staticmethod
-    def test_outdated_filters_by_requested() -> None:
+    async def test_outdated_filters_by_requested() -> None:
         """Outdated results are filtered by requested packages."""
         env = BrewEnvironment(_MOCK_PARAMS)
         outdated_data = [
@@ -412,30 +424,30 @@ class TestBrewCheckUpdates:
         ]
         info_data = {'formulae': [{'versions': {'stable': '2.44.0'}}]}
 
-        with patch.object(env, '_run_json_command') as mock_cmd:
+        with patch.object(env, '_run_json_command', new_callable=AsyncMock) as mock_cmd:
             mock_cmd.side_effect = [outdated_data, info_data]
-            result = env.check_updates(_make_params(['git']))
+            result = await env.check_updates(_make_params(['git']))
 
         assert len(result) == 1
         assert result[0].name == 'git'
 
     @staticmethod
-    def test_no_outdated_returns_empty() -> None:
+    async def test_no_outdated_returns_empty() -> None:
         """No outdated packages returns empty list."""
         env = BrewEnvironment(_MOCK_PARAMS)
 
-        with patch.object(env, '_run_json_command', return_value=[]):
-            result = env.check_updates(_make_params(['git']))
+        with patch.object(env, '_run_json_command', new_callable=AsyncMock, return_value=[]):
+            result = await env.check_updates(_make_params(['git']))
 
         assert result == []
 
     @staticmethod
-    def test_command_failure_returns_empty() -> None:
+    async def test_command_failure_returns_empty() -> None:
         """Command failure returns empty list."""
         env = BrewEnvironment(_MOCK_PARAMS)
 
-        with patch.object(env, '_run_json_command', return_value=None):
-            result = env.check_updates(_make_params(['git']))
+        with patch.object(env, '_run_json_command', new_callable=AsyncMock, return_value=None):
+            result = await env.check_updates(_make_params(['git']))
 
         assert result == []
 
@@ -449,7 +461,7 @@ class TestWingetCheckUpdates:
     """WingetEnvironment.check_updates parses ``winget upgrade`` output."""
 
     @staticmethod
-    def test_parses_upgrade_output() -> None:
+    async def test_parses_upgrade_output() -> None:
         """Parses winget upgrade output correctly."""
         env = WingetEnvironment(_MOCK_PARAMS)
         # Typical winget upgrade output with fixed-width columns
@@ -459,20 +471,20 @@ class TestWingetCheckUpdates:
             'Python 3.12             Python.Python.3.12      3.12.0   3.12.1    winget\n'
         )
 
-        with patch.object(env, '_run_text_command', return_value=output):
-            result = env.check_updates(_make_params(['Python.Python.3.12']))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=output):
+            result = await env.check_updates(_make_params(['Python.Python.3.12']))
 
         assert len(result) == 1
         assert result[0].name == 'Python.Python.3.12'
         assert result[0].version == '3.12.1'
 
     @staticmethod
-    def test_command_failure_returns_empty() -> None:
+    async def test_command_failure_returns_empty() -> None:
         """Command failure returns empty list."""
         env = WingetEnvironment(_MOCK_PARAMS)
 
-        with patch.object(env, '_run_text_command', return_value=None):
-            result = env.check_updates(_make_params(['Python.Python.3.12']))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=None):
+            result = await env.check_updates(_make_params(['Python.Python.3.12']))
 
         assert result == []
 
@@ -486,36 +498,36 @@ class TestAptCheckUpdates:
     """APTEnvironment.check_updates uses ``apt-cache policy``."""
 
     @staticmethod
-    def test_parses_candidate() -> None:
+    async def test_parses_candidate() -> None:
         """Parses candidate version from apt-cache policy."""
         env = APTEnvironment(_MOCK_PARAMS)
         policy_output = 'python3:\n  Installed: 3.11.6-1\n  Candidate: 3.12.0-1\n  Version table:\n'
 
-        with patch.object(env, '_run_text_command', return_value=policy_output):
-            result = env.check_updates(_make_params(['python3']))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=policy_output):
+            result = await env.check_updates(_make_params(['python3']))
 
         assert len(result) == 1
         assert result[0].name == 'python3'
         assert result[0].version == '3.12.0-1'
 
     @staticmethod
-    def test_no_candidate_returns_empty() -> None:
+    async def test_no_candidate_returns_empty() -> None:
         """No candidate version returns empty list."""
         env = APTEnvironment(_MOCK_PARAMS)
         policy_output = 'nonexistent:\n  Installed: (none)\n  Candidate: (none)\n'
 
-        with patch.object(env, '_run_text_command', return_value=policy_output):
-            result = env.check_updates(_make_params(['nonexistent']))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=policy_output):
+            result = await env.check_updates(_make_params(['nonexistent']))
 
         assert result == []
 
     @staticmethod
-    def test_command_failure_returns_empty() -> None:
+    async def test_command_failure_returns_empty() -> None:
         """Command failure returns empty list."""
         env = APTEnvironment(_MOCK_PARAMS)
 
-        with patch.object(env, '_run_text_command', return_value=None):
-            result = env.check_updates(_make_params(['python3']))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=None):
+            result = await env.check_updates(_make_params(['python3']))
 
         assert result == []
 
@@ -529,49 +541,49 @@ class TestPyenvCheckUpdates:
     """PyenvEnvironment.check_updates uses ``pyenv install --list``."""
 
     @staticmethod
-    def test_finds_latest_matching_version() -> None:
+    async def test_finds_latest_matching_version() -> None:
         """Finds latest matching version from pyenv list."""
         env = PyenvEnvironment(_MOCK_PARAMS)
         list_output = '  3.11.8\n  3.12.0\n  3.12.1\n  3.12.2\n  3.13.0a3\n'
 
-        with patch.object(env, '_run_text_command', return_value=list_output):
-            result = env.check_updates(_make_params(['3.12']))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=list_output):
+            result = await env.check_updates(_make_params(['3.12']))
 
         assert len(result) == 1
         assert result[0].name == '3.12'
         assert result[0].version == '3.12.2'
 
     @staticmethod
-    def test_excludes_prereleases_by_default() -> None:
+    async def test_excludes_prereleases_by_default() -> None:
         """Excludes prereleases by default."""
         env = PyenvEnvironment(_MOCK_PARAMS)
         list_output = '  3.13.0a3\n  3.13.0b1\n  3.12.2\n'
 
-        with patch.object(env, '_run_text_command', return_value=list_output):
-            result = env.check_updates(_make_params(['3.13']))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=list_output):
+            result = await env.check_updates(_make_params(['3.13']))
 
         # No stable 3.13 exists
         assert result == []
 
     @staticmethod
-    def test_includes_prereleases_when_requested() -> None:
+    async def test_includes_prereleases_when_requested() -> None:
         """Includes prereleases when requested."""
         env = PyenvEnvironment(_MOCK_PARAMS)
         list_output = '  3.13.0a3\n  3.13.0b1\n  3.12.2\n'
 
-        with patch.object(env, '_run_text_command', return_value=list_output):
-            result = env.check_updates(_make_params(['3.13'], include_prereleases=True))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=list_output):
+            result = await env.check_updates(_make_params(['3.13'], include_prereleases=True))
 
         assert len(result) == 1
         assert result[0].version == '3.13.0b1'
 
     @staticmethod
-    def test_command_failure_returns_empty() -> None:
+    async def test_command_failure_returns_empty() -> None:
         """Command failure returns empty list."""
         env = PyenvEnvironment(_MOCK_PARAMS)
 
-        with patch.object(env, '_run_text_command', return_value=None):
-            result = env.check_updates(_make_params(['3.12']))
+        with patch.object(env, '_run_text_command', new_callable=AsyncMock, return_value=None):
+            result = await env.check_updates(_make_params(['3.12']))
 
         assert result == []
 
@@ -585,7 +597,7 @@ class TestPimCheckUpdates:
     """PIMEnvironment.check_updates uses ``py list --online``."""
 
     @staticmethod
-    def test_finds_latest_matching_version() -> None:
+    async def test_finds_latest_matching_version() -> None:
         """Finds latest matching version from pim list."""
         env = PIMEnvironment(_MOCK_PARAMS)
         data = {
@@ -596,19 +608,19 @@ class TestPimCheckUpdates:
             ]
         }
 
-        with patch.object(env, '_run_json_command', return_value=data):
-            result = env.check_updates(_make_params(['3.12']))
+        with patch.object(env, '_run_json_command', new_callable=AsyncMock, return_value=data):
+            result = await env.check_updates(_make_params(['3.12']))
 
         assert len(result) == 1
         assert result[0].version == '3.12.1'
 
     @staticmethod
-    def test_command_failure_returns_empty() -> None:
+    async def test_command_failure_returns_empty() -> None:
         """Command failure returns empty list."""
         env = PIMEnvironment(_MOCK_PARAMS)
 
-        with patch.object(env, '_run_json_command', return_value=None):
-            result = env.check_updates(_make_params(['3.12']))
+        with patch.object(env, '_run_json_command', new_callable=AsyncMock, return_value=None):
+            result = await env.check_updates(_make_params(['3.12']))
 
         assert result == []
 
@@ -622,7 +634,7 @@ class TestNpmRegistryHelper:
     """Tests for Environment._check_npm_registry shared helper."""
 
     @staticmethod
-    def test_stable_version() -> None:
+    async def test_stable_version() -> None:
         """Stable version returned from npm registry."""
         registry_data = {
             'dist-tags': {'latest': '10.0.0'},
@@ -632,16 +644,15 @@ class TestNpmRegistryHelper:
         response.json.return_value = registry_data
         response.raise_for_status = MagicMock()
 
-        with patch('porringer.core.plugin_schema.environment.httpx.Client') as mock_client:
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = Environment._check_npm_registry([PackageRef.model_validate('typescript')])
+        with patch('porringer.core.plugin_schema.environment.httpx.AsyncClient') as mock_client:
+            _setup_async_client(mock_client, response)
+            result = await Environment._check_npm_registry([PackageRef.model_validate('typescript')])
 
         assert len(result) == 1
         assert result[0].version == '10.0.0'
 
     @staticmethod
-    def test_prerelease_version() -> None:
+    async def test_prerelease_version() -> None:
         """Prerelease versions are included when include_prereleases is set."""
         registry_data = {
             'dist-tags': {'latest': '10.0.0'},
@@ -651,10 +662,9 @@ class TestNpmRegistryHelper:
         response.json.return_value = registry_data
         response.raise_for_status = MagicMock()
 
-        with patch('porringer.core.plugin_schema.environment.httpx.Client') as mock_client:
-            mock_client.return_value.__enter__ = MagicMock(return_value=MagicMock(get=MagicMock(return_value=response)))
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = Environment._check_npm_registry(
+        with patch('porringer.core.plugin_schema.environment.httpx.AsyncClient') as mock_client:
+            _setup_async_client(mock_client, response)
+            result = await Environment._check_npm_registry(
                 [PackageRef.model_validate('typescript')],
                 include_prereleases=True,
             )
@@ -663,13 +673,13 @@ class TestNpmRegistryHelper:
         assert result[0].version == '11.0.0-beta.1'
 
     @staticmethod
-    def test_http_error_returns_empty() -> None:
+    async def test_http_error_returns_empty() -> None:
         """HTTP errors result in an empty list."""
-        with patch('porringer.core.plugin_schema.environment.httpx.Client') as mock_client:
+        with patch('porringer.core.plugin_schema.environment.httpx.AsyncClient') as mock_client:
             mock_instance = MagicMock()
-            mock_instance.get.side_effect = httpx.HTTPError('timeout')
-            mock_client.return_value.__enter__ = MagicMock(return_value=mock_instance)
-            mock_client.return_value.__exit__ = MagicMock(return_value=False)
-            result = Environment._check_npm_registry([PackageRef.model_validate('typescript')])
+            mock_instance.get = AsyncMock(side_effect=httpx.HTTPError('timeout'))
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await Environment._check_npm_registry([PackageRef.model_validate('typescript')])
 
         assert result == []

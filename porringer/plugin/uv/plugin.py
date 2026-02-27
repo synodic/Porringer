@@ -60,7 +60,7 @@ class UvEnvironment(PythonEnvironment):
         return cmd
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages using `uv pip list --format=json`.
 
         When *project_path* is provided, the method discovers the
@@ -89,7 +89,7 @@ class UvEnvironment(PythonEnvironment):
         if self._cached_packages is not None and self._cached_python == cache_key:
             return self._cached_packages
 
-        entries = self._run_json_command(['uv', 'pip', 'list', '--format=json', *effective_args])
+        entries = await self._run_json_command(['uv', 'pip', 'list', '--format=json', *effective_args])
         if isinstance(entries, list):
             self._cached_packages = [Package(name=e['name'], version=e.get('version')) for e in entries]
         else:

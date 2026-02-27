@@ -77,7 +77,7 @@ class APTEnvironment(Environment):
         return ['apt', 'install', '--only-upgrade', package.name]
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates via ``apt-cache policy``.
 
         For each requested package, parses the ``Candidate:`` line
@@ -92,7 +92,7 @@ class APTEnvironment(Environment):
         """
         results: list[Package] = []
         for pkg_ref in params.packages:
-            output = self._run_text_command(['apt-cache', 'policy', pkg_ref.name])
+            output = await self._run_text_command(['apt-cache', 'policy', pkg_ref.name])
             if output is None:
                 continue
             for line in output.splitlines():
@@ -129,7 +129,7 @@ class APTEnvironment(Environment):
             verb='install',
         )
         if result is not None:
-            version = self.__class__._get_package_version(package)
+            version = await self.__class__._get_package_version(package)
             return Package(name=result.name, version=version)
         return None
 
@@ -158,12 +158,12 @@ class APTEnvironment(Environment):
             verb='upgrade',
         )
         if result is not None:
-            version = self.__class__._get_package_version(package)
+            version = await self.__class__._get_package_version(package)
             return Package(name=result.name, version=version)
         return None
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Lists all installed packages via dpkg.
 
         apt manages system packages globally; *project_path* is accepted
@@ -175,7 +175,7 @@ class APTEnvironment(Environment):
         Returns:
             A list of installed packages
         """
-        output = self._run_text_command(['dpkg-query', '-W', '-f', '${Package}\t${Version}\n'])
+        output = await self._run_text_command(['dpkg-query', '-W', '-f', '${Package}\t${Version}\n'])
         if output is None:
             return []
 
@@ -190,7 +190,7 @@ class APTEnvironment(Environment):
         return packages
 
     @classmethod
-    def _get_package_version(cls, package: str) -> str | None:
+    async def _get_package_version(cls, package: str) -> str | None:
         """Gets the installed version for a package.
 
         Args:
@@ -199,7 +199,7 @@ class APTEnvironment(Environment):
         Returns:
             The version string, or None if not found
         """
-        output = cls._run_text_command(['dpkg-query', '-W', '-f', '${Version}', package])
+        output = await cls._run_text_command(['dpkg-query', '-W', '-f', '${Version}', package])
         if output and output.strip():
             return output.strip()
         return None

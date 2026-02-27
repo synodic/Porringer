@@ -1,6 +1,5 @@
 """Shared pytest configuration and fixtures."""
 
-import asyncio
 import tempfile
 from pathlib import Path
 
@@ -22,7 +21,7 @@ from porringer.schema import (
 )
 
 
-def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
+async def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
     """Drain `execute_stream` and build `BatchSetupResults` from emitted events.
 
     This is a test helper that calls `execute_stream` directly — no
@@ -32,16 +31,13 @@ def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
     collected: list[SetupActionResult] = []
     failed_paths: list[tuple[Path, str]] = []
 
-    async def _run() -> None:
-        async for event in api.sync.execute_stream(params):
-            if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
-                manifests.append(event.manifest)
-            elif event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
-                failed_paths.append(event.failed_path)
-            elif event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
-                collected.append(event.result)
-
-    asyncio.run(_run())
+    async for event in api.sync.execute_stream(params):
+        if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+            manifests.append(event.manifest)
+        elif event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
+            failed_paths.append(event.failed_path)
+        elif event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+            collected.append(event.result)
 
     # Partition collected results by manifest based on action identity
     manifest_action_sets = [set(id(a) for a in m.actions) for m in manifests]

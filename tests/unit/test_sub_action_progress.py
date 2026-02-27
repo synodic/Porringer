@@ -1,6 +1,5 @@
 """Tests for progress event stream and sub-action progress."""
 
-import asyncio
 import json
 import tempfile
 from pathlib import Path
@@ -260,7 +259,7 @@ class TestExecuteStream:
     """Tests for execute_stream async generator."""
 
     @staticmethod
-    def test_stream_yields_events() -> None:
+    async def test_stream_yields_events() -> None:
         """execute_stream yields ProgressEvent items via the queue-based bridge."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -270,13 +269,11 @@ class TestExecuteStream:
             params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             commands = SyncCommands()
 
-            async def run() -> list[ProgressEvent]:
-                collected: list[ProgressEvent] = []
-                async for event in commands.execute_stream(params):
-                    collected.append(event)
-                return collected
+            collected: list[ProgressEvent] = []
+            async for event in commands.execute_stream(params):
+                collected.append(event)
 
-            events = asyncio.run(run())
+            events = collected
 
             # Should have at least a MANIFEST_LOADED event + start/complete pairs
             manifest_events = [e for e in events if e.kind == ProgressEventKind.MANIFEST_LOADED]
@@ -287,7 +284,7 @@ class TestExecuteStream:
             assert len(started) == len(completed)
 
     @staticmethod
-    def test_stream_cancellation() -> None:
+    async def test_stream_cancellation() -> None:
         """Breaking from the stream cancels the background task."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -297,13 +294,11 @@ class TestExecuteStream:
             params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             commands = SyncCommands()
 
-            async def run() -> list[ProgressEvent]:
-                collected: list[ProgressEvent] = []
-                async for event in commands.execute_stream(params):
-                    collected.append(event)
-                    if len(collected) >= MIN_STREAM_EVENTS:
-                        break  # early exit
-                return collected
+            collected: list[ProgressEvent] = []
+            async for event in commands.execute_stream(params):
+                collected.append(event)
+                if len(collected) >= MIN_STREAM_EVENTS:
+                    break  # early exit
 
-            events = asyncio.run(run())
+            events = collected
             assert len(events) >= MIN_STREAM_EVENTS

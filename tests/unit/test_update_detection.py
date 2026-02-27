@@ -5,8 +5,7 @@ on ``SetupActionResult``, and the ``detect_updates`` flag on
 ``SetupParameters``.
 """
 
-import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -56,8 +55,8 @@ def _make_env(
 ) -> MagicMock:
     """Create a mock ``Environment``."""
     env = MagicMock(spec=Environment)
-    env.packages.return_value = installed or []
-    env.check_updates.return_value = updates or []
+    env.packages = AsyncMock(return_value=installed or [])
+    env.check_updates = AsyncMock(return_value=updates or [])
     type(env).package_name_validator = MagicMock(return_value='pep440')
     env.tool_name.return_value = 'pip'
     return env
@@ -100,76 +99,76 @@ class TestCheckForNewerVersion:
     """Unit tests for the helper that queries a plugin for updates."""
 
     @staticmethod
-    def test_returns_newer_version() -> None:
+    async def test_returns_newer_version() -> None:
         """Newer version is returned when available."""
         env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
-        result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
+        result = await check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
         assert result == '0.9.0'
 
     @staticmethod
-    def test_returns_none_when_up_to_date() -> None:
+    async def test_returns_none_when_up_to_date() -> None:
         """None is returned when already up to date."""
         env = _make_env(updates=[Package(name='ruff', version='0.8.0')])
-        result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
+        result = await check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
         assert result is None
 
     @staticmethod
-    def test_returns_none_when_plugin_has_no_updates() -> None:
+    async def test_returns_none_when_plugin_has_no_updates() -> None:
         """None is returned when the plugin reports no updates."""
         env = _make_env(updates=[])
-        result = asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
+        result = await check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
         assert result is None
 
     @staticmethod
-    def test_raises_when_plugin_raises() -> None:
+    async def test_raises_when_plugin_raises() -> None:
         """UpdateCheckError is raised when the plugin raises."""
         env = _make_env()
         env.check_updates.side_effect = RuntimeError('boom')
         with pytest.raises(UpdateCheckError):
-            asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0'))
+            await check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
 
     @staticmethod
-    def test_forwards_include_prereleases() -> None:
+    async def test_forwards_include_prereleases() -> None:
         """The include_prereleases flag is forwarded to the plugin."""
         env = _make_env(updates=[Package(name='ruff', version='0.9.0a1')])
-        asyncio.run(check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True))
+        await check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True)
         call_args = env.check_updates.call_args
         params: CheckUpdatesParameters = call_args[0][0]
         assert params.include_prereleases is True
 
     @staticmethod
-    def test_returns_newer_prerelease() -> None:
+    async def test_returns_newer_prerelease() -> None:
         """Newer prerelease is returned when opted in."""
         env = _make_env(updates=[Package(name='ruff', version='0.9.0a1')])
-        result = asyncio.run(
-            check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True)
+        result = await check_for_newer_version(
+            env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=True
         )
         assert result == '0.9.0a1'
 
     @staticmethod
-    def test_rejects_prerelease_when_not_opted_in() -> None:
+    async def test_rejects_prerelease_when_not_opted_in() -> None:
         """When include_prereleases=False and the plugin leaks a prerelease, filter it out."""
         env = _make_env(updates=[Package(name='cppython', version='0.9.15.dev3')])
-        result = asyncio.run(
-            check_for_newer_version(env, PackageRef.model_validate('cppython'), '0.9.14', include_prereleases=False)
+        result = await check_for_newer_version(
+            env, PackageRef.model_validate('cppython'), '0.9.14', include_prereleases=False
         )
         assert result is None
 
     @staticmethod
-    def test_accepts_stable_when_not_opted_in() -> None:
+    async def test_accepts_stable_when_not_opted_in() -> None:
         """When include_prereleases=False and the plugin returns a stable version, accept it."""
         env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
-        result = asyncio.run(
-            check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=False)
+        result = await check_for_newer_version(
+            env, PackageRef.model_validate('ruff'), '0.8.0', include_prereleases=False
         )
         assert result == '0.9.0'
 
     @staticmethod
-    def test_rejects_devrelease_when_not_opted_in() -> None:
+    async def test_rejects_devrelease_when_not_opted_in() -> None:
         """Dev releases like 1.0.0.dev1 are also filtered when include_prereleases=False."""
         env = _make_env(updates=[Package(name='foo', version='1.0.0.dev1')])
-        result = asyncio.run(
-            check_for_newer_version(env, PackageRef.model_validate('foo'), '0.9.0', include_prereleases=False)
+        result = await check_for_newer_version(
+            env, PackageRef.model_validate('foo'), '0.9.0', include_prereleases=False
         )
         assert result is None
 
@@ -377,7 +376,7 @@ class TestLatestStrategySkip:
         envs = {'pipx': env}
 
         manager = MagicMock()
-        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
         manager.tool_name.return_value = 'pdm'
         manager.is_available.return_value = True
 
@@ -400,7 +399,7 @@ class TestLatestStrategySkip:
         envs = {'pipx': env}
 
         manager = MagicMock()
-        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
         manager.tool_name.return_value = 'pdm'
         manager.is_available.return_value = True
 
@@ -570,7 +569,7 @@ class TestPluginTargetUpdateDetection:
         envs = {'pipx': env}
 
         manager = MagicMock()
-        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
         manager.tool_name.return_value = 'pdm'
         manager.is_available.return_value = True
 
@@ -595,7 +594,7 @@ class TestPluginTargetUpdateDetection:
         envs = {'pipx': env}
 
         manager = MagicMock()
-        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
         manager.tool_name.return_value = 'pdm'
         manager.is_available.return_value = True
 
@@ -618,7 +617,7 @@ class TestPluginTargetUpdateDetection:
         envs = {'pipx': env}
 
         manager = MagicMock()
-        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
         manager.tool_name.return_value = 'pdm'
         manager.is_available.return_value = True
 
@@ -644,7 +643,7 @@ class TestPluginTargetUpdateDetection:
         envs = {'pipx': env}
 
         manager = MagicMock()
-        manager.installed_plugins.return_value = [Package(name='cppython', version='0.9.14')]
+        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
         manager.tool_name.return_value = 'pdm'
         manager.is_available.return_value = True
 

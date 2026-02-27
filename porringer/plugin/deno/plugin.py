@@ -57,7 +57,7 @@ class DenoEnvironment(Environment):
         return ['deno', 'install', '-g', '--force', self._deno_specifier(package)]
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying package registries.
 
         Routes packages to the appropriate registry:
@@ -84,10 +84,11 @@ class DenoEnvironment(Environment):
                 npm_refs.append(pkg_ref)
 
         # Delegate npm-compatible packages to the shared helper
-        results = self._check_npm_registry(
+        results = await self._check_npm_registry(
             [PackageRef.model_validate(r.name[4:] if r.name.startswith('npm:') else r.name) for r in npm_refs],
             include_prereleases=params.include_prereleases,
             logger=logger,
+            http_client=params.http_client,
         )
         # Restore original names (with npm: prefix) for npm results
         for i, npm_ref in enumerate(npm_refs):
@@ -95,23 +96,30 @@ class DenoEnvironment(Environment):
                 results[i] = Package(name=npm_ref.name, version=results[i].version)
 
         # JSR packages
-        for pkg_ref in jsr_refs:
-            jsr_name = pkg_ref.name[4:]  # strip 'jsr:'
-            try:
-                with httpx.Client(timeout=10.0) as client:
-                    response = client.get(f'https://jsr.io/{jsr_name}/meta.json')
+        async def _fetch_jsr(client: httpx.AsyncClient) -> None:
+            for pkg_ref in jsr_refs:
+                jsr_name = pkg_ref.name[4:]  # strip 'jsr:'
+                try:
+                    response = await client.get(f'https://jsr.io/{jsr_name}/meta.json')
                     response.raise_for_status()
                     data = response.json()
-                latest = data.get('latest')
-                if latest:
-                    results.append(Package(name=pkg_ref.name, version=latest))
-            except (httpx.HTTPError, ValueError) as exc:
-                logger.debug('JSR query failed for %s: %s', pkg_ref.name, exc)
+                    latest = data.get('latest')
+                    if latest:
+                        results.append(Package(name=pkg_ref.name, version=latest))
+                except (httpx.HTTPError, ValueError) as exc:
+                    logger.debug('JSR query failed for %s: %s', pkg_ref.name, exc)
+
+        if jsr_refs:
+            if params.http_client is not None:
+                await _fetch_jsr(params.http_client)
+            else:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await _fetch_jsr(client)
 
         return results
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers globally installed Deno scripts.
 
         Deno does not provide a structured list of globally installed

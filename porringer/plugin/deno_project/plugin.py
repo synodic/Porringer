@@ -45,7 +45,7 @@ class DenoProjectEnvironment(ProjectEnvironment):
         return 'deno'
 
     @override
-    def sync(self, params: ProjectSyncParameters) -> bool:
+    async def sync(self, params: ProjectSyncParameters) -> bool:
         """Run `deno install` in the project directory.
 
         Deno does not support `--dry-run`.  In dry-run mode the
@@ -61,4 +61,4 @@ class DenoProjectEnvironment(ProjectEnvironment):
         if params.dry:
             logger.info('Dry run: %s', ' '.join(args))
             return True
-        return self._run_sync(args, params.directory)
+        return await self._run_sync(args, params.directory)

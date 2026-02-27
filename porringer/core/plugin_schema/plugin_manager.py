@@ -11,8 +11,8 @@ The protocol follows the same mixin pattern used by
 plugin management is available.
 """
 
+import asyncio
 import logging
-import subprocess
 from abc import abstractmethod
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
@@ -121,11 +121,12 @@ class PluginManager(Protocol):
         """
         return [Package(name=line.strip(), version=None) for line in stdout.splitlines() if line.strip()]
 
-    def installed_plugins(self) -> list[Package]:
+    async def installed_plugins(self) -> list[Package]:
         """Query the tool for its currently installed plugins.
 
-        Runs ``plugin_list_command`` synchronously and delegates
-        parsing to ``parse_plugin_list``.
+        Runs ``plugin_list_command`` via ``asyncio.create_subprocess_exec``
+        so the event loop is never blocked, and delegates parsing to
+        ``parse_plugin_list``.
 
         Returns:
             A list of installed plugin packages, or an empty list
@@ -134,17 +135,18 @@ class PluginManager(Protocol):
         tool = self.tool_name()
         _logger = logging.getLogger(f'porringer.{tool}.plugin_list')
         try:
-            result = subprocess.run(
-                self.plugin_list_command(),
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                *self.plugin_list_command(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if result.returncode != 0:
-                _logger.debug('plugin list failed: %s', result.stderr)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+            if proc.returncode != 0:
+                stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
+                _logger.debug('plugin list failed: %s', stderr)
                 return []
-            return self.parse_plugin_list(result.stdout)
+            return self.parse_plugin_list(stdout)
         except FileNotFoundError:
             _logger.debug('%s not found', tool)
             return []

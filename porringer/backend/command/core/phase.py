@@ -8,8 +8,7 @@ The :func:`run_phases` driver replaces the hand-coded per-phase blocks in
 ``execute_single()`` with a uniform loop.
 """
 
-from __future__ import annotations
-
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, override
@@ -60,7 +59,7 @@ class Phase(Protocol):
         """The ``PluginKind`` this phase processes (``None`` for post-sync commands)."""
         ...
 
-    def refresh(self, state: ExecutionState) -> None:
+    async def refresh(self, state: ExecutionState) -> None:
         """Re-discover plugins and resolve deferred actions for **this** phase only.
 
         Called *before* :meth:`execute`.  The default implementation is a no-op.
@@ -75,7 +74,7 @@ class Phase(Protocol):
         """
         ...
 
-    def post_execute(self, state: ExecutionState) -> None:
+    async def post_execute(self, state: ExecutionState) -> None:
         """Hook called *after* a successful execution (``should_continue=True``).
 
         Typical use: propagate a resolved runtime to downstream consumers.
@@ -99,10 +98,10 @@ class _PhaseBase:
         return self._kind
 
     # Default no-ops — subclasses override as needed.
-    def refresh(self, state: ExecutionState) -> None:  # noqa: D102
+    async def refresh(self, state: ExecutionState) -> None:  # noqa: D102
         pass
 
-    def post_execute(self, state: ExecutionState) -> None:  # noqa: D102
+    async def post_execute(self, state: ExecutionState) -> None:  # noqa: D102
         pass
 
 
@@ -116,10 +115,10 @@ class RuntimePhase(_PhaseBase):
         return PhaseResult(results=results, should_continue=ok)
 
     @override
-    def post_execute(self, state: ExecutionState) -> None:
+    async def post_execute(self, state: ExecutionState) -> None:
         """Propagate the resolved runtime and trigger a full plugin refresh."""
-        state.propagate_runtime()
-        state.refresh_all_plugins()
+        await state.propagate_runtime()
+        await asyncio.to_thread(state.refresh_all_plugins)
 
 
 class PackagePhase(_PhaseBase):
@@ -138,9 +137,9 @@ class ToolPhase(_PhaseBase):
     _kind = PluginKind.TOOL
 
     @override
-    def refresh(self, state: ExecutionState) -> None:
+    async def refresh(self, state: ExecutionState) -> None:
         """Re-discover plugins so that tools installed in Phase 2a become available."""
-        state.refresh_all_plugins()
+        await asyncio.to_thread(state.refresh_all_plugins)
 
     async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
         results, ok = await state.run_package_actions(state.phases[self._kind])
@@ -153,9 +152,9 @@ class ProjectPhase(_PhaseBase):
     _kind = PluginKind.PROJECT
 
     @override
-    def refresh(self, state: ExecutionState) -> None:
+    async def refresh(self, state: ExecutionState) -> None:
         """Re-discover all plugins so that project environments installed in earlier phases are available."""
-        state.refresh_all_plugins()
+        await asyncio.to_thread(state.refresh_all_plugins)
 
     async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
         results = await state.run_project_phase(state.phases[self._kind])
@@ -170,9 +169,9 @@ class ScmPhase(_PhaseBase):
     _kind = PluginKind.SCM
 
     @override
-    def refresh(self, state: ExecutionState) -> None:
+    async def refresh(self, state: ExecutionState) -> None:
         """Re-discover plugins so that SCM tools installed in earlier phases are available."""
-        state.refresh_all_plugins()
+        await asyncio.to_thread(state.refresh_all_plugins)
 
     async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
         results = await state.run_scm_actions(state.phases[self._kind])
@@ -231,10 +230,10 @@ async def run_phases(state: ExecutionState) -> None:
             continue
 
         # 1. Refresh plugins
-        phase.refresh(state)
+        await phase.refresh(state)
 
         # 2. Resolve deferred actions for THIS phase only
-        state.resolve_deferred(actions)
+        await asyncio.to_thread(state.resolve_deferred, actions)
 
         # 3. Execute
         result = await phase.execute(state)
@@ -244,4 +243,4 @@ async def run_phases(state: ExecutionState) -> None:
             return
 
         # 4. Post-execute hooks
-        phase.post_execute(state)
+        await phase.post_execute(state)

@@ -55,7 +55,7 @@ class WingetEnvironment(Environment):
         return cmd
 
     @override
-    def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates via ``winget upgrade``.
 
         Parses the tabular text output of ``winget upgrade`` to find
@@ -70,7 +70,9 @@ class WingetEnvironment(Environment):
             A list of packages with their latest available version.
         """
         logger = logging.getLogger('porringer.winget.check_updates')
-        output = self._run_text_command(['winget', 'upgrade', '--accept-source-agreements', '--disable-interactivity'])
+        output = await self._run_text_command(
+            ['winget', 'upgrade', '--accept-source-agreements', '--disable-interactivity'],
+        )
         if output is None:
             return []
 
@@ -143,7 +145,7 @@ class WingetEnvironment(Environment):
         return col_starts, col_names, lines[sep_idx + 1 :]
 
     @override
-    def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages in the given environment.
 
         winget manages system packages globally; *project_path* is
