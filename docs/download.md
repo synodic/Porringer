@@ -40,6 +40,7 @@ porringer download https://example.com/large-file.zip ./file.zip --timeout 600
 ## API Usage
 
 ```python
+import asyncio
 from porringer.api import API
 from porringer.schema import LocalConfiguration, DownloadParameters
 
@@ -51,7 +52,7 @@ params = DownloadParameters(
     expected_hash="sha256:abc123...",
 )
 
-result = api.download(params)
+result = asyncio.run(api.download(params))
 print(f"Download success: {result.success}")
 ```
 
@@ -60,10 +61,12 @@ print(f"Download success: {result.success}")
 For programmatic usage, you can provide a progress callback:
 
 ```python
+import asyncio
+
 def progress(downloaded: int, total: int | None) -> None:
     if total:
         percent = (downloaded / total) * 100
         print(f"Progress: {percent:.1f}%")
 
-result = api.download(params, progress_callback=progress)
+result = asyncio.run(api.download(params, progress_callback=progress))
 ```

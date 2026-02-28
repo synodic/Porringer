@@ -110,14 +110,14 @@ class APTEnvironment(Environment):
         return results
 
     @override
-    async def async_install(self, params: PackageParameters) -> Package | None:
+    async def install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs a package using APT.
 
         Overrides the base to use `-y` auto-confirm and resolve
         the installed version afterward.
         """
         if params.progress_callback is None:
-            return await super().async_install(params)
+            return await super().install(params)
 
         logger = logging.getLogger('porringer.apt.install')
         package = params.package.name
@@ -139,14 +139,14 @@ class APTEnvironment(Environment):
         return None
 
     @override
-    async def async_upgrade(self, params: PackageParameters) -> Package | None:
+    async def upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrades a package using APT.
 
         Overrides the base to use `-y --only-upgrade` and resolve
         the installed version afterward.
         """
         if params.progress_callback is None:
-            return await super().async_upgrade(params)
+            return await super().upgrade(params)
 
         logger = logging.getLogger('porringer.apt.upgrade')
         package = params.package.name

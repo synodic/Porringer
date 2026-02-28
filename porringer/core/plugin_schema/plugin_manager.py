@@ -61,7 +61,7 @@ class PluginManager(Protocol):
         """Return the CLI command that adds a plugin natively.
 
         This is used for dry-run / preview display and as the
-        default implementation for ``async_plugin_add``.
+        default implementation for ``plugin_add``.
 
         Args:
             plugin: The sub-package to add.
@@ -79,7 +79,7 @@ class PluginManager(Protocol):
         """Return the CLI command that upgrades an installed plugin.
 
         This is used for dry-run / preview display and as the
-        default implementation for ``async_plugin_update``.
+        default implementation for ``plugin_update``.
 
         Args:
             plugin: The sub-package to upgrade.
@@ -97,7 +97,7 @@ class PluginManager(Protocol):
         """Return the CLI command that removes an installed plugin.
 
         This is used for dry-run / preview display and as the
-        default implementation for ``async_plugin_remove``.
+        default implementation for ``plugin_remove``.
 
         Unlike ``plugin_add_command`` and ``plugin_update_command``,
         there is no ``include_prereleases`` parameter because
@@ -175,7 +175,7 @@ class PluginManager(Protocol):
             _logger.debug('Failed to list plugins for %s: %s', tool, e)
             return []
 
-    async def async_plugin_add(self, params: PackageParameters) -> Package | None:
+    async def plugin_add(self, params: PackageParameters) -> Package | None:
         """Asynchronously add a plugin via the tool's native command.
 
         The default implementation delegates to ``plugin_add_command``
@@ -204,7 +204,7 @@ class PluginManager(Protocol):
             return None
         return Package(name=params.package.name, version=None)
 
-    async def async_plugin_update(self, params: PackageParameters) -> Package | None:
+    async def plugin_update(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrade an installed plugin via the tool's native command.
 
         The default implementation delegates to ``plugin_update_command``
@@ -233,7 +233,7 @@ class PluginManager(Protocol):
             return None
         return Package(name=params.package.name, version=None)
 
-    async def async_plugin_remove(self, params: PackageParameters) -> Package | None:
+    async def plugin_remove(self, params: PackageParameters) -> Package | None:
         """Asynchronously remove an installed plugin via the tool's native command.
 
         The default implementation delegates to ``plugin_remove_command``

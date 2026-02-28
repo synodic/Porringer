@@ -22,23 +22,7 @@ from porringer.utility.exception import PluginError, UpdateError
 app = typer.Typer()
 
 
-def _check_plugin_updates(
-    configuration: ConsoleConfiguration,
-    params: CheckParameters,
-) -> list[CheckResult]:
-    """Check for updates across all plugins.
-
-    Args:
-        configuration: CLI configuration.
-        params: Check parameters.
-
-    Returns:
-        List of check results per plugin.
-    """
-    return asyncio.run(_async_check_plugin_updates(configuration, params))
-
-
-async def _async_check_plugin_updates(
+async def _check_plugin_updates(
     configuration: ConsoleConfiguration,
     params: CheckParameters,
 ) -> list[CheckResult]:
@@ -176,5 +160,5 @@ def check_default(
         include_prereleases=include_prereleases,
     )
 
-    results = _check_plugin_updates(configuration, params)
+    results = asyncio.run(_check_plugin_updates(configuration, params))
     _display_results(configuration, results)

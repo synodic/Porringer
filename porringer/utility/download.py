@@ -360,7 +360,7 @@ def _verify_download(
 # --- Async Download Implementation ---
 
 
-async def _async_download_attempt(
+async def _download_attempt(
     state: _DownloadState,
     cancellation_token: CancellationToken | None,
 ) -> DownloadResult:
@@ -392,7 +392,7 @@ async def _async_download_attempt(
         )
         temp_path = Path(temp_path_str)
 
-        result = await _async_perform_download(temp_fd, state, cancellation_token)
+        result = await _perform_download(temp_fd, state, cancellation_token)
 
         if result.success:
             temp_path.replace(state.parameters.destination)
@@ -411,7 +411,7 @@ async def _async_download_attempt(
                 temp_path.unlink()
 
 
-async def async_download_file(
+async def download_file(
     parameters: DownloadParameters,
     progress_callback: ProgressCallback | None = None,
     cancellation_token: CancellationToken | None = None,
@@ -462,7 +462,7 @@ async def async_download_file(
 
     for attempt in range(_MAX_RETRIES):
         try:
-            result = await _async_download_attempt(state, cancellation_token)
+            result = await _download_attempt(state, cancellation_token)
             if not result.success:
                 return result
             return result
@@ -496,7 +496,7 @@ async def async_download_file(
     return last_result or DownloadResult(success=False, message='Download failed after retries')
 
 
-async def _async_stream_download(
+async def _stream_download(
     temp_fd: int,
     parameters: DownloadParameters,
     *,
@@ -557,7 +557,7 @@ class DownloadSizeMismatchError(Exception):
         super().__init__(f'Size mismatch: expected {expected}, got {actual}')
 
 
-async def _async_perform_download(
+async def _perform_download(
     temp_fd: int,
     state: _DownloadState,
     cancellation_token: CancellationToken | None,
@@ -580,7 +580,7 @@ async def _async_perform_download(
 
     try:
         async with asyncio.timeout(state.parameters.timeout):
-            downloaded = await _async_stream_download(
+            downloaded = await _stream_download(
                 temp_fd,
                 state.parameters,
                 hasher=hasher,

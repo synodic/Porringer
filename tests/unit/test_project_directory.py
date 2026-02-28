@@ -20,7 +20,7 @@ class TestProjectDirectorySkip:
     """Tests for project_directory=False skipping PROJECT_SYNC and RUN_COMMAND actions."""
 
     @staticmethod
-    def test_false_skips_project_sync_not_post_sync(test_api: API) -> None:
+    async def test_false_skips_project_sync_not_post_sync(test_api: API) -> None:
         """Post-sync commands still execute when project_directory is False.
 
         Only PROJECT_SYNC actions are skipped — `post_sync` commands are
@@ -36,7 +36,7 @@ class TestProjectDirectorySkip:
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
-            results = test_api.sync.run(params)
+            results = await test_api.sync.run(params)
 
             # Should show all actions (1 package + 1 command)
             expected_action_count = 2
@@ -52,7 +52,7 @@ class TestProjectDirectorySkip:
             assert command_results[0].success is True
 
     @staticmethod
-    def test_false_keeps_package_actions(test_api: API) -> None:
+    async def test_false_keeps_package_actions(test_api: API) -> None:
         """Package actions still execute when project_directory is False."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -64,7 +64,7 @@ class TestProjectDirectorySkip:
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
-            results = test_api.sync.run(params)
+            results = await test_api.sync.run(params)
 
             # Package action should not be skipped due to project_directory
             package_results = [
@@ -77,7 +77,7 @@ class TestProjectDirectorySkip:
             assert len(project_skips) == 0
 
     @staticmethod
-    def test_none_runs_post_sync(test_api: API) -> None:
+    async def test_none_runs_post_sync(test_api: API) -> None:
         """Post-sync commands execute normally when project_directory is None (default)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -91,7 +91,7 @@ class TestProjectDirectorySkip:
             params = SetupParameters(paths=Path(tmpdir), dry_run=True)
             assert params.project_directory is None
 
-            results = test_api.sync.run(params)
+            results = await test_api.sync.run(params)
 
             # The RUN_COMMAND should NOT be in skips
             command_skips = [r for r in results.skips if r.action.kind is None]

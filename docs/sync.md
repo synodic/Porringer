@@ -217,21 +217,21 @@ from porringer.schema import LocalConfiguration, SetupParameters
 
 api = API(LocalConfiguration())
 
-# Full sync (project + packages)
-results = api.sync.run(SetupParameters(paths=project_path))
+async def main():
+    # Full sync (project + packages)
+    results = await api.sync.run(SetupParameters(paths=project_path))
 
-# Packages only — skip project backends and post-sync commands
-results = api.sync.run(SetupParameters(paths=manifest_path, project_directory=False))
+    # Packages only — skip project backends and post-sync commands
+    results = await api.sync.run(SetupParameters(paths=manifest_path, project_directory=False))
 
-# Override project directory (manifest and project in different locations)
-results = api.sync.run(
-    SetupParameters(paths=manifest_path, project_directory=project_path)
-)
+    # Override project directory (manifest and project in different locations)
+    results = await api.sync.run(
+        SetupParameters(paths=manifest_path, project_directory=project_path)
+    )
 
-# Execute with streaming progress
-async def run():
+    # Execute with streaming progress
     async for event in api.sync.execute_stream(SetupParameters(paths=project_path)):
         print(event.kind, getattr(event.action, 'description', 'manifest loaded'))
 
-asyncio.run(run())
+asyncio.run(main())
 ```

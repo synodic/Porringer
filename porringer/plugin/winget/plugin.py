@@ -165,14 +165,14 @@ class WingetEnvironment(Environment):
         return []
 
     @override
-    async def async_install(self, params: PackageParameters) -> Package | None:
+    async def install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package using winget.
 
         Overrides the base to add `--accept-source-agreements` and
         other winget-specific flags.
         """
         if params.progress_callback is None:
-            return await super().async_install(params)
+            return await super().install(params)
 
         pkg = params.package
         args = [
@@ -198,14 +198,14 @@ class WingetEnvironment(Environment):
         )
 
     @override
-    async def async_upgrade(self, params: PackageParameters) -> Package | None:
+    async def upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrades the given package using winget.
 
         Overrides the base to add `--accept-source-agreements` and
         other winget-specific flags.
         """
         if params.progress_callback is None:
-            return await super().async_upgrade(params)
+            return await super().upgrade(params)
 
         pkg = params.package
         args = [

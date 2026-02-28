@@ -182,7 +182,7 @@ class TestDryRunUpdateAvailable:
     """The main integration of update detection in the dry-run flow."""
 
     @staticmethod
-    def test_update_available_when_check_enabled() -> None:
+    async def test_update_available_when_check_enabled() -> None:
         """When detect_updates=True and a newer version exists, result is UPDATE_AVAILABLE."""
         action = _make_action()
         env = _make_env(
@@ -192,7 +192,7 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
@@ -201,7 +201,7 @@ class TestDryRunUpdateAvailable:
         assert result.message is not None
 
     @staticmethod
-    def test_already_installed_when_no_update() -> None:
+    async def test_already_installed_when_no_update() -> None:
         """When detect_updates=True but no newer version, result is ALREADY_INSTALLED."""
         action = _make_action()
         env = _make_env(
@@ -211,7 +211,7 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
@@ -219,14 +219,14 @@ class TestDryRunUpdateAvailable:
         assert result.available_version is None
 
     @staticmethod
-    def test_already_installed_when_check_disabled() -> None:
+    async def test_already_installed_when_check_disabled() -> None:
         """When detect_updates=False (default), check_updates is never called."""
         action = _make_action()
         env = _make_env(installed=[Package(name='ruff', version='0.8.0')])
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=False)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
@@ -234,20 +234,20 @@ class TestDryRunUpdateAvailable:
         env.check_updates.assert_not_called()
 
     @staticmethod
-    def test_already_installed_when_no_parameters() -> None:
+    async def test_already_installed_when_no_parameters() -> None:
         """Legacy callers passing parameters=None get the old behavior."""
         action = _make_action()
         env = _make_env(installed=[Package(name='ruff', version='0.8.0')])
         envs = {'pip': env}
 
-        result = dry_run_action(action, envs)
+        result = await dry_run_action(action, envs)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
         env.check_updates.assert_not_called()
 
     @staticmethod
-    def test_plugin_no_op_check_updates_falls_back() -> None:
+    async def test_plugin_no_op_check_updates_falls_back() -> None:
         """Plugins that return [] from check_updates → ALREADY_INSTALLED."""
         action = _make_action()
         env = _make_env(
@@ -257,12 +257,12 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
 
     @staticmethod
-    def test_per_action_prereleases_forwarded() -> None:
+    async def test_per_action_prereleases_forwarded() -> None:
         """Per-action include_prereleases is threaded to check_updates."""
         action = _make_action()
         action.include_prereleases = True
@@ -273,7 +273,7 @@ class TestDryRunUpdateAvailable:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        dry_run_action(action, envs, parameters=params)
+        await dry_run_action(action, envs, parameters=params)
 
         call_args = env.check_updates.call_args
         check_params: CheckUpdatesParameters = call_args[0][0]
@@ -289,7 +289,7 @@ class TestLatestStrategySkip:
     """Verify that LATEST strategy skips packages already at the latest version."""
 
     @staticmethod
-    def test_latest_skips_when_at_latest() -> None:
+    async def test_latest_skips_when_at_latest() -> None:
         """LATEST + installed + no newer version → SKIP with ALREADY_LATEST."""
         action = _make_action()
         env = _make_env(
@@ -299,7 +299,7 @@ class TestLatestStrategySkip:
         envs = {'pip': env}
         params = SetupParameters(strategy=SyncStrategy.LATEST)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_LATEST
@@ -307,7 +307,7 @@ class TestLatestStrategySkip:
         assert result.available_version is None
 
     @staticmethod
-    def test_latest_upgrades_when_newer_available() -> None:
+    async def test_latest_upgrades_when_newer_available() -> None:
         """LATEST + installed + newer version exists → not skipped (UPGRADE)."""
         action = _make_action()
         env = _make_env(
@@ -317,27 +317,27 @@ class TestLatestStrategySkip:
         envs = {'pip': env}
         params = SetupParameters(strategy=SyncStrategy.LATEST)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         # Dry-run maps UPGRADE to a success (non-skipped) result
         assert result.skipped is False
         assert result.success is True
 
     @staticmethod
-    def test_latest_installs_when_not_present() -> None:
+    async def test_latest_installs_when_not_present() -> None:
         """LATEST + not installed → INSTALL (not skipped)."""
         action = _make_action()
         env = _make_env(installed=[], updates=[])
         envs = {'pip': env}
         params = SetupParameters(strategy=SyncStrategy.LATEST)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is False
         assert result.success is True
 
     @staticmethod
-    def test_latest_falls_back_to_upgrade_on_check_error() -> None:
+    async def test_latest_falls_back_to_upgrade_on_check_error() -> None:
         """LATEST + installed + check_updates raises → UPGRADE (conservative)."""
         action = _make_action()
         env = _make_env(installed=[Package(name='ruff', version='0.8.0')])
@@ -345,14 +345,14 @@ class TestLatestStrategySkip:
         envs = {'pip': env}
         params = SetupParameters(strategy=SyncStrategy.LATEST)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         # Should not skip — falls back to upgrade attempt
         assert result.skipped is False
         assert result.success is True
 
     @staticmethod
-    def test_latest_skip_has_no_available_version() -> None:
+    async def test_latest_skip_has_no_available_version() -> None:
         """When LATEST skips (already at latest), available_version should be None."""
         action = _make_action()
         env = _make_env(
@@ -362,14 +362,14 @@ class TestLatestStrategySkip:
         envs = {'pip': env}
         params = SetupParameters(strategy=SyncStrategy.LATEST)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_LATEST
         assert result.available_version is None
 
     @staticmethod
-    def test_latest_plugin_target_skips_when_at_latest() -> None:
+    async def test_latest_plugin_target_skips_when_at_latest() -> None:
         """Plugin-target actions under LATEST also skip when at latest."""
         action = _make_plugin_action()
         env = _make_env(updates=[Package(name='cppython', version='0.9.14')])  # same version
@@ -386,13 +386,13 @@ class TestLatestStrategySkip:
             'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
-            result = dry_run_action(action, envs, parameters=params)
+            result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_LATEST
 
     @staticmethod
-    def test_latest_plugin_target_upgrades_when_newer() -> None:
+    async def test_latest_plugin_target_upgrades_when_newer() -> None:
         """Plugin-target actions under LATEST do upgrade when newer version exists."""
         action = _make_plugin_action()
         env = _make_env(updates=[Package(name='cppython', version='1.0.0')])
@@ -409,7 +409,7 @@ class TestLatestStrategySkip:
             'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
-            result = dry_run_action(action, envs, parameters=params)
+            result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is False
         assert result.success is True
@@ -419,7 +419,7 @@ class TestExactStrategySkip:
     """Verify that EXACT strategy also skips packages already at latest."""
 
     @staticmethod
-    def test_exact_skips_when_at_latest() -> None:
+    async def test_exact_skips_when_at_latest() -> None:
         """EXACT + installed + no newer version → SKIP with ALREADY_LATEST."""
         action = _make_action()
         env = _make_env(
@@ -429,13 +429,13 @@ class TestExactStrategySkip:
         envs = {'pip': env}
         params = SetupParameters(strategy=SyncStrategy.EXACT)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_LATEST
 
     @staticmethod
-    def test_exact_upgrades_when_newer() -> None:
+    async def test_exact_upgrades_when_newer() -> None:
         """EXACT + installed + newer version → UPGRADE (not skipped)."""
         action = _make_action()
         env = _make_env(
@@ -445,7 +445,7 @@ class TestExactStrategySkip:
         envs = {'pip': env}
         params = SetupParameters(strategy=SyncStrategy.EXACT)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is False
         assert result.success is True
@@ -460,7 +460,7 @@ class TestDryRunActionDispatch:
     """Verify the top-level dry_run_action passes parameters through."""
 
     @staticmethod
-    def test_parameters_threaded_to_package_action() -> None:
+    async def test_parameters_threaded_to_package_action() -> None:
         """Parameters are threaded through to the package action."""
         action = _make_action()
         env = _make_env(
@@ -470,16 +470,16 @@ class TestDryRunActionDispatch:
         envs = {'pip': env}
         params = SetupParameters(dry_run=True, detect_updates=True)
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
 
     @staticmethod
-    def test_project_action_ignores_parameters() -> None:
+    async def test_project_action_ignores_parameters() -> None:
         """PROJECT actions always return success regardless of parameters."""
         action = SetupAction(description='Sync project', kind=PluginKind.PROJECT, ecosystem=Ecosystem('python'))
         params = SetupParameters(dry_run=True, detect_updates=True)
-        result = dry_run_action(action, {}, parameters=params)
+        result = await dry_run_action(action, {}, parameters=params)
         assert result.success is True
         assert result.skipped is False
 
@@ -562,7 +562,7 @@ class TestPluginTargetUpdateDetection:
     """Verify update detection for plugin-management actions (e.g. cppython→pdm)."""
 
     @staticmethod
-    def test_plugin_update_available() -> None:
+    async def test_plugin_update_available() -> None:
         """When detect_updates=True and a newer version exists, plugin gets UPDATE_AVAILABLE."""
         action = _make_plugin_action()
         env = _make_env(updates=[Package(name='cppython', version='1.0.0')])
@@ -579,7 +579,7 @@ class TestPluginTargetUpdateDetection:
             'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
-            result = dry_run_action(action, envs, parameters=params)
+            result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
@@ -587,7 +587,7 @@ class TestPluginTargetUpdateDetection:
         assert result.available_version == '1.0.0'
 
     @staticmethod
-    def test_plugin_no_update() -> None:
+    async def test_plugin_no_update() -> None:
         """When detect_updates=True but no newer version, plugin gets ALREADY_INSTALLED."""
         action = _make_plugin_action()
         env = _make_env(updates=[Package(name='cppython', version='0.9.14')])
@@ -604,13 +604,13 @@ class TestPluginTargetUpdateDetection:
             'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
-            result = dry_run_action(action, envs, parameters=params)
+            result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
 
     @staticmethod
-    def test_plugin_detect_updates_off() -> None:
+    async def test_plugin_detect_updates_off() -> None:
         """When detect_updates=False, plugin never calls check_updates."""
         action = _make_plugin_action()
         env = _make_env()
@@ -627,14 +627,14 @@ class TestPluginTargetUpdateDetection:
             'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
-            result = dry_run_action(action, envs, parameters=params)
+            result = await dry_run_action(action, envs, parameters=params)
 
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
         env.check_updates.assert_not_called()
 
     @staticmethod
-    def test_plugin_per_package_prereleases() -> None:
+    async def test_plugin_per_package_prereleases() -> None:
         """Per-package include_prereleases on a plugin action is threaded to check_updates."""
         action = _make_plugin_action(include_prereleases=True)
         env = _make_env(
@@ -653,7 +653,7 @@ class TestPluginTargetUpdateDetection:
             'porringer.backend.command.core.resolution.find_plugin_manager',
             return_value=manager,
         ):
-            result = dry_run_action(action, envs, parameters=params)
+            result = await dry_run_action(action, envs, parameters=params)
 
         # Per-action flag is threaded through
         call_args = env.check_updates.call_args
@@ -671,7 +671,7 @@ class TestPrereleasePackagesOverride:
     """Verify that SetupParameters.prerelease_packages mutates actions."""
 
     @staticmethod
-    def test_override_sets_include_prereleases() -> None:
+    async def test_override_sets_include_prereleases() -> None:
         """An action whose package is in prerelease_packages gets include_prereleases=True."""
         action = _make_action(name='ruff')
         assert not action.include_prereleases
@@ -691,7 +691,7 @@ class TestPrereleasePackagesOverride:
 
         assert action.include_prereleases
 
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         call_args = env.check_updates.call_args
         check_params: CheckUpdatesParameters = call_args[0][0]
@@ -738,7 +738,7 @@ class TestPrereleasePackagesOverride:
         assert params.prerelease_packages is None
 
     @staticmethod
-    def test_override_threaded_to_check_for_newer_version() -> None:
+    async def test_override_threaded_to_check_for_newer_version() -> None:
         """Full pipeline: override → action mutation → check_updates receives True."""
         action = _make_action(name='ruff')
         env = _make_env(
@@ -751,7 +751,7 @@ class TestPrereleasePackagesOverride:
         action.include_prereleases = True
 
         params = SetupParameters(dry_run=True, detect_updates=True)
-        result = dry_run_action(action, envs, parameters=params)
+        result = await dry_run_action(action, envs, parameters=params)
 
         call_args = env.check_updates.call_args
         check_params: CheckUpdatesParameters = call_args[0][0]
@@ -794,13 +794,15 @@ class TestPluginSpec:
     @staticmethod
     def test_package_spec_plugins_accepts_mixed() -> None:
         """PackageSpec.plugins accepts a mix of strings and objects."""
-        spec = PackageSpec.model_validate({
-            'name': 'pdm',
-            'plugins': [
-                'cppython',
-                {'name': 'another-plugin', 'include_prereleases': True},
-            ],
-        })
+        spec = PackageSpec.model_validate(
+            {
+                'name': 'pdm',
+                'plugins': [
+                    'cppython',
+                    {'name': 'another-plugin', 'include_prereleases': True},
+                ],
+            }
+        )
         expected_plugin_count = 2
         assert len(spec.plugins) == expected_plugin_count
         assert spec.plugins[0].name.name == 'cppython'
@@ -811,11 +813,13 @@ class TestPluginSpec:
     @staticmethod
     def test_plugin_prereleases_independent_of_parent() -> None:
         """Plugin include_prereleases does not inherit from the parent PackageSpec."""
-        spec = PackageSpec.model_validate({
-            'name': 'pdm',
-            'include_prereleases': True,
-            'plugins': ['cppython'],
-        })
+        spec = PackageSpec.model_validate(
+            {
+                'name': 'pdm',
+                'include_prereleases': True,
+                'plugins': ['cppython'],
+            }
+        )
         # Parent has include_prereleases=True, but the plugin string shorthand defaults to False
         assert spec.include_prereleases is True
         assert spec.plugins[0].include_prereleases is False
