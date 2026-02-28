@@ -41,6 +41,11 @@ class PNPMEnvironment(Environment):
         return ['pnpm', 'update', '-g', '--latest', package.name]
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a package via pnpm."""
+        return ['pnpm', 'remove', '-g', package.name]
+
+    @override
     async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying the npm registry.
 

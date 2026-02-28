@@ -21,6 +21,11 @@ class MockEnvironment(Environment):
         return ['mock', 'upgrade', str(package)]
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a package."""
+        return ['mock', 'uninstall', package.name]
+
+    @override
     async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages in the given environment
 

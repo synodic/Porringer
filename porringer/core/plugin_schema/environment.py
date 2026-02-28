@@ -112,6 +112,27 @@ class Environment(ToolBasedPlugin):
         """
         ...
 
+    @abstractmethod
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command that would uninstall a package.
+
+        Override this method to provide the actual command line arguments
+        that would be used to remove a package.  This is used for
+        displaying commands in dry-run / preview mode and should reflect
+        instance state such as `runtime_executable`.
+
+        Unlike ``install_command`` and ``upgrade_command``, there is no
+        ``include_prereleases`` parameter because pre-release handling
+        is irrelevant when removing a package.
+
+        Args:
+            package: The package reference (only ``name`` is used).
+
+        Returns:
+            A list of command arguments (e.g., ['pip', 'uninstall', '-y', 'requests']).
+        """
+        ...
+
     @staticmethod
     def supports_parallel() -> bool:
         """Returns whether this plugin supports parallel package installations.
@@ -168,6 +189,28 @@ class Environment(ToolBasedPlugin):
         if params.progress_callback is not None:
             return await self._stream_command(args=args, params=params, phase='upgrading', verb='upgrade')
         return await self._run_command(args=args, params=params, verb='upgrade')
+
+    async def async_uninstall(self, params: PackageParameters) -> Package | None:
+        """Asynchronously uninstalls the given package.
+
+        Uses a native async subprocess via `uninstall_command()`.  When
+        `params.progress_callback` is set, output is streamed
+        line-by-line; otherwise output is collected silently.
+
+        Subclasses only need to override this when the streaming command
+        differs from `uninstall_command()` or when post-uninstall logic
+        is required.
+
+        Args:
+            params: The package parameters
+
+        Returns:
+            The package, or None if the uninstall failed.
+        """
+        args = list(self.uninstall_command(params.package))
+        if params.progress_callback is not None:
+            return await self._stream_command(args=args, params=params, phase='uninstalling', verb='uninstall')
+        return await self._run_command(args=args, params=params, verb='uninstall')
 
     # --- Helpers ----------------------------------------------------------
 

@@ -61,6 +61,11 @@ class BrewEnvironment(Environment):
         return ['brew', 'upgrade', package.name]
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a package via brew."""
+        return ['brew', 'uninstall', package.name]
+
+    @override
     async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available formula updates via ``brew outdated``.
 

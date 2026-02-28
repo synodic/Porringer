@@ -9,7 +9,7 @@ import pytest
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
-from porringer.core.schema import Distribution, PluginParameters
+from porringer.core.schema import Distribution, PackageRef, PluginParameters
 from porringer.test.pytest.shared import (
     EnvironmentTests,
     PluginIntegrationTests,
@@ -50,6 +50,17 @@ class EnvironmentUnitTests[T: Environment](PluginUnitTests[T], EnvironmentTests[
             return
         monkeypatch.setattr(shutil, 'which', lambda cmd: None)
         assert plugin_type.is_available() is False
+
+    @staticmethod
+    def test_uninstall_command_returns_list(plugin_type: type[T]) -> None:
+        """uninstall_command() should return a non-empty list of strings."""
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        instance = plugin_type(params)
+        ref = PackageRef.model_validate('some-package')
+        cmd = instance.uninstall_command(ref)
+        assert isinstance(cmd, list)
+        assert len(cmd) > 0
+        assert all(isinstance(part, str) for part in cmd)
 
 
 class ProjectEnvironmentUnitTests[T: ProjectEnvironment](

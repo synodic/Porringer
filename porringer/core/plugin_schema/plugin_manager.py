@@ -93,6 +93,26 @@ class PluginManager(Protocol):
         ...
 
     @abstractmethod
+    def plugin_remove_command(self, plugin: PackageRef) -> list[str]:
+        """Return the CLI command that removes an installed plugin.
+
+        This is used for dry-run / preview display and as the
+        default implementation for ``async_plugin_remove``.
+
+        Unlike ``plugin_add_command`` and ``plugin_update_command``,
+        there is no ``include_prereleases`` parameter because
+        pre-release handling is irrelevant when removing a plugin.
+
+        Args:
+            plugin: The sub-package to remove.
+
+        Returns:
+            A list of command arguments
+            (e.g. ``['pdm', 'self', 'remove', 'cppython']``).
+        """
+        ...
+
+    @abstractmethod
     def plugin_list_command(self) -> list[str]:
         """Return the CLI command that lists installed plugins.
 
@@ -210,6 +230,35 @@ class PluginManager(Protocol):
             return None
         except Exception as e:
             _logger.error('Failed to update plugin %s: %s', params.package.name, e)
+            return None
+        return Package(name=params.package.name, version=None)
+
+    async def async_plugin_remove(self, params: PackageParameters) -> Package | None:
+        """Asynchronously remove an installed plugin via the tool's native command.
+
+        The default implementation delegates to ``plugin_remove_command``
+        and runs the result as an async subprocess.
+
+        Args:
+            params: Package parameters (``params.package`` is the plugin).
+
+        Returns:
+            The removed package, or ``None`` on failure.
+        """
+        args = self.plugin_remove_command(params.package)
+        tool = self.tool_name()
+        _logger = logging.getLogger(f'porringer.{tool}.plugin_remove')
+        try:
+            result = await run_command(args)
+            _logger.info(result.stdout)
+            if result.returncode != 0:
+                _logger.error(result.stderr)
+                return None
+        except FileNotFoundError:
+            _logger.error('%s not found', tool)
+            return None
+        except Exception as e:
+            _logger.error('Failed to remove plugin %s: %s', params.package.name, e)
             return None
         return Package(name=params.package.name, version=None)
 

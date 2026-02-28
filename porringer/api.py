@@ -1,5 +1,6 @@
 """API for Porringer"""
 
+import asyncio
 import logging
 
 from porringer.backend.cache import DirectoryCacheManager
@@ -8,12 +9,14 @@ from porringer.backend.command.self import check_self_updates
 from porringer.backend.command.sync import SyncCommands
 from porringer.backend.resolver import resolve_configuration
 from porringer.backend.schema import GlobalConfiguration
+from porringer.core.schema import PackageRef
 from porringer.schema import (
     DownloadParameters,
     DownloadResult,
     LocalConfiguration,
     PackageUpdateInfo,
     ProgressCallback,
+    SetupActionResult,
 )
 from porringer.utility.download import download_file
 
@@ -70,3 +73,60 @@ class API:
         """
         logger.info(f'Downloading: {parameters.url}')
         return download_file(parameters, progress_callback)
+
+    @staticmethod
+    def uninstall(
+        plugin_name: str,
+        package: PackageRef,
+        *,
+        dry_run: bool = False,
+    ) -> SetupActionResult:
+        """Uninstall a globally-installed package.
+
+        Resolves the named plugin, checks whether the package is
+        installed, and runs the plugin's ``async_uninstall`` command.
+        When ``dry_run`` is ``True``, only reports whether the
+        removal *would* proceed without actually executing it.
+
+        This is an imperative operation that operates outside the
+        manifest-driven sync flow.  It is intended for GUI clients
+        that wish to offer per-package removal.
+
+        Args:
+            plugin_name: The installer plugin name (e.g. ``"pipx"``,
+                ``"uv"``, ``"npm"``).
+            package: The package to uninstall (only ``name`` is used).
+            dry_run: When ``True``, resolve presence but do not execute.
+
+        Returns:
+            A ``SetupActionResult`` describing the outcome.
+        """
+        from porringer.backend.command.core.discovery import discover_all_plugins
+        from porringer.backend.command.core.execution import execute_uninstall
+        from porringer.backend.command.core.resolution import resolve_uninstall_operation, resolved_to_result
+        from porringer.schema import SetupAction
+
+        plugins = discover_all_plugins(use_cache=True)
+        environments = plugins.environments
+
+        if plugin_name not in environments:
+            return SetupActionResult(
+                action=SetupAction(description=f"Uninstall '{package.name}' via {plugin_name}"),
+                success=False,
+                message=f"Plugin '{plugin_name}' is not available",
+            )
+
+        environment = environments[plugin_name]
+        action = SetupAction(
+            description=f"Uninstall '{package.name}' via {plugin_name}",
+            kind=environment.plugin_kind(),
+            ecosystem=environment.ecosystem(),
+            installer=plugin_name,
+            package=package,
+        )
+
+        if dry_run:
+            resolved = asyncio.run(resolve_uninstall_operation(action, environments))
+            return resolved_to_result(resolved)
+
+        return asyncio.run(execute_uninstall(action, environments))

@@ -42,6 +42,11 @@ class BunEnvironment(Environment):
         return ['bun', 'add', '-g', f'{package.name}@latest']
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a package via Bun."""
+        return ['bun', 'remove', '-g', package.name]
+
+    @override
     async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying the npm registry.
 

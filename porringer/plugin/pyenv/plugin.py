@@ -73,6 +73,11 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         """Returns the CLI command to upgrade (reinstall) a Python runtime via pyenv."""
         return ['pyenv', 'install', '--skip-existing', package.name]
 
+    @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a Python runtime via pyenv."""
+        return ['pyenv', 'uninstall', '-f', package.name]
+
     # ------------------------------------------------------------------
     # RuntimeProvider
     # ------------------------------------------------------------------

@@ -135,6 +135,11 @@ class PIMEnvironment(Environment, RuntimeProvider):
         return ['py', 'install', '--update', package.name]
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a Python runtime via pymanager."""
+        return ['py', 'uninstall', '-y', package.name]
+
+    @override
     async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for newer Python runtimes via ``py list --online``.
 
