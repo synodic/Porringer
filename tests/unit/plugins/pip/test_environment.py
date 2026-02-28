@@ -205,11 +205,17 @@ class TestGlobalEnvironment:
 
 
 class TestCaching:
-    """Verify that packages() results are cached per-instance."""
+    """Verify that packages() calls through to the subprocess each time.
+
+    Per-instance caching has been removed — caching is now handled by
+    the resolution-layer ``PackageCache``.  Each ``packages()`` call
+    invokes the underlying subprocess so the cache layer can control
+    freshness.
+    """
 
     @staticmethod
-    async def test_caches_result(monkeypatch: pytest.MonkeyPatch) -> None:
-        """asyncio.create_subprocess_exec is only called once, subsequent calls use cache."""
+    async def test_each_call_queries_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Each packages() call invokes the subprocess (no internal memoisation)."""
         call_count = 0
 
         async def run(*a: Any, **kw: Any) -> AsyncMock:
@@ -223,12 +229,13 @@ class TestCaching:
         first = await env.packages()
         second = await env.packages()
 
-        assert first is second
-        assert call_count == 1
+        assert first == second
+        _expected_subprocess_calls = 2
+        assert call_count == _expected_subprocess_calls
 
     @staticmethod
-    async def test_separate_instances_not_shared(monkeypatch: pytest.MonkeyPatch) -> None:
-        """Each PIPEnvironment instance has its own cache."""
+    async def test_separate_instances_independent(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Each PIPEnvironment instance queries independently."""
         call_count = 0
 
         async def run(*a: Any, **kw: Any) -> AsyncMock:

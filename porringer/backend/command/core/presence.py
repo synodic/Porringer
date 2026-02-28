@@ -23,10 +23,9 @@ from porringer.schema import (
 )
 from porringer.schema.execution import CloneStatus, CloneStatusKind
 
-from .resolution import ResolutionContext, is_package_installed, resolve_operation, resolved_to_result
+from .resolution import PackageCache, ResolutionContext, resolve_operation, resolved_to_result
 
-# Re-export for backward compatibility with existing callers
-__all__ = ['async_dry_run_action', 'clone_status_to_result', 'dry_run_action', 'is_package_installed']
+__all__ = ['async_dry_run_action', 'clone_status_to_result', 'dry_run_action']
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +40,7 @@ async def async_dry_run_action(
     working_dir: Path | None = None,
     parameters: SetupParameters | None = None,
     http_client: httpx.AsyncClient | None = None,
+    package_cache: PackageCache | None = None,
 ) -> SetupActionResult:
     """Simulate executing an action in dry-run mode (async).
 
@@ -70,6 +70,9 @@ async def async_dry_run_action(
             ``SyncStrategy.MINIMAL`` is used.
         http_client: Shared ``httpx.AsyncClient`` for connection pooling.
             When ``None``, each update check creates its own client.
+        package_cache: Optional shared cache for ``packages()`` results.
+            When set, concurrent dry-run checks share a single query
+            per installer instead of each task querying independently.
 
     Returns:
         The simulated result.
@@ -83,6 +86,7 @@ async def async_dry_run_action(
                 project_environments=project_environments,
                 parameters=parameters,
                 http_client=http_client,
+                package_cache=package_cache,
             )
         case PluginKind.SCM:
             return await _async_dry_run_scm_action(
@@ -238,6 +242,7 @@ async def _async_dry_run_package_action(
     project_environments: dict[str, ProjectEnvironment] | None = None,
     parameters: SetupParameters | None = None,
     http_client: httpx.AsyncClient | None = None,
+    package_cache: PackageCache | None = None,
 ) -> SetupActionResult:
     """Simulate a package or plugin action in dry-run mode.
 
@@ -255,6 +260,7 @@ async def _async_dry_run_package_action(
         project_environments=project_environments,
         detect_updates=detect_updates,
         http_client=http_client,
+        package_cache=package_cache,
     )
 
     resolved = await resolve_operation(action, environments, strategy, ctx)

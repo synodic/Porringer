@@ -9,6 +9,7 @@ Also hosts :func:`is_package_installed`, the shared presence-detection
 helper used by resolution, dry-run, and execution paths.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -90,6 +91,106 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
     )
 
 
+class PackageCache:
+    """Per-phase cache for ``packages()`` / ``installed_plugins()`` results.
+
+    Ensures each environment plugin's ``packages()`` method and each
+    ``PluginManager``'s ``installed_plugins()`` method is called at
+    most once per unique key, eliminating redundant subprocess or
+    filesystem queries when many actions share the same installer.
+
+    Thread-safe via per-key `asyncio.Lock` instances so concurrent
+    ``TaskGroup`` tasks that hit the same installer serialise on
+    the first query and share its result.
+    """
+
+    def __init__(self) -> None:
+        """Initialise empty caches and lock registry."""
+        self._packages: dict[str, list[Package]] = {}
+        self._plugins: dict[str, list[Package]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for(self, key: str) -> asyncio.Lock:
+        """Return (creating if needed) the lock for *key*."""
+        return self._locks.setdefault(key, asyncio.Lock())
+
+    async def get_packages(
+        self,
+        installer: str,
+        environment: Environment,
+        project_path: Path | None = None,
+    ) -> list[Package]:
+        """Return cached ``packages()`` result, querying on first access.
+
+        The cache key is ``(installer, project_path)`` so that
+        project-scoped queries are cached separately from global ones.
+
+        Args:
+            installer: The installer/plugin name.
+            environment: The environment plugin instance.
+            project_path: Optional project directory scope.
+
+        Returns:
+            The list of installed packages.
+        """
+        key = f'pkg:{installer}:{project_path}'
+        async with self._lock_for(key):
+            if key not in self._packages:
+                self._packages[key] = await environment.packages(project_path=project_path)
+            return self._packages[key]
+
+    async def get_plugins(
+        self,
+        tool_name: str,
+        manager: PluginManager,
+    ) -> list[Package]:
+        """Return cached ``installed_plugins()`` result.
+
+        Args:
+            tool_name: The host tool name (cache key).
+            manager: The plugin manager instance.
+
+        Returns:
+            The list of installed plugin packages.
+        """
+        key = f'plg:{tool_name}'
+        async with self._lock_for(key):
+            if key not in self._plugins:
+                self._plugins[key] = await manager.installed_plugins()
+            return self._plugins[key]
+
+    def invalidate_packages(self, installer: str, project_path: Path | None = None) -> None:
+        """Remove cached packages for an installer so next access re-queries.
+
+        Call this after a successful install/upgrade so subsequent
+        presence checks see fresh state.
+
+        Args:
+            installer: The installer/plugin name.
+            project_path: Optional project directory scope.
+        """
+        key = f'pkg:{installer}:{project_path}'
+        self._packages.pop(key, None)
+
+    def invalidate_plugins(self, tool_name: str) -> None:
+        """Remove cached plugins for a tool so next access re-queries.
+
+        Args:
+            tool_name: The host tool name.
+        """
+        key = f'plg:{tool_name}'
+        self._plugins.pop(key, None)
+
+    def invalidate_all(self) -> None:
+        """Clear all cached data.
+
+        Locks are intentionally retained — clearing them while a
+        concurrent coroutine holds one would be unsafe.
+        """
+        self._packages.clear()
+        self._plugins.clear()
+
+
 @dataclass(slots=True)
 class ResolutionContext:
     """Optional context for :func:`resolve_operation`.
@@ -109,6 +210,10 @@ class ResolutionContext:
     """Shared ``httpx.AsyncClient`` for connection pooling across
     concurrent update checks.  ``None`` means each check creates
     its own short-lived client."""
+    package_cache: PackageCache | None = None
+    """Optional shared cache for ``packages()`` results.  When set,
+    multiple actions using the same installer share a single
+    ``packages()`` call instead of querying independently."""
 
 
 async def resolve_operation(
@@ -149,40 +254,23 @@ async def resolve_operation(
 
     # --- Plugin-management actions -----------------------------------------
     if action.plugin_target is not None:
-        return await _resolve_plugin_operation(
-            action,
-            environments,
-            strategy,
-            project_environments=ctx.project_environments,
-            detect_updates=ctx.detect_updates,
-            http_client=ctx.http_client,
-        )
+        return await _resolve_plugin_operation(action, environments, strategy, ctx)
 
     # --- Normal package actions --------------------------------------------
-    return await _resolve_package_operation(
-        action,
-        environments,
-        strategy,
-        project_path=ctx.project_path,
-        detect_updates=ctx.detect_updates,
-        http_client=ctx.http_client,
-    )
+    return await _resolve_package_operation(action, environments, strategy, ctx)
 
 
 async def _resolve_plugin_operation(
     action: SetupAction,
     environments: dict[str, Environment],
     strategy: SyncStrategy,
-    *,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
-    detect_updates: bool = False,
-    http_client: httpx.AsyncClient | None = None,
+    ctx: ResolutionContext,
 ) -> ResolvedOperation:
     """Resolve the operation for a plugin-management action."""
     assert action.plugin_target is not None
     assert action.package is not None
 
-    manager = find_plugin_manager(action.plugin_target.name, project_environments)
+    manager = find_plugin_manager(action.plugin_target.name, ctx.project_environments)
     if manager is None:
         # No PluginManager found — cannot determine presence, assume install
         return ResolvedOperation(
@@ -192,12 +280,15 @@ async def _resolve_plugin_operation(
             message='PluginManager not available for query',
         )
 
-    # Query installed plugins (subprocess — run off the event loop)
+    # Query installed plugins — use cache when available
     presence = _PresenceResult(
         env_for_updates=environments.get(action.installer) if action.installer else None,
     )
     try:
-        installed = await manager.installed_plugins()
+        if ctx.package_cache is not None:
+            installed = await ctx.package_cache.get_plugins(action.plugin_target.name, manager)
+        else:
+            installed = await manager.installed_plugins()
         presence.is_installed, presence.detail, presence.matched = is_package_installed(action.package, installed)
     except Exception as e:
         logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
@@ -206,9 +297,9 @@ async def _resolve_plugin_operation(
         action=action,
         strategy=strategy,
         presence=presence,
-        detect_updates=detect_updates,
+        detect_updates=ctx.detect_updates,
         plugin_manager=manager,
-        http_client=http_client,
+        http_client=ctx.http_client,
     )
 
 
@@ -216,10 +307,7 @@ async def _resolve_package_operation(
     action: SetupAction,
     environments: dict[str, Environment],
     strategy: SyncStrategy,
-    *,
-    project_path: Path | None = None,
-    detect_updates: bool = False,
-    http_client: httpx.AsyncClient | None = None,
+    ctx: ResolutionContext,
 ) -> ResolvedOperation:
     """Resolve the operation for a normal package action."""
     assert action.installer is not None
@@ -237,7 +325,10 @@ async def _resolve_package_operation(
 
     presence = _PresenceResult(env_for_updates=environment)
     try:
-        installed_packages = await environment.packages(project_path=project_path)
+        if ctx.package_cache is not None:
+            installed_packages = await ctx.package_cache.get_packages(action.installer, environment, ctx.project_path)
+        else:
+            installed_packages = await environment.packages(project_path=ctx.project_path)
         presence.is_installed, presence.detail, presence.matched = is_package_installed(
             action.package, installed_packages, validator, action.kind
         )
@@ -250,8 +341,8 @@ async def _resolve_package_operation(
         action=action,
         strategy=strategy,
         presence=presence,
-        detect_updates=detect_updates,
-        http_client=http_client,
+        detect_updates=ctx.detect_updates,
+        http_client=ctx.http_client,
     )
 
 

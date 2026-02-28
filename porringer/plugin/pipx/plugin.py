@@ -1,12 +1,13 @@
 """Plugin implementation"""
 
+import asyncio
 import json
 import os
 from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
-from porringer.core.schema import Package, PackageRef, PluginKind
+from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind, PluginKind
 
 
 def _get_pipx_venvs_dir() -> Path:
@@ -28,6 +29,51 @@ def _get_pipx_venvs_dir() -> Path:
         return Path.home() / 'pipx' / 'venvs'
     else:
         return Path.home() / '.local' / 'pipx' / 'venvs'
+
+
+def _read_venv_packages_sync(venv_dir: Path) -> list[Package]:
+    """Read packages from a single pipx venv directory (synchronous).
+
+    Parses ``pipx_metadata.json`` and returns both the main package
+    and any injected packages.  Injected packages carry a
+    :class:`PackageRelation` linking them to the host tool.
+
+    Args:
+        venv_dir: Path to a pipx venv directory.
+
+    Returns:
+        A list of packages found in the venv.
+    """
+    metadata_file = venv_dir / 'pipx_metadata.json'
+    if not metadata_file.exists():
+        return []
+
+    try:
+        metadata = json.loads(metadata_file.read_text())
+    except json.JSONDecodeError, KeyError:
+        return []
+
+    packages: list[Package] = []
+    main_package = metadata.get('main_package', {})
+    name = main_package.get('package')
+    version = main_package.get('package_version')
+    if name:
+        packages.append(Package(name=name, version=version))
+
+        # Injected packages carry a relation back to the host tool
+        for _key, injected in metadata.get('injected_packages', {}).items():
+            inj_name = injected.get('package')
+            inj_version = injected.get('package_version')
+            if inj_name:
+                packages.append(
+                    Package(
+                        name=inj_name,
+                        version=inj_version,
+                        relation=PackageRelation(host=name, kind=PackageRelationKind.INJECTED),
+                    )
+                )
+
+    return packages
 
 
 class PIPXEnvironment(PythonEnvironment):
@@ -76,35 +122,31 @@ class PIPXEnvironment(PythonEnvironment):
         *project_path* is accepted for interface compatibility but
         has no effect on the result.
 
+        Per-venv metadata reads are offloaded to threads and run in
+        parallel so the event loop is never blocked, even when many
+        venvs exist.
+
         Args:
             project_path: Unused.  pipx is inherently global.
 
         Returns:
             A list of packages
         """
-        packages: list[Package] = []
         pipx_venvs = _get_pipx_venvs_dir()
 
         if not pipx_venvs.exists():
-            return packages
+            return []
 
-        for venv_dir in pipx_venvs.iterdir():
-            metadata_file = venv_dir / 'pipx_metadata.json'
-            if metadata_file.exists():
-                try:
-                    metadata = json.loads(metadata_file.read_text())
-                    main_package = metadata.get('main_package', {})
-                    name = main_package.get('package')
-                    version = main_package.get('package_version')
-                    if name:
-                        packages.append(Package(name=name, version=version))
-                    # Also report injected packages
-                    for _key, injected in metadata.get('injected_packages', {}).items():
-                        inj_name = injected.get('package')
-                        inj_version = injected.get('package_version')
-                        if inj_name:
-                            packages.append(Package(name=inj_name, version=inj_version))
-                except json.JSONDecodeError, KeyError:
-                    continue
+        venv_dirs = [d for d in pipx_venvs.iterdir() if d.is_dir()]
+        if not venv_dirs:
+            return []
+
+        # Fan out per-venv reads in parallel, each offloaded to a thread
+        results = await asyncio.gather(*[asyncio.to_thread(_read_venv_packages_sync, d) for d in venv_dirs])
+
+        # Flatten the per-venv lists into a single list
+        packages: list[Package] = []
+        for venv_packages in results:
+            packages.extend(venv_packages)
 
         return packages

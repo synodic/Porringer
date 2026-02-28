@@ -61,6 +61,7 @@ from .phase import run_phases
 from .presence import async_dry_run_action, clone_status_to_result
 from .resolution import (
     OperationKind,
+    PackageCache,
     ResolutionContext,
     resolve_operation,
     resolved_to_result,
@@ -468,6 +469,8 @@ async def execute_package(
     strategy: SyncStrategy,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
     plugin_context: PluginContext | None = None,
+    *,
+    package_cache: PackageCache | None = None,
 ) -> SetupActionResult:
     """Execute a package install or upgrade based on the strategy.
 
@@ -482,6 +485,10 @@ async def execute_package(
         event_queue: Optional queue to emit sub-action events into.
         plugin_context: Optional plugin-management context providing
             project-path and project-environment references.
+        package_cache: Optional shared cache for ``packages()`` results.
+            When provided, presence checks share a single query per
+            installer.  Invalidated after successful installs/upgrades
+            so subsequent actions see fresh state.
 
     Returns:
         The result of the operation.
@@ -499,6 +506,7 @@ async def execute_package(
         ResolutionContext(
             project_path=project_path,
             project_environments=project_environments,
+            package_cache=package_cache,
         ),
     )
 
@@ -739,6 +747,10 @@ async def execute_package_actions(
 
     results: list[SetupActionResult] = []
 
+    # Shared cache — presence checks share a single packages() call per
+    # installer.  Invalidated by execute_package after successful mutations.
+    cache = PackageCache()
+
     # Execute parallel actions concurrently
     if parallel_actions:
         parallel_results, should_continue = await _run_parallel_packages(
@@ -747,6 +759,7 @@ async def execute_package_actions(
             parameters,
             event_queue,
             plugin_context,
+            package_cache=cache,
         )
         results.extend(parallel_results)
         if not should_continue:
@@ -759,6 +772,7 @@ async def execute_package_actions(
         parameters,
         event_queue,
         plugin_context,
+        package_cache=cache,
     )
     results.extend(sequential_results)
 
@@ -776,6 +790,10 @@ async def _dry_run_package_actions(
     """Execute dry-run for package actions in parallel.
 
     All actions are dispatched concurrently via ``asyncio.TaskGroup``.
+    A shared :class:`PackageCache` ensures each installer's
+    ``packages()`` is called at most once, regardless of how many
+    actions target the same installer.
+
     Results are emitted in the original action order regardless of
     which checks finish first, preserving deterministic card ordering
     for GUI consumers.
@@ -787,6 +805,9 @@ async def _dry_run_package_actions(
     result_slots: list[SetupActionResult | None] = [None] * len(package_actions)
 
     semaphore: asyncio.Semaphore | None = asyncio.Semaphore(max_concurrency) if max_concurrency > 0 else None
+
+    # Shared cache — collapses N concurrent packages() calls per installer to 1
+    cache = PackageCache()
 
     async def _check(index: int, action: SetupAction, client: httpx.AsyncClient) -> None:
         if semaphore is not None:
@@ -804,6 +825,7 @@ async def _dry_run_package_actions(
                     project_environments=project_environments,
                     parameters=parameters,
                     http_client=client,
+                    package_cache=cache,
                 )
             except Exception as exc:
                 logger.debug('Dry-run check failed for %s: %s', action.description, exc)
@@ -869,6 +891,8 @@ async def _run_sequential_packages(
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
     plugin_context: PluginContext | None = None,
+    *,
+    package_cache: PackageCache | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions sequentially."""
     results: list[SetupActionResult] = []
@@ -881,8 +905,16 @@ async def _run_sequential_packages(
             parameters.strategy,
             event_queue,
             plugin_context,
+            package_cache=package_cache,
         )
         results.append(result)
+        # Invalidate cache after successful install/upgrade so the next
+        # action sees fresh state for the same installer.
+        if result.success and not result.skipped and package_cache is not None and action.installer:
+            project_path = plugin_context.project_path if plugin_context else None
+            package_cache.invalidate_packages(action.installer, project_path)
+            if action.plugin_target is not None:
+                package_cache.invalidate_plugins(action.plugin_target.name)
         if event_queue is not None:
             event_queue.put_nowait(
                 ProgressEvent(
@@ -903,6 +935,8 @@ async def _run_parallel_packages(
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
     plugin_context: PluginContext | None = None,
+    *,
+    package_cache: PackageCache | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions in parallel using TaskGroup.
 
@@ -930,6 +964,7 @@ async def _run_parallel_packages(
                     parameters.strategy,
                     event_queue,
                     plugin_context,
+                    package_cache=package_cache,
                 )
             except Exception as e:
                 result = SetupActionResult(action=action, success=False, message=str(e))

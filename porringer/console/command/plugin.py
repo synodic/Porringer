@@ -69,9 +69,13 @@ def plugin_packages(
         table = Table(title=f'Packages ({plugin_name})')
         table.add_column('Name', style='cyan')
         table.add_column('Version', style='green')
+        table.add_column('Host', style='magenta')
 
         for pkg in sorted(packages, key=lambda p: p.name.lower()):
-            table.add_row(pkg.name, pkg.version or 'n/a')
+            host_text = ''
+            if pkg.relation is not None:
+                host_text = f'{pkg.relation.host} ({pkg.relation.kind.value})'
+            table.add_row(pkg.name, pkg.version or 'n/a', host_text)
 
         configuration.console.print(table)
 

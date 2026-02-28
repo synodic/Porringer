@@ -17,8 +17,6 @@ class UvEnvironment(PythonEnvironment):
     def __init__(self, parameters: PluginParameters) -> None:
         """Initializes the uv environment plugin."""
         super().__init__(parameters)
-        self._cached_packages: list[Package] | None = None
-        self._cached_python: str | None = None
 
     def _python_args(self) -> list[str]:
         """Return `['--python', '<path>']` when an override is active.
@@ -68,9 +66,6 @@ class UvEnvironment(PythonEnvironment):
         lists packages from that interpreter.  Otherwise it falls back
         to the runtime-override or the default Python.
 
-        Results are cached per effective interpreter so multiple calls
-        within a single sync run don't shell out repeatedly.
-
         Args:
             project_path: Optional project directory.  When set, the
                 listing is scoped to the project's `.venv`.
@@ -85,15 +80,8 @@ class UvEnvironment(PythonEnvironment):
             if venv_python is not None:
                 effective_args = ['--python', str(venv_python)]
 
-        cache_key = str(effective_args)
-        if self._cached_packages is not None and self._cached_python == cache_key:
-            return self._cached_packages
-
         entries = await self._run_json_command(['uv', 'pip', 'list', '--format=json', *effective_args])
         if isinstance(entries, list):
-            self._cached_packages = [Package(name=e['name'], version=e.get('version')) for e in entries]
-        else:
-            self._cached_packages = []
+            return [Package(name=e['name'], version=e.get('version')) for e in entries]
 
-        self._cached_python = cache_key
-        return self._cached_packages
+        return []

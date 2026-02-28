@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
 from porringer.core.plugin_schema.environment import PackageParameters
-from porringer.core.schema import Package, PackageRef
+from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind
 from porringer.utility.utility import run_command
 
 
@@ -146,7 +146,8 @@ class PluginManager(Protocol):
                 stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
                 _logger.debug('plugin list failed: %s', stderr)
                 return []
-            return self.parse_plugin_list(stdout)
+            relation = PackageRelation(host=tool, kind=PackageRelationKind.PLUGIN)
+            return [pkg.model_copy(update={'relation': relation}) for pkg in self.parse_plugin_list(stdout)]
         except FileNotFoundError:
             _logger.debug('%s not found', tool)
             return []
