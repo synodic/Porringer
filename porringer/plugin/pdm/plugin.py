@@ -75,6 +75,11 @@ class PDMEnvironment(ProjectEnvironment, PluginManager):
         return cmd
 
     @override
+    def plugin_remove_command(self, plugin: PackageRef) -> list[str]:
+        """Return ``pdm self remove <plugin>``."""
+        return ['pdm', 'self', 'remove', plugin.name]
+
+    @override
     def plugin_list_command(self) -> list[str]:
         """Return ``pdm self list --plugins``."""
         return ['pdm', 'self', 'list', '--plugins']

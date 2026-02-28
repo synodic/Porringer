@@ -57,6 +57,11 @@ class DenoEnvironment(Environment):
         return ['deno', 'install', '-g', '--force', self._deno_specifier(package)]
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a global script via Deno."""
+        return ['deno', 'uninstall', '-g', package.name]
+
+    @override
     async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates by querying package registries.
 

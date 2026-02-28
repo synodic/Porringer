@@ -58,6 +58,11 @@ class UvEnvironment(PythonEnvironment):
         return cmd
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a package via uv."""
+        return ['uv', 'pip', 'uninstall', *self._python_args(), package.name]
+
+    @override
     async def packages(self, *, project_path: Path | None = None) -> list[Package]:
         """Gathers installed packages using `uv pip list --format=json`.
 

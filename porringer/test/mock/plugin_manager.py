@@ -64,6 +64,10 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
         return ['mock-pm', 'update', plugin.specifier]
 
     @override
+    def plugin_remove_command(self, plugin: PackageRef) -> list[str]:
+        return ['mock-pm', 'remove', plugin.name]
+
+    @override
     def plugin_list_command(self) -> list[str]:
         return ['mock-pm', 'list']
 
@@ -81,4 +85,9 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
     @override
     async def async_plugin_update(self, params: PackageParameters) -> Package | None:
         self.operations.append(('update', params.package))
+        return Package(name=params.package.name, version=None)
+
+    @override
+    async def async_plugin_remove(self, params: PackageParameters) -> Package | None:
+        self.operations.append(('remove', params.package))
         return Package(name=params.package.name, version=None)

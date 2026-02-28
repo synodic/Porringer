@@ -64,6 +64,7 @@ from .resolution import (
     PackageCache,
     ResolutionContext,
     resolve_operation,
+    resolve_uninstall_operation,
     resolved_to_result,
 )
 
@@ -517,10 +518,9 @@ async def execute_package(
 
     # --- Plugin-management actions ----------------------------------------
     if action.plugin_target is not None:
-        is_install = resolved.operation == OperationKind.INSTALL
         return await _attempt_plugin_operation(
             action,
-            is_install=is_install,
+            operation=resolved.operation,
             event_queue=event_queue,
             plugin_manager=resolved.plugin_manager,
             project_environments=project_environments,
@@ -574,23 +574,94 @@ async def _attempt_package_operation(
     )
 
 
+async def execute_uninstall(
+    action: SetupAction,
+    environments: dict[str, Environment],
+    event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    plugin_context: PluginContext | None = None,
+    *,
+    package_cache: PackageCache | None = None,
+) -> SetupActionResult:
+    """Execute a package uninstall after resolving presence.
+
+    Delegates to :func:`resolve_uninstall_operation` to determine
+    whether the package is installed, then dispatches to
+    ``async_uninstall`` (or ``async_plugin_remove`` for plugin-target
+    actions).
+
+    Args:
+        action: The package action describing what to uninstall.
+        environments: Dict of instantiated environment plugins.
+        event_queue: Optional queue to emit sub-action events into.
+        plugin_context: Optional plugin-management context providing
+            project-path and project-environment references.
+        package_cache: Optional shared cache for ``packages()`` results.
+
+    Returns:
+        The result of the operation.
+    """
+    if action.installer is None or action.package is None:
+        return SetupActionResult(action=action, success=False, message='Installer or package not specified')
+
+    project_path = plugin_context.project_path if plugin_context else None
+    project_environments = plugin_context.project_environments if plugin_context else None
+
+    resolved = await resolve_uninstall_operation(
+        action,
+        environments,
+        ResolutionContext(
+            project_path=project_path,
+            project_environments=project_environments,
+            package_cache=package_cache,
+        ),
+    )
+
+    # --- Skip (not installed) ---------------------------------------------
+    if resolved.operation == OperationKind.SKIP:
+        logger.info("Skipping uninstall of '%s': %s", action.package, resolved.message)
+        return resolved_to_result(resolved)
+
+    # --- Plugin-management actions ----------------------------------------
+    if action.plugin_target is not None:
+        return await _attempt_plugin_operation(
+            action,
+            operation=OperationKind.UNINSTALL,
+            event_queue=event_queue,
+            plugin_manager=resolved.plugin_manager,
+            project_environments=project_environments,
+        )
+
+    # --- Normal package actions -------------------------------------------
+    environment = environments[action.installer]
+    logger.info("Uninstalling '%s' via %s", action.package, action.installer)
+    return await _attempt_operation(
+        action,
+        spec=OperationSpec(
+            execute=environment.async_uninstall,
+            verb='uninstall',
+            verb_past='Uninstalled',
+        ),
+        event_queue=event_queue,
+    )
+
+
 async def _attempt_plugin_operation(
     action: SetupAction,
     *,
-    is_install: bool,
+    operation: OperationKind,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
     plugin_manager: PluginManager | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
 ) -> SetupActionResult:
-    """Add or update a plugin via its native ``PluginManager``.
+    """Add, update, or remove a plugin via its native ``PluginManager``.
 
     Uses the *plugin_manager* resolved during operation resolution
     when available, falling back to a fresh lookup when not provided.
 
     Args:
         action: The plugin action (``plugin_target`` must be set).
-        is_install: ``True`` to add (install) the plugin,
-            ``False`` to update (upgrade) it.
+        operation: The resolved operation kind (INSTALL, UPGRADE, or
+            UNINSTALL).
         event_queue: Optional queue to emit sub-action events into.
         plugin_manager: Pre-resolved ``PluginManager`` from
             :func:`resolve_operation`, if available.
@@ -609,12 +680,19 @@ async def _attempt_plugin_operation(
         msg = f"No PluginManager found for '{action.plugin_target.name}'"
         return SetupActionResult(action=action, success=False, message=msg)
 
-    if is_install:
-        execute = plugin_manager.async_plugin_add
-        verb, verb_past = 'add plugin', 'Added'
-    else:
-        execute = plugin_manager.async_plugin_update
-        verb, verb_past = 'update plugin', 'Updated'
+    match operation:
+        case OperationKind.INSTALL:
+            execute = plugin_manager.async_plugin_add
+            verb, verb_past, suffix = 'add plugin', 'Added', f' to {action.plugin_target.name} (native)'
+        case OperationKind.UPGRADE:
+            execute = plugin_manager.async_plugin_update
+            verb, verb_past, suffix = 'update plugin', 'Updated', f' to {action.plugin_target.name} (native)'
+        case OperationKind.UNINSTALL:
+            execute = plugin_manager.async_plugin_remove
+            verb, verb_past, suffix = 'remove plugin', 'Removed', f' from {action.plugin_target.name} (native)'
+        case _:
+            msg = f'Unexpected operation {operation} for plugin action'
+            return SetupActionResult(action=action, success=False, message=msg)
 
     logger.info(
         "Using native plugin management (%s) for '%s' via %s",
@@ -628,7 +706,7 @@ async def _attempt_plugin_operation(
             execute=execute,
             verb=verb,
             verb_past=verb_past,
-            success_suffix=f' to {action.plugin_target.name} (native)',
+            success_suffix=suffix,
         ),
         event_queue=event_queue,
     )

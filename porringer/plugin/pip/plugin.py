@@ -96,6 +96,11 @@ class PIPEnvironment(PythonEnvironment):
             cmd.append('--pre')
         return cmd
 
+    @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a package via pip."""
+        return [self.python_command, '-m', 'pip', 'uninstall', '-y', package.name]
+
     @staticmethod
     @override
     def supports_parallel() -> bool:

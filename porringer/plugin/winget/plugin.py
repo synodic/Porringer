@@ -55,6 +55,11 @@ class WingetEnvironment(Environment):
         return cmd
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Returns the CLI command to uninstall a package via winget."""
+        return ['winget', 'uninstall', '--id', package.name, '--silent']
+
+    @override
     async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for available updates via ``winget upgrade``.
 
