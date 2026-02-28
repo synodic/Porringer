@@ -3,15 +3,11 @@
 import asyncio
 import contextlib
 import hashlib
-import http.client
 import logging
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from typing import Any
 
 import httpx
 
@@ -95,37 +91,6 @@ def compute_file_hash(path: Path, algorithm: HashAlgorithm, chunk_size: int = 81
     return hasher.hexdigest()
 
 
-def download_file(
-    parameters: DownloadParameters,
-    progress_callback: ProgressCallback | None = None,
-) -> DownloadResult:
-    """Downloads a file with optional hash verification.
-
-    Downloads to a temporary file first, verifies hash if provided,
-    then atomically moves to the destination.
-
-    Args:
-        parameters: Download parameters.
-        progress_callback: Optional callback for progress updates.
-
-    Returns:
-        DownloadResult with success status and details.
-    """
-    logger.info(f'Downloading: {parameters.url}')
-
-    # Parse and validate hash if provided
-    try:
-        expected_algorithm, expected_digest = _parse_and_validate_hash(parameters.expected_hash)
-    except ValueError as e:
-        return DownloadResult(success=False, message=str(e))
-
-    # Create parent directory if needed
-    parameters.destination.parent.mkdir(parents=True, exist_ok=True)
-
-    # Download to temp file (atomic write pattern)
-    return _download_with_temp_file(parameters, expected_algorithm, expected_digest, progress_callback)
-
-
 def _parse_and_validate_hash(
     expected_hash: str | None,
 ) -> tuple[HashAlgorithm | None, str | None]:
@@ -144,180 +109,6 @@ def _parse_and_validate_hash(
         return None, None
 
     return parse_hash_string(expected_hash)
-
-
-def _is_retryable_http_error(exc: HTTPError) -> bool:
-    """Return True for server-side HTTP errors that may succeed on retry."""
-    return exc.code >= _SERVER_ERROR_THRESHOLD
-
-
-def _download_with_temp_file(
-    parameters: DownloadParameters,
-    expected_algorithm: HashAlgorithm | None,
-    expected_digest: str | None,
-    progress_callback: ProgressCallback | None,
-) -> DownloadResult:
-    """Download file to temporary location with verification and retries.
-
-    Transient network errors (timeouts, connection resets, 5xx responses)
-    are retried up to ``_MAX_RETRIES`` times with exponential back-off.
-
-    Args:
-        parameters: Download parameters.
-        expected_algorithm: Hash algorithm for verification.
-        expected_digest: Expected hash digest.
-        progress_callback: Optional progress callback.
-
-    Returns:
-        DownloadResult.
-    """
-    state = _DownloadState(parameters, expected_algorithm, expected_digest, progress_callback)
-    last_result: DownloadResult | None = None
-
-    for attempt in range(_MAX_RETRIES):
-        temp_path: Path | None = None
-        try:
-            temp_fd, temp_path_str = tempfile.mkstemp(
-                dir=parameters.destination.parent,
-                prefix='.download_',
-                suffix='.tmp',
-            )
-            temp_path = Path(temp_path_str)
-
-            result = _perform_download(temp_fd, state)
-
-            if result.success:
-                temp_path.replace(parameters.destination)
-                logger.info(f'Saved to: {parameters.destination}')
-                return result
-
-            # Non-retryable verification failure
-            return result
-
-        except HTTPError as e:
-            last_result = DownloadResult(success=False, message=f'HTTP Error {e.code}: {e.reason}')
-            if not _is_retryable_http_error(e):
-                logger.error(f'Download failed with HTTP error {e.code}: {e.reason}')
-                return last_result
-            logger.warning('Retryable HTTP %d on attempt %d/%d', e.code, attempt + 1, _MAX_RETRIES)
-        except TimeoutError:
-            last_result = DownloadResult(
-                success=False, message=f'Download timed out after {parameters.timeout} seconds'
-            )
-            logger.warning('Timeout on attempt %d/%d', attempt + 1, _MAX_RETRIES)
-        except (URLError, ConnectionError, OSError) as e:
-            last_result = DownloadResult(success=False, message=f'Network error: {e}')
-            logger.warning('Network error on attempt %d/%d: %s', attempt + 1, _MAX_RETRIES, e)
-        except Exception as e:
-            logger.error(f'Download failed: {e}')
-            return DownloadResult(success=False, message=str(e))
-        finally:
-            if temp_path and temp_path.exists():
-                with contextlib.suppress(OSError):
-                    temp_path.unlink()
-
-        # Exponential back-off before next attempt
-        if attempt < _MAX_RETRIES - 1:
-            delay = _RETRY_BACKOFF_BASE * (2**attempt)
-            logger.debug('Waiting %.1fs before retry', delay)
-            time.sleep(delay)
-
-    # All retries exhausted
-    return last_result or DownloadResult(success=False, message='Download failed after retries')
-
-
-def _perform_download(temp_fd: int, state: _DownloadState) -> DownloadResult:
-    """Perform the actual download and verification.
-
-    Args:
-        temp_fd: File descriptor for temp file.
-        state: Download state.
-
-    Returns:
-        DownloadResult.
-    """
-    request = Request(state.parameters.url)
-    request.add_header('User-Agent', 'porringer/1.0')
-
-    downloaded = 0
-    hasher: Any = None
-    if state.expected_algorithm:
-        hasher = hashlib.new(state.expected_algorithm.value)
-
-    with urlopen(request, timeout=state.parameters.timeout) as response:
-        total_size = response.headers.get('Content-Length')
-        total_size = int(total_size) if total_size else None
-
-        # Validate size from headers if available
-        size_check = _validate_content_length(state.parameters.expected_size, total_size)
-        if not size_check[0]:
-            return DownloadResult(success=False, message=size_check[1])
-
-        with open(temp_fd, 'wb') as f:
-            downloaded = _write_file_chunks(f, response, state, hasher)
-
-    logger.info(f'Downloaded {downloaded} bytes')
-
-    # Verify hash and size
-    result = _verify_download(downloaded, state.expected_digest, hasher, state.parameters)
-
-    if result:
-        return result
-
-    return DownloadResult(success=True, path=state.parameters.destination, verified=bool(hasher), size=downloaded)
-
-
-def _validate_content_length(expected_size: int | None, content_length: int | None) -> tuple[bool, str | None]:
-    """Validate content length matches expected size.
-
-    Args:
-        expected_size: Expected size or None.
-        content_length: Content-Length header or None.
-
-    Returns:
-        (True, None) if valid or (False, error_message).
-    """
-    if expected_size and content_length and content_length != expected_size:
-        return (False, f'Size mismatch: expected {expected_size}, got {content_length}')
-
-    return (True, None)
-
-
-def _write_file_chunks(
-    file: BinaryIO,
-    response: http.client.HTTPResponse,
-    state: _DownloadState,
-    hasher: Any,
-) -> int:
-    """Write response chunks to file.
-
-    Args:
-        file: Open file object.
-        response: URL response.
-        state: Download state.
-        hasher: Hash object or None.
-
-    Returns:
-        Total bytes downloaded.
-    """
-    downloaded = 0
-    header_size = response.headers.get('Content-Length')
-    total_size: int | None = int(header_size) if header_size else None
-
-    while True:
-        chunk = response.read(state.parameters.chunk_size)
-        if not chunk:
-            break
-        file.write(chunk)
-        downloaded += len(chunk)
-
-        if hasher:
-            hasher.update(chunk)
-
-        if state.progress_callback:
-            state.progress_callback(downloaded, total_size)
-
-    return downloaded
 
 
 def _verify_download(

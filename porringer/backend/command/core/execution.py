@@ -58,7 +58,7 @@ from .discovery import (
     invalidate_plugin_cache,
 )
 from .phase import run_phases
-from .presence import dry_run_action, clone_status_to_result
+from .presence import clone_status_to_result, dry_run_action
 from .resolution import (
     OperationKind,
     PackageCache,
