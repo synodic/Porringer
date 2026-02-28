@@ -84,7 +84,7 @@ class TestNotInstalledSkipReason:
 
     @staticmethod
     def test_not_installed_is_skip_reason() -> None:
-        assert SkipReason.NOT_INSTALLED is not None
+        """NOT_INSTALLED exists and is distinct from ALREADY_INSTALLED."""
         assert SkipReason.NOT_INSTALLED != SkipReason.ALREADY_INSTALLED
 
 
@@ -98,6 +98,7 @@ class TestMockEnvironmentUninstallCommand:
 
     @staticmethod
     def test_returns_list_of_strings() -> None:
+        """uninstall_command returns a list of strings."""
         env = MockEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('requests')
         cmd = env.uninstall_command(ref)
@@ -106,6 +107,7 @@ class TestMockEnvironmentUninstallCommand:
 
     @staticmethod
     def test_contains_package_name() -> None:
+        """uninstall_command includes the package name."""
         env = MockEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('requests')
         cmd = env.uninstall_command(ref)
@@ -113,6 +115,7 @@ class TestMockEnvironmentUninstallCommand:
 
     @staticmethod
     def test_contains_uninstall_verb() -> None:
+        """uninstall_command includes the 'uninstall' verb."""
         env = MockEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('requests')
         cmd = env.uninstall_command(ref)
@@ -129,6 +132,7 @@ class TestMockPluginManagerRemove:
 
     @staticmethod
     def test_plugin_remove_command_returns_list() -> None:
+        """plugin_remove_command returns a list containing 'remove'."""
         pm = MockPluginManager(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         cmd = pm.plugin_remove_command(ref)
@@ -138,6 +142,7 @@ class TestMockPluginManagerRemove:
 
     @staticmethod
     async def test_async_plugin_remove_records_operation() -> None:
+        """async_plugin_remove records a ('remove', ref) operation."""
         pm = MockPluginManager(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
@@ -161,7 +166,7 @@ class TestResolveUninstallOperation:
         """Package is installed → UNINSTALL."""
         action = _make_action()
         env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
-        envs = {'mock': env}
+        envs: dict[str, Environment] = {'mock': env}
 
         resolved = await resolve_uninstall_operation(action, envs)
         assert resolved.operation == OperationKind.UNINSTALL
@@ -172,7 +177,7 @@ class TestResolveUninstallOperation:
         """Package is not installed → SKIP with NOT_INSTALLED."""
         action = _make_action()
         env = _make_mock_env(installed=[])
-        envs = {'mock': env}
+        envs: dict[str, Environment] = {'mock': env}
 
         resolved = await resolve_uninstall_operation(action, envs)
         assert resolved.operation == OperationKind.SKIP
@@ -233,7 +238,7 @@ class TestResolveUninstallOperation:
         """resolved_to_result maps SKIP/NOT_INSTALLED correctly."""
         action = _make_action()
         env = _make_mock_env(installed=[])
-        envs = {'mock': env}
+        envs: dict[str, Environment] = {'mock': env}
 
         resolved = await resolve_uninstall_operation(action, envs)
         result = resolved_to_result(resolved)
@@ -255,7 +260,7 @@ class TestExecuteUninstall:
         env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
         # Patch async_uninstall to verify it's called
         env.async_uninstall = AsyncMock(return_value=Package(name='requests', version=None))  # type: ignore[assignment]
-        envs = {'mock': env}
+        envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action()
         result = await execute_uninstall(action, envs)
@@ -268,7 +273,7 @@ class TestExecuteUninstall:
     async def test_skips_not_installed_package() -> None:
         """execute_uninstall skips when package is not installed."""
         env = _make_mock_env(installed=[])
-        envs = {'mock': env}
+        envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action()
         result = await execute_uninstall(action, envs)

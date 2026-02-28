@@ -4,6 +4,9 @@ import asyncio
 import logging
 
 from porringer.backend.cache import DirectoryCacheManager
+from porringer.backend.command.core.discovery import discover_all_plugins
+from porringer.backend.command.core.execution import execute_uninstall
+from porringer.backend.command.core.resolution import resolve_uninstall_operation, resolved_to_result
 from porringer.backend.command.plugin import PluginCommands
 from porringer.backend.command.self import check_self_updates
 from porringer.backend.command.sync import SyncCommands
@@ -16,6 +19,7 @@ from porringer.schema import (
     LocalConfiguration,
     PackageUpdateInfo,
     ProgressCallback,
+    SetupAction,
     SetupActionResult,
 )
 from porringer.utility.download import download_file
@@ -101,11 +105,6 @@ class API:
         Returns:
             A ``SetupActionResult`` describing the outcome.
         """
-        from porringer.backend.command.core.discovery import discover_all_plugins
-        from porringer.backend.command.core.execution import execute_uninstall
-        from porringer.backend.command.core.resolution import resolve_uninstall_operation, resolved_to_result
-        from porringer.schema import SetupAction
-
         plugins = discover_all_plugins(use_cache=True)
         environments = plugins.environments
 

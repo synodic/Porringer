@@ -507,38 +507,7 @@ async def resolve_uninstall_operation(
 
     # --- Plugin-management actions -----------------------------------------
     if action.plugin_target is not None:
-        manager = find_plugin_manager(action.plugin_target.name, ctx.project_environments)
-        if manager is None:
-            return ResolvedOperation(
-                action=action,
-                operation=OperationKind.SKIP,
-                message=f"No PluginManager found for '{action.plugin_target.name}'",
-            )
-
-        try:
-            if ctx.package_cache is not None:
-                installed = await ctx.package_cache.get_plugins(action.plugin_target.name, manager)
-            else:
-                installed = await manager.installed_plugins()
-            is_installed, detail, _ = is_package_installed(action.package, installed)
-        except Exception as e:
-            logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
-            is_installed, detail = False, None
-
-        if not is_installed:
-            return ResolvedOperation(
-                action=action,
-                operation=OperationKind.SKIP,
-                skip_reason=SkipReason.NOT_INSTALLED,
-                message=f"Plugin '{action.package.name}' is not installed in '{action.plugin_target.name}'",
-                plugin_manager=manager,
-            )
-        return ResolvedOperation(
-            action=action,
-            operation=OperationKind.UNINSTALL,
-            message=detail,
-            plugin_manager=manager,
-        )
+        return await _resolve_plugin_uninstall(action, ctx)
 
     # --- Normal package actions --------------------------------------------
     if action.installer not in environments:
@@ -574,6 +543,56 @@ async def resolve_uninstall_operation(
         operation=OperationKind.UNINSTALL,
         message=detail,
         installed_version=matched.version if matched else None,
+    )
+
+
+async def _resolve_plugin_uninstall(
+    action: SetupAction,
+    ctx: ResolutionContext,
+) -> ResolvedOperation:
+    """Resolve an uninstall operation for a plugin-management action.
+
+    Args:
+        action: The action describing the plugin to uninstall.
+        ctx: Resolution context with project environments and cache.
+
+    Returns:
+        A resolved operation descriptor.
+    """
+    assert action.plugin_target is not None
+    assert action.package is not None
+
+    manager = find_plugin_manager(action.plugin_target.name, ctx.project_environments)
+    if manager is None:
+        return ResolvedOperation(
+            action=action,
+            operation=OperationKind.SKIP,
+            message=f"No PluginManager found for '{action.plugin_target.name}'",
+        )
+
+    try:
+        if ctx.package_cache is not None:
+            installed = await ctx.package_cache.get_plugins(action.plugin_target.name, manager)
+        else:
+            installed = await manager.installed_plugins()
+        is_installed, detail, _ = is_package_installed(action.package, installed)
+    except Exception as e:
+        logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
+        is_installed, detail = False, None
+
+    if not is_installed:
+        return ResolvedOperation(
+            action=action,
+            operation=OperationKind.SKIP,
+            skip_reason=SkipReason.NOT_INSTALLED,
+            message=f"Plugin '{action.package.name}' is not installed in '{action.plugin_target.name}'",
+            plugin_manager=manager,
+        )
+    return ResolvedOperation(
+        action=action,
+        operation=OperationKind.UNINSTALL,
+        message=detail,
+        plugin_manager=manager,
     )
 
 
