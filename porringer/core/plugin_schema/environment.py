@@ -208,6 +208,8 @@ class Environment(ToolBasedPlugin):
             The package, or None if the uninstall failed.
         """
         args = list(self.uninstall_command(params.package))
+        uninstall_logger = logging.getLogger(f'porringer.{self.tool_name()}.uninstall')
+        uninstall_logger.debug('uninstall command: %s', args)
         if params.progress_callback is not None:
             return await self._stream_command(args=args, params=params, phase='uninstalling', verb='uninstall')
         return await self._run_command(args=args, params=params, verb='uninstall')

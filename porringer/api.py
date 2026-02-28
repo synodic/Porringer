@@ -105,10 +105,13 @@ class API:
         Returns:
             A ``SetupActionResult`` describing the outcome.
         """
+        logger.debug('uninstall requested: plugin=%s package=%s dry_run=%s', plugin_name, package.name, dry_run)
+
         plugins = discover_all_plugins(use_cache=True)
         environments = plugins.environments
 
         if plugin_name not in environments:
+            logger.warning("Plugin '%s' is not available for uninstall of '%s'", plugin_name, package.name)
             return SetupActionResult(
                 action=SetupAction(description=f"Uninstall '{package.name}' via {plugin_name}"),
                 success=False,
@@ -128,4 +131,12 @@ class API:
             resolved = asyncio.run(resolve_uninstall_operation(action, environments))
             return resolved_to_result(resolved)
 
-        return asyncio.run(execute_uninstall(action, environments))
+        result = asyncio.run(execute_uninstall(action, environments))
+        logger.info(
+            'uninstall result: success=%s skipped=%s skip_reason=%s message=%s',
+            result.success,
+            result.skipped,
+            result.skip_reason,
+            result.message,
+        )
+        return result

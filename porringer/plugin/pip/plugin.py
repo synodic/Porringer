@@ -388,6 +388,7 @@ class PIPEnvironment(PythonEnvironment):
                 effective_python = str(venv_python)
 
         logger = logging.getLogger('porringer.pip.packages')
+        logger.debug('listing packages via: %s', effective_python)
 
         # Try pip list first
         packages = await self._list_packages_via_pip(logger, effective_python)
