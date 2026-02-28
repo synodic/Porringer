@@ -11,6 +11,8 @@ __all__ = [
     'ManifestContribution',
     'Package',
     'PackageRef',
+    'PackageRelation',
+    'PackageRelationKind',
     'PlatformScoped',
     'Plugin',
     'PluginDependency',
@@ -238,11 +240,48 @@ class PluginDependency(PlatformScoped):
     required: bool = Field(default=True, description='Whether this dependency is required (True) or optional (False)')
 
 
+class PackageRelationKind(Enum):
+    """Kind of relationship a package has with a host tool.
+
+    Used to distinguish how a sub-package was added to its host:
+    via tool-level injection (e.g. ``pipx inject``) or via native
+    plugin management (e.g. ``pdm self add``).
+    """
+
+    INJECTED = 'injected'
+    """Package was injected into a host tool's isolated environment."""
+
+    PLUGIN = 'plugin'
+    """Package was added via the host tool's native plugin management."""
+
+
+class PackageRelation(PorringerModel):
+    """Describes a package's relationship to a host tool.
+
+    When a package is a sub-package of another tool (injected into its
+    venv, or added via native plugin management), this model captures
+    the host tool name and the kind of relationship.
+
+    A standalone top-level package has no relation (``None``).
+    """
+
+    host: str = Field(description='Name of the host tool this package belongs to')
+    kind: PackageRelationKind = Field(description='How this package relates to its host')
+
+
 class Package(PorringerModel):
     """Package definition — represents an installed package identity."""
 
     name: str = Field(description='The bare package name')
     version: str | None = None
+    relation: PackageRelation | None = Field(
+        default=None,
+        description=(
+            'Relationship to a host tool, or None for standalone packages. '
+            'Set when the package is injected into another tool (e.g. pipx inject) '
+            'or managed as a native plugin (e.g. pdm self add).'
+        ),
+    )
 
 
 class Distribution(PorringerModel):

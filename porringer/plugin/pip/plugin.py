@@ -50,8 +50,6 @@ class PIPEnvironment(PythonEnvironment):
             parameters: Plugin parameters including distribution info
         """
         super().__init__(parameters)
-        self._cached_packages: list[Package] | None = None
-        self._cached_python: str | None = None
 
     @classmethod
     @override
@@ -370,10 +368,6 @@ class PIPEnvironment(PythonEnvironment):
         module is not installed (common in uv-created virtual
         environments), falls back to `importlib.metadata`.
 
-        The result is cached per effective interpreter path so that
-        multiple calls within a single sync run don't shell out
-        repeatedly.
-
         Args:
             project_path: Optional project directory.  When set, the
                 listing is scoped to the project's `.venv`.
@@ -388,30 +382,20 @@ class PIPEnvironment(PythonEnvironment):
             if venv_python is not None:
                 effective_python = str(venv_python)
 
-        # Use cached result when the interpreter matches
-        if self._cached_packages is not None and self._cached_python == effective_python:
-            return self._cached_packages
-
         logger = logging.getLogger('porringer.pip.packages')
 
         # Try pip list first
         packages = await self._list_packages_via_pip(logger, effective_python)
         if packages is not None:
-            self._cached_packages = packages
-            self._cached_python = effective_python
-            return self._cached_packages
+            return packages
 
         # Fallback: importlib.metadata (works without pip module installed)
         logger.warning('pip module unavailable for %s, falling back to importlib.metadata', effective_python)
         packages = await self._list_packages_via_importlib(logger, effective_python)
         if packages is not None:
-            self._cached_packages = packages
-            self._cached_python = effective_python
-            return self._cached_packages
+            return packages
 
-        self._cached_packages = []
-        self._cached_python = effective_python
-        return self._cached_packages
+        return []
 
     @staticmethod
     async def _list_packages_via_pip(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
