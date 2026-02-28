@@ -4,7 +4,6 @@ Checks whether packages are already installed so the sync engine can
 skip redundant operations.
 """
 
-import asyncio
 import logging
 from pathlib import Path
 
@@ -25,12 +24,12 @@ from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 from .resolution import PackageCache, ResolutionContext, resolve_operation, resolved_to_result
 
-__all__ = ['async_dry_run_action', 'clone_status_to_result', 'dry_run_action']
+__all__ = ['dry_run_action', 'clone_status_to_result']
 
 logger = logging.getLogger(__name__)
 
 
-async def async_dry_run_action(
+async def dry_run_action(
     action: SetupAction,
     environments: dict[str, Environment],
     *,
@@ -79,7 +78,7 @@ async def async_dry_run_action(
     """
     match action.kind:
         case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
-            return await _async_dry_run_package_action(
+            return await _dry_run_package_action(
                 action,
                 environments,
                 project_path=project_path,
@@ -89,7 +88,7 @@ async def async_dry_run_action(
                 package_cache=package_cache,
             )
         case PluginKind.SCM:
-            return await _async_dry_run_scm_action(
+            return await _dry_run_scm_action(
                 action,
                 scm_environments=scm_environments,
                 working_dir=working_dir,
@@ -154,7 +153,7 @@ def clone_status_to_result(
             return None
 
 
-async def _async_dry_run_scm_action(
+async def _dry_run_scm_action(
     action: SetupAction,
     *,
     scm_environments: dict[str, ScmEnvironment] | None = None,
@@ -188,53 +187,7 @@ async def _async_dry_run_scm_action(
     )
 
 
-def dry_run_action(
-    action: SetupAction,
-    environments: dict[str, Environment],
-    *,
-    project_path: Path | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
-    scm_environments: dict[str, ScmEnvironment] | None = None,
-    working_dir: Path | None = None,
-    parameters: SetupParameters | None = None,
-) -> SetupActionResult:
-    """Simulate executing an action in dry-run mode (sync wrapper).
-
-    Thin synchronous façade over :func:`async_dry_run_action` for
-    callers that are not in an async context.  Prefer the async
-    variant when running inside the execution pipeline.
-
-    Args:
-        action: The action to simulate.
-        environments: Dict of instantiated environment plugins.
-        project_path: Optional project directory for scoped package queries.
-        project_environments: Optional dict of project-environment
-            plugins, used to look up ``PluginManager`` instances for
-            plugin-target presence checks.
-        scm_environments: Optional dict of SCM-environment plugins,
-            used for SCM clone presence detection.
-        working_dir: Working directory (manifest location) for SCM checks.
-        parameters: Full setup parameters.  When provided, ``strategy``
-            and ``detect_updates`` are read from it.  When ``None``,
-            ``SyncStrategy.MINIMAL`` is used.
-
-    Returns:
-        The simulated result.
-    """
-    return asyncio.run(
-        async_dry_run_action(
-            action,
-            environments,
-            project_path=project_path,
-            project_environments=project_environments,
-            scm_environments=scm_environments,
-            working_dir=working_dir,
-            parameters=parameters,
-        )
-    )
-
-
-async def _async_dry_run_package_action(
+async def _dry_run_package_action(
     action: SetupAction,
     environments: dict[str, Environment],
     *,

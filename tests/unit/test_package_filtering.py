@@ -17,7 +17,7 @@ class TestIncludePackages:
     """Tests for SetupParameters.include_packages filtering."""
 
     @staticmethod
-    def test_include_packages_none_preserves_all_actions(test_api: API) -> None:
+    async def test_include_packages_none_preserves_all_actions(test_api: API) -> None:
         """When include_packages is None, all actions should be preserved."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -37,11 +37,11 @@ class TestIncludePackages:
                 dry_run=True,
                 include_packages=None,
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             assert batch.total_actions == full_count
 
     @staticmethod
-    def test_include_packages_filters_by_name(test_api: API) -> None:
+    async def test_include_packages_filters_by_name(test_api: API) -> None:
         """When include_packages is set, only matching package actions are kept."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -57,7 +57,7 @@ class TestIncludePackages:
                 dry_run=True,
                 include_packages={'requests'},
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
                 for action in manifest_result.actions:
                     # Should be 'requests' or a non-package action (command)
@@ -65,7 +65,7 @@ class TestIncludePackages:
                         assert action.package.name.lower() == 'requests'
 
     @staticmethod
-    def test_include_packages_case_insensitive(test_api: API) -> None:
+    async def test_include_packages_case_insensitive(test_api: API) -> None:
         """Package name matching should be case-insensitive."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -82,7 +82,7 @@ class TestIncludePackages:
                 dry_run=True,
                 include_packages={'REQUESTS'},
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             package_actions = [a for m in batch.manifest_results for a in m.actions if a.package is not None]
             assert len(package_actions) > 0
             for action in package_actions:
@@ -90,7 +90,7 @@ class TestIncludePackages:
                 assert action.package.name.lower() == 'requests'
 
     @staticmethod
-    def test_include_packages_nonexistent_removes_all_package_actions(test_api: API) -> None:
+    async def test_include_packages_nonexistent_removes_all_package_actions(test_api: API) -> None:
         """When include_packages names a nonexistent package, all package actions are removed."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -106,13 +106,13 @@ class TestIncludePackages:
                 dry_run=True,
                 include_packages={'nonexistent_package_xyz'},
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
                 for action in manifest_result.actions:
                     assert action.package is None
 
     @staticmethod
-    def test_include_packages_preserves_post_sync(test_api: API) -> None:
+    async def test_include_packages_preserves_post_sync(test_api: API) -> None:
         """Post-sync commands (package=None) are always preserved."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -128,14 +128,14 @@ class TestIncludePackages:
                 dry_run=True,
                 include_packages={'nonexistent_package_xyz'},
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
                 command_actions = [a for a in manifest_result.actions if a.command is not None]
                 expected_command_count = 2
                 assert len(command_actions) == expected_command_count
 
     @staticmethod
-    def test_include_packages_composes_with_plugins(test_api: API) -> None:
+    async def test_include_packages_composes_with_plugins(test_api: API) -> None:
         """Both plugins and include_packages should compose (intersection)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -160,7 +160,7 @@ class TestIncludePackages:
                 plugins={resolved_installer},
                 include_packages={'requests'},
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
                 for action in manifest_result.actions:
                     if action.package is not None:

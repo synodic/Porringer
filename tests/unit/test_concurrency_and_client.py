@@ -65,6 +65,11 @@ class _StubEnv(Environment):
         return ['stub', 'install', package.name]
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        """Return uninstall command."""
+        return ['stub', 'uninstall', package.name]
+
+    @override
     def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return upgrade command."""
         return ['stub', 'upgrade', package.name]
@@ -212,7 +217,7 @@ class TestDryRunConcurrencyBounding:
         actions = [_make_action(f'pkg-{i}') for i in range(num_actions)]
 
         with patch(
-            'porringer.backend.command.core.execution.async_dry_run_action',
+            'porringer.backend.command.core.execution.dry_run_action',
             side_effect=_counting_dry_run,
         ):
             results = await _dry_run_package_actions(
@@ -243,7 +248,7 @@ class TestDryRunConcurrencyBounding:
         actions = [_make_action(f'pkg-{i}') for i in range(num_actions)]
 
         with patch(
-            'porringer.backend.command.core.execution.async_dry_run_action',
+            'porringer.backend.command.core.execution.dry_run_action',
             side_effect=_mock_dry_run,
         ):
             results = await _dry_run_package_actions(
@@ -325,7 +330,7 @@ class TestSharedHttpClient:
         actions = [_make_action(f'pkg-{i}') for i in range(num_actions)]
 
         with patch(
-            'porringer.backend.command.core.execution.async_dry_run_action',
+            'porringer.backend.command.core.execution.dry_run_action',
             side_effect=_capture_client,
         ):
             await _dry_run_package_actions(
@@ -351,15 +356,11 @@ class TestConsoleCheckAsync:
     """Console check command properly awaits async plugin methods."""
 
     @staticmethod
-    def test_check_plugin_updates_uses_asyncio_run() -> None:
-        """``_check_plugin_updates`` wraps async logic in ``asyncio.run``."""
+    def test_check_plugin_updates_is_async() -> None:
+        """``_check_plugin_updates`` is a coroutine function."""
         from porringer.console.command.check import (  # noqa: PLC0415
-            _async_check_plugin_updates,  # noqa: PLC2701
             _check_plugin_updates,  # noqa: PLC2701
         )
 
-        # Verify _async_check_plugin_updates is a coroutine function
-        assert inspect.iscoroutinefunction(_async_check_plugin_updates)
-
-        # Verify _check_plugin_updates is a regular function (sync wrapper)
-        assert not inspect.iscoroutinefunction(_check_plugin_updates)
+        # Verify _check_plugin_updates is a coroutine function
+        assert inspect.iscoroutinefunction(_check_plugin_updates)

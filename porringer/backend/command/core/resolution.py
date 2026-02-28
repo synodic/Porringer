@@ -75,6 +75,7 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
     the result reports success with an optional message.
     """
     if resolved.operation == OperationKind.SKIP:
+        logger.debug('resolved to skip: reason=%s message=%s', resolved.skip_reason, resolved.message)
         return SetupActionResult(
             action=resolved.action,
             success=True,
@@ -525,7 +526,14 @@ async def resolve_uninstall_operation(
             installed_packages = await ctx.package_cache.get_packages(action.installer, environment, ctx.project_path)
         else:
             installed_packages = await environment.packages(project_path=ctx.project_path)
+        logger.debug('packages query for %s returned %d entries', action.installer, len(installed_packages))
         is_installed, detail, matched = is_package_installed(action.package, installed_packages, validator, action.kind)
+        logger.debug(
+            "is_package_installed('%s'): found=%s matched=%s",
+            action.package.name,
+            is_installed,
+            matched.name if matched else None,
+        )
     except Exception as e:
         logger.debug('Could not check installed packages for %s: %s', action.installer, e)
         is_installed, detail, matched = False, None, None

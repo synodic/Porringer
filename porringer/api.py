@@ -1,6 +1,5 @@
 """API for Porringer"""
 
-import asyncio
 import logging
 
 from porringer.backend.cache import DirectoryCacheManager
@@ -62,11 +61,15 @@ class API:
         return await check_self_updates()
 
     @staticmethod
-    def download(
+    async def download(
         parameters: DownloadParameters,
         progress_callback: ProgressCallback | None = None,
     ) -> DownloadResult:
         """Download a file with optional hash verification.
+
+        Uses httpx for non-blocking HTTP requests.  Suitable for GUI
+        applications that need to keep their event loop responsive
+        during downloads.
 
         Args:
             parameters: Download parameters including URL and destination.
@@ -76,10 +79,10 @@ class API:
             DownloadResult with success status and details.
         """
         logger.info(f'Downloading: {parameters.url}')
-        return download_file(parameters, progress_callback)
+        return await download_file(parameters, progress_callback)
 
     @staticmethod
-    def uninstall(
+    async def uninstall(
         plugin_name: str,
         package: PackageRef,
         *,
@@ -88,7 +91,7 @@ class API:
         """Uninstall a globally-installed package.
 
         Resolves the named plugin, checks whether the package is
-        installed, and runs the plugin's ``async_uninstall`` command.
+        installed, and runs the plugin's ``uninstall`` command.
         When ``dry_run`` is ``True``, only reports whether the
         removal *would* proceed without actually executing it.
 
@@ -105,10 +108,13 @@ class API:
         Returns:
             A ``SetupActionResult`` describing the outcome.
         """
+        logger.debug('uninstall requested: plugin=%s package=%s dry_run=%s', plugin_name, package.name, dry_run)
+
         plugins = discover_all_plugins(use_cache=True)
         environments = plugins.environments
 
         if plugin_name not in environments:
+            logger.warning("Plugin '%s' is not available for uninstall of '%s'", plugin_name, package.name)
             return SetupActionResult(
                 action=SetupAction(description=f"Uninstall '{package.name}' via {plugin_name}"),
                 success=False,
@@ -125,7 +131,15 @@ class API:
         )
 
         if dry_run:
-            resolved = asyncio.run(resolve_uninstall_operation(action, environments))
+            resolved = await resolve_uninstall_operation(action, environments)
             return resolved_to_result(resolved)
 
-        return asyncio.run(execute_uninstall(action, environments))
+        result = await execute_uninstall(action, environments)
+        logger.info(
+            'uninstall result: success=%s skipped=%s skip_reason=%s message=%s',
+            result.success,
+            result.skipped,
+            result.skip_reason,
+            result.message,
+        )
+        return result

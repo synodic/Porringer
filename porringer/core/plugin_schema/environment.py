@@ -146,7 +146,7 @@ class Environment(ToolBasedPlugin):
         """
         return True
 
-    async def async_install(self, params: PackageParameters) -> Package | None:
+    async def install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package identified by its name.
 
         Uses a native async subprocess via `install_command()`.  When
@@ -168,7 +168,7 @@ class Environment(ToolBasedPlugin):
             return await self._stream_command(args=args, params=params, phase='installing', verb='install')
         return await self._run_command(args=args, params=params, verb='install')
 
-    async def async_upgrade(self, params: PackageParameters) -> Package | None:
+    async def upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrades the given package.
 
         Uses a native async subprocess via `upgrade_command()`.  When
@@ -190,7 +190,7 @@ class Environment(ToolBasedPlugin):
             return await self._stream_command(args=args, params=params, phase='upgrading', verb='upgrade')
         return await self._run_command(args=args, params=params, verb='upgrade')
 
-    async def async_uninstall(self, params: PackageParameters) -> Package | None:
+    async def uninstall(self, params: PackageParameters) -> Package | None:
         """Asynchronously uninstalls the given package.
 
         Uses a native async subprocess via `uninstall_command()`.  When
@@ -208,6 +208,8 @@ class Environment(ToolBasedPlugin):
             The package, or None if the uninstall failed.
         """
         args = list(self.uninstall_command(params.package))
+        uninstall_logger = logging.getLogger(f'porringer.{self.tool_name()}.uninstall')
+        uninstall_logger.debug('uninstall command: %s', args)
         if params.progress_callback is not None:
             return await self._stream_command(args=args, params=params, phase='uninstalling', verb='uninstall')
         return await self._run_command(args=args, params=params, verb='uninstall')

@@ -167,7 +167,7 @@ class TestSetupBatch:
     """Tests for batch setup operations"""
 
     @staticmethod
-    def test_preview_batch_single_path(test_api: API) -> None:
+    async def test_preview_batch_single_path(test_api: API) -> None:
         """Test batch preview with a single path"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -175,14 +175,14 @@ class TestSetupBatch:
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir))
-            results = test_api.sync.run(params)
+            results = await test_api.sync.run(params)
 
             assert len(results.manifest_results) == 1
             assert results.total_actions == 1
             assert len(results.failed_paths) == 0
 
     @staticmethod
-    def test_preview_batch_multiple_paths(test_api: API) -> None:
+    async def test_preview_batch_multiple_paths(test_api: API) -> None:
         """Test batch preview with multiple paths"""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create two project directories with manifests
@@ -197,14 +197,14 @@ class TestSetupBatch:
             )
 
             params = SetupParameters(paths=[project1, project2])
-            results = test_api.sync.run(params)
+            results = await test_api.sync.run(params)
 
             assert len(results.manifest_results) == DUAL_MANIFESTS
             assert results.total_actions == THREE_ACTIONS  # 1 + 2
             assert len(results.failed_paths) == NO_FAILED_PATHS
 
     @staticmethod
-    def test_preview_batch_with_failures(test_api: API) -> None:
+    async def test_preview_batch_with_failures(test_api: API) -> None:
         """Test batch preview continues on manifest errors"""
         with tempfile.TemporaryDirectory() as tmpdir:
             project1 = Path(tmpdir) / 'project1'
@@ -216,13 +216,13 @@ class TestSetupBatch:
             (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'python': ['requests']}}))
 
             params = SetupParameters(paths=[project1, project2], fail_fast=False)
-            results = test_api.sync.run(params)
+            results = await test_api.sync.run(params)
 
             assert len(results.manifest_results) == SINGLE_MANIFEST
             assert len(results.failed_paths) == SINGLE_FAILED_PATH
 
     @staticmethod
-    def test_preview_batch_from_cache(test_api: API, temp_cache_dir) -> None:
+    async def test_preview_batch_from_cache(test_api: API, temp_cache_dir) -> None:
         """Test batch preview using cached directories"""
         tmp_path, _ = temp_cache_dir
         project1 = tmp_path / 'project1'
@@ -235,13 +235,13 @@ class TestSetupBatch:
 
         # Preview from cache (paths=None)
         params = SetupParameters(paths=None)
-        results = test_api.sync.run(params)
+        results = await test_api.sync.run(params)
 
         assert len(results.manifest_results) == SINGLE_MANIFEST
         assert results.total_actions == SINGLE_MANIFEST
 
     @staticmethod
-    def test_preview_batch_from_all_cached(test_api: API, temp_cache_dir) -> None:
+    async def test_preview_batch_from_all_cached(test_api: API, temp_cache_dir) -> None:
         """Test batch preview using all cached directories"""
         tmp_path, _ = temp_cache_dir
         project1 = tmp_path / 'project1'
@@ -258,7 +258,7 @@ class TestSetupBatch:
 
         # Preview from all cached
         params = SetupParameters(paths=None)
-        results = test_api.sync.run(params)
+        results = await test_api.sync.run(params)
 
         assert len(results.manifest_results) == DUAL_MANIFESTS
         assert results.total_actions == TWO_ACTIONS
@@ -426,7 +426,7 @@ class TestSetupCLI:
     """Tests for setup CLI commands (now via sync)"""
 
     @staticmethod
-    def test_sync_dry_run_api(test_api: API) -> None:
+    async def test_sync_dry_run_api(test_api: API) -> None:
         """Test the sync dry-run functionality via API"""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -435,7 +435,7 @@ class TestSetupCLI:
 
             # Test dry-run via API
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            results = test_api.sync.run(setup_params)
+            results = await test_api.sync.run(setup_params)
 
             # Should have 1 action for pip install
             assert len(results.manifest_results) == 1
@@ -658,7 +658,7 @@ class TestDryRunStateAware:
     """Tests for state-aware dry-run (skipping already-installed packages)"""
 
     @staticmethod
-    def test_dry_run_skips_installed_package(test_api: API) -> None:
+    async def test_dry_run_skips_installed_package(test_api: API) -> None:
         """Test that dry-run detects an already-installed package and marks it skipped."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # 'packaging' is always installed (it's a dependency of porringer itself)
@@ -667,7 +667,7 @@ class TestDryRunStateAware:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            results = test_api.sync.run(setup_params)
+            results = await test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -678,7 +678,7 @@ class TestDryRunStateAware:
             assert 'packaging' in action_result.message
 
     @staticmethod
-    def test_dry_run_does_not_skip_missing_package(test_api: API) -> None:
+    async def test_dry_run_does_not_skip_missing_package(test_api: API) -> None:
         """Test that dry-run reports success without skip for a package that is not installed."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -687,7 +687,7 @@ class TestDryRunStateAware:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            results = test_api.sync.run(setup_params)
+            results = await test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -696,7 +696,7 @@ class TestDryRunStateAware:
             assert action_result.skip_reason is None
 
     @staticmethod
-    def test_dry_run_version_satisfied(test_api: API) -> None:
+    async def test_dry_run_version_satisfied(test_api: API) -> None:
         """Test that dry-run reports skipped when a version specifier is satisfied."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -705,7 +705,7 @@ class TestDryRunStateAware:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            results = test_api.sync.run(setup_params)
+            results = await test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -716,7 +716,7 @@ class TestDryRunStateAware:
             assert 'satisfies' in action_result.message
 
     @staticmethod
-    def test_dry_run_version_not_satisfied(test_api: API) -> None:
+    async def test_dry_run_version_not_satisfied(test_api: API) -> None:
         """Test that dry-run does not skip when a version specifier is not satisfied."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -725,7 +725,7 @@ class TestDryRunStateAware:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            results = test_api.sync.run(setup_params)
+            results = await test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -772,7 +772,7 @@ class TestSyncStrategyUpgrade:
             assert results.actions[0].kind == PluginKind.PACKAGE
 
     @staticmethod
-    def test_preview_batch_latest_strategy(test_api: API) -> None:
+    async def test_preview_batch_latest_strategy(test_api: API) -> None:
         """Test that batch preview with LATEST strategy threads strategy through."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -780,7 +780,7 @@ class TestSyncStrategyUpgrade:
             manifest_path.write_text(json.dumps(manifest_data))
 
             params = SetupParameters(paths=Path(tmpdir), strategy=SyncStrategy.LATEST)
-            results = test_api.sync.run(params)
+            results = await test_api.sync.run(params)
 
             assert len(results.manifest_results) == 1
             assert results.manifest_results[0].actions[0].kind == PluginKind.PACKAGE
@@ -810,7 +810,7 @@ class TestSyncStrategyUpgrade:
             assert 'Upgrade' in results.actions[0].description
 
     @staticmethod
-    def test_dry_run_upgrade_installed_package(test_api: API) -> None:
+    async def test_dry_run_upgrade_installed_package(test_api: API) -> None:
         """Test that dry-run upgrade of an installed package skips when already at latest."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # 'packaging' is always installed
@@ -819,7 +819,7 @@ class TestSyncStrategyUpgrade:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True, strategy=SyncStrategy.LATEST)
-            results = test_api.sync.run(setup_params)
+            results = await test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]
@@ -829,7 +829,7 @@ class TestSyncStrategyUpgrade:
             assert action_result.skip_reason is not None
 
     @staticmethod
-    def test_dry_run_upgrade_missing_package(test_api: API) -> None:
+    async def test_dry_run_upgrade_missing_package(test_api: API) -> None:
         """Test dry-run upgrade of a missing package reports install fallback."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -837,7 +837,7 @@ class TestSyncStrategyUpgrade:
             manifest_path.write_text(json.dumps(manifest_data))
 
             setup_params = SetupParameters(paths=Path(tmpdir), dry_run=True, strategy=SyncStrategy.LATEST)
-            results = test_api.sync.run(setup_params)
+            results = await test_api.sync.run(setup_params)
 
             assert len(results.manifest_results) == 1
             action_result = results.manifest_results[0].results[0]

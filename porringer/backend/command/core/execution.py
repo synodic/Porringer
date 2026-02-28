@@ -58,7 +58,7 @@ from .discovery import (
     invalidate_plugin_cache,
 )
 from .phase import run_phases
-from .presence import async_dry_run_action, clone_status_to_result
+from .presence import clone_status_to_result, dry_run_action
 from .resolution import (
     OperationKind,
     PackageCache,
@@ -557,10 +557,10 @@ async def _attempt_package_operation(
     """
     is_install = strategy == SyncStrategy.MINIMAL
     if is_install:
-        execute: Callable[[PackageParameters], Awaitable[Package | None]] = environment.async_install
+        execute: Callable[[PackageParameters], Awaitable[Package | None]] = environment.install
         verb, verb_past = 'install', 'Installed'
     else:
-        execute = environment.async_upgrade
+        execute = environment.upgrade
         verb, verb_past = 'upgrade', 'Upgraded'
 
     return await _attempt_operation(
@@ -586,7 +586,7 @@ async def execute_uninstall(
 
     Delegates to :func:`resolve_uninstall_operation` to determine
     whether the package is installed, then dispatches to
-    ``async_uninstall`` (or ``async_plugin_remove`` for plugin-target
+    ``uninstall`` (or ``plugin_remove`` for plugin-target
     actions).
 
     Args:
@@ -637,7 +637,7 @@ async def execute_uninstall(
     return await _attempt_operation(
         action,
         spec=OperationSpec(
-            execute=environment.async_uninstall,
+            execute=environment.uninstall,
             verb='uninstall',
             verb_past='Uninstalled',
         ),
@@ -682,13 +682,13 @@ async def _attempt_plugin_operation(
 
     match operation:
         case OperationKind.INSTALL:
-            execute = plugin_manager.async_plugin_add
+            execute = plugin_manager.plugin_add
             verb, verb_past, suffix = 'add plugin', 'Added', f' to {action.plugin_target.name} (native)'
         case OperationKind.UPGRADE:
-            execute = plugin_manager.async_plugin_update
+            execute = plugin_manager.plugin_update
             verb, verb_past, suffix = 'update plugin', 'Updated', f' to {action.plugin_target.name} (native)'
         case OperationKind.UNINSTALL:
-            execute = plugin_manager.async_plugin_remove
+            execute = plugin_manager.plugin_remove
             verb, verb_past, suffix = 'remove plugin', 'Removed', f' from {action.plugin_target.name} (native)'
         case _:
             msg = f'Unexpected operation {operation} for plugin action'
@@ -896,7 +896,7 @@ async def _dry_run_package_actions(
             if event_queue is not None:
                 event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
             try:
-                result = await async_dry_run_action(
+                result = await dry_run_action(
                     action,
                     environments,
                     project_path=project_path,
@@ -1103,7 +1103,7 @@ async def execute_command_actions(
             state.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
 
         if state.parameters.dry_run:
-            result = await async_dry_run_action(
+            result = await dry_run_action(
                 action,
                 state.environments,
                 parameters=state.parameters,

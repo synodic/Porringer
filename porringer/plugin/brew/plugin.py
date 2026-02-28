@@ -105,13 +105,13 @@ class BrewEnvironment(Environment):
         return results
 
     @override
-    async def async_install(self, params: PackageParameters) -> Package | None:
+    async def install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs a formula using Homebrew.
 
         Delegates streaming to the base class, then resolves the
         installed version via `brew info`.
         """
-        result = await super().async_install(params)
+        result = await super().install(params)
         if result is not None and result.version is None:
             result = Package(
                 name=result.name,
@@ -120,13 +120,13 @@ class BrewEnvironment(Environment):
         return result
 
     @override
-    async def async_upgrade(self, params: PackageParameters) -> Package | None:
+    async def upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrades a formula using Homebrew.
 
         Delegates streaming to the base class, then resolves the
         installed version via `brew info`.
         """
-        result = await super().async_upgrade(params)
+        result = await super().upgrade(params)
         if result is not None and result.version is None:
             result = Package(
                 name=result.name,

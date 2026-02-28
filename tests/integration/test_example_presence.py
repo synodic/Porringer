@@ -19,9 +19,9 @@ _EXAMPLE_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'python-dev'
 _EXPECTED_PRESENT = {'pytest', 'pytest-cov', 'pytest-mock', 'pytest-asyncio', 'ruff', 'pyrefly'}
 
 
-def test_dev_deps_detected_as_present(test_api: API) -> None:
+async def test_dev_deps_detected_as_present(test_api: API) -> None:
     """Dry-run the python-dev manifest and verify every dev dep is skipped as already installed."""
-    results = test_api.sync.run(SetupParameters(paths=_EXAMPLE_DIR, dry_run=True))
+    results = await test_api.sync.run(SetupParameters(paths=_EXAMPLE_DIR, dry_run=True))
 
     assert len(results.manifest_results) == 1
     mr = results.manifest_results[0]

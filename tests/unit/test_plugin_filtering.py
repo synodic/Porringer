@@ -20,7 +20,7 @@ class TestSetupParametersPlugins:
     """Tests for SetupParameters.plugins include-list filtering."""
 
     @staticmethod
-    def test_plugins_none_preserves_all_actions(test_api: API) -> None:
+    async def test_plugins_none_preserves_all_actions(test_api: API) -> None:
         """When plugins is None, all actions should be preserved."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -42,11 +42,11 @@ class TestSetupParametersPlugins:
                 dry_run=True,
                 plugins=None,
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             assert batch.total_actions == full_count
 
     @staticmethod
-    def test_plugins_filter_by_installer(test_api: API) -> None:
+    async def test_plugins_filter_by_installer(test_api: API) -> None:
         """When plugins is set, only actions with matching installer are kept."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -70,14 +70,14 @@ class TestSetupParametersPlugins:
                 dry_run=True,
                 plugins={resolved_installer},
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
                 for action in manifest_result.actions:
                     # Should be either our installer or a post-sync command (installer=None)
                     assert action.installer == resolved_installer or action.installer is None
 
     @staticmethod
-    def test_plugins_nonexistent_name_filters_all_package_actions(test_api: API) -> None:
+    async def test_plugins_nonexistent_name_filters_all_package_actions(test_api: API) -> None:
         """When plugins names a nonexistent plugin, all plugin-backed actions are removed."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -93,14 +93,14 @@ class TestSetupParametersPlugins:
                 dry_run=True,
                 plugins={'nonexistent_plugin_xyz'},
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             # Only post_sync commands (installer=None) should remain
             for manifest_result in batch.manifest_results:
                 for action in manifest_result.actions:
                     assert action.installer is None
 
     @staticmethod
-    def test_plugins_filter_preserves_post_sync(test_api: API) -> None:
+    async def test_plugins_filter_preserves_post_sync(test_api: API) -> None:
         """Post-sync commands (installer=None) are always preserved."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
@@ -117,7 +117,7 @@ class TestSetupParametersPlugins:
                 dry_run=True,
                 plugins={'nonexistent_plugin_xyz'},
             )
-            batch = test_api.sync.run(params)
+            batch = await test_api.sync.run(params)
             for manifest_result in batch.manifest_results:
                 command_actions = [a for a in manifest_result.actions if a.command is not None]
                 expected_command_count = 2

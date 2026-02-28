@@ -108,7 +108,7 @@ class PIPEnvironment(PythonEnvironment):
         return False
 
     @override
-    async def async_install(self, params: PackageParameters) -> Package | None:
+    async def install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package using pip.
 
         When a progress_callback is provided, streams stderr line-by-line to
@@ -122,12 +122,12 @@ class PIPEnvironment(PythonEnvironment):
 
         if params.progress_callback is None:
             # Fast path — no streaming needed
-            return await self._async_install_simple(args, params.package, logger)
+            return await self._install_simple(args, params.package, logger)
 
-        return await self._async_install_with_progress(args, params, logger)
+        return await self._install_with_progress(args, params, logger)
 
     @staticmethod
-    async def _async_install_simple(args: list[str], package: PackageRef, logger: logging.Logger) -> Package | None:
+    async def _install_simple(args: list[str], package: PackageRef, logger: logging.Logger) -> Package | None:
         """Install without progress streaming."""
         try:
             result = await run_command(args)
@@ -144,7 +144,7 @@ class PIPEnvironment(PythonEnvironment):
         return Package(name=package.name, version=None)
 
     @staticmethod
-    async def _async_install_with_progress(
+    async def _install_with_progress(
         args: list[str],
         params: PackageParameters,
         logger: logging.Logger,
@@ -388,6 +388,7 @@ class PIPEnvironment(PythonEnvironment):
                 effective_python = str(venv_python)
 
         logger = logging.getLogger('porringer.pip.packages')
+        logger.debug('listing packages via: %s', effective_python)
 
         # Try pip list first
         packages = await self._list_packages_via_pip(logger, effective_python)

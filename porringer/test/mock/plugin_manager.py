@@ -22,7 +22,7 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
 
     Attributes:
         operations: Chronological list of ``(verb, PackageRef)`` tuples
-            recorded by ``async_plugin_add`` and ``async_plugin_update``.
+            recorded by ``plugin_add`` and ``plugin_update``.
     """
 
     def __init__(
@@ -78,16 +78,16 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
         return list(self._plugins)
 
     @override
-    async def async_plugin_add(self, params: PackageParameters) -> Package | None:
+    async def plugin_add(self, params: PackageParameters) -> Package | None:
         self.operations.append(('add', params.package))
         return Package(name=params.package.name, version=None)
 
     @override
-    async def async_plugin_update(self, params: PackageParameters) -> Package | None:
+    async def plugin_update(self, params: PackageParameters) -> Package | None:
         self.operations.append(('update', params.package))
         return Package(name=params.package.name, version=None)
 
     @override
-    async def async_plugin_remove(self, params: PackageParameters) -> Package | None:
+    async def plugin_remove(self, params: PackageParameters) -> Package | None:
         self.operations.append(('remove', params.package))
         return Package(name=params.package.name, version=None)

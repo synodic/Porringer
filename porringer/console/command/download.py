@@ -1,5 +1,6 @@
 """Porringer CLI download command module for downloading files."""
 
+import asyncio
 from pathlib import Path
 from typing import Annotated
 
@@ -82,7 +83,7 @@ def download_default(
         timeout=timeout,
     )
 
-    result = api.download(params, _create_progress_callback(configuration))
+    result = asyncio.run(api.download(params, _create_progress_callback(configuration)))
     configuration.console.print()  # Newline after progress
 
     if result.success:

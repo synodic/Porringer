@@ -27,10 +27,10 @@ class TestBootstrapPresence:
 
     @staticmethod
     @pytest.fixture
-    def dry_run_results(test_api: API) -> list[SetupActionResult]:
+    async def dry_run_results(test_api: API) -> list[SetupActionResult]:
         """Dry-run the bootstrap manifest and return all action results."""
         setup_params = SetupParameters(paths=_BOOTSTRAP_DIR, dry_run=True)
-        results = test_api.sync.run(setup_params)
+        results = await test_api.sync.run(setup_params)
 
         assert len(results.manifest_results) == 1
         return results.manifest_results[0].results

@@ -2,11 +2,11 @@
 
 Covers:
 - resolve_uninstall_operation (presence → UNINSTALL or SKIP/NOT_INSTALLED)
-- execute_uninstall (routing to environment.async_uninstall / plugin_manager.async_plugin_remove)
+- execute_uninstall (routing to environment.uninstall / plugin_manager.plugin_remove)
 - get_uninstall_cli_command (preview command generation)
 - SkipReason.NOT_INSTALLED enum value
 - uninstall_command on MockEnvironment
-- plugin_remove_command / async_plugin_remove on MockPluginManager
+- plugin_remove_command / plugin_remove on MockPluginManager
 """
 
 from pathlib import Path
@@ -123,7 +123,7 @@ class TestMockEnvironmentUninstallCommand:
 
 
 # ---------------------------------------------------------------------------
-# MockPluginManager.plugin_remove_command / async_plugin_remove
+# MockPluginManager.plugin_remove_command / plugin_remove
 # ---------------------------------------------------------------------------
 
 
@@ -142,11 +142,11 @@ class TestMockPluginManagerRemove:
 
     @staticmethod
     async def test_async_plugin_remove_records_operation() -> None:
-        """async_plugin_remove records a ('remove', ref) operation."""
+        """plugin_remove records a ('remove', ref) operation."""
         pm = MockPluginManager(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
-        result = await pm.async_plugin_remove(params)
+        result = await pm.plugin_remove(params)
         assert result is not None
         assert result.name == 'cppython'
         assert len(pm.operations) == 1
@@ -256,10 +256,10 @@ class TestExecuteUninstall:
 
     @staticmethod
     async def test_uninstalls_installed_package() -> None:
-        """execute_uninstall calls async_uninstall on installed package."""
+        """execute_uninstall calls uninstall on installed package."""
         env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
-        # Patch async_uninstall to verify it's called
-        env.async_uninstall = AsyncMock(return_value=Package(name='requests', version=None))  # type: ignore[assignment]
+        # Patch uninstall to verify it's called
+        env.uninstall = AsyncMock(return_value=Package(name='requests', version=None))  # type: ignore[assignment]
         envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action()
@@ -267,7 +267,7 @@ class TestExecuteUninstall:
         assert result.success is True
         assert result.message is not None
         assert 'Uninstalled' in result.message
-        env.async_uninstall.assert_awaited_once()
+        env.uninstall.assert_awaited_once()
 
     @staticmethod
     async def test_skips_not_installed_package() -> None:
@@ -303,7 +303,7 @@ class TestExecuteUninstall:
 
     @staticmethod
     async def test_plugin_target_routes_to_plugin_remove() -> None:
-        """execute_uninstall routes plugin-target to async_plugin_remove."""
+        """execute_uninstall routes plugin-target to plugin_remove."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}

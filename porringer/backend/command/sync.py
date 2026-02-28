@@ -291,8 +291,8 @@ class SyncCommands:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-    def run(self, parameters: SetupParameters) -> BatchSetupResults:
-        """Execute setup synchronously and return collected results.
+    async def run(self, parameters: SetupParameters) -> BatchSetupResults:
+        """Execute setup and return collected results.
 
         Args:
             parameters: The setup parameters (paths, dry_run, strategy, etc.).
@@ -304,15 +304,11 @@ class SyncCommands:
 
         manifest_results: list[SetupResults] = []
         if previews:
-
-            async def _execute_all() -> None:
-                if not parameters.dry_run:
-                    invalidate_plugin_cache()
-                shared_plugins = discover_all_plugins(use_cache=parameters.dry_run)
-                for preview in previews:
-                    sr = await execute_single(preview, parameters, plugins=shared_plugins)
-                    manifest_results.append(sr)
-
-            asyncio.run(_execute_all())
+            if not parameters.dry_run:
+                invalidate_plugin_cache()
+            shared_plugins = discover_all_plugins(use_cache=parameters.dry_run)
+            for preview in previews:
+                sr = await execute_single(preview, parameters, plugins=shared_plugins)
+                manifest_results.append(sr)
 
         return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)

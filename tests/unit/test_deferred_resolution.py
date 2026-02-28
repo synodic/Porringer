@@ -59,6 +59,10 @@ class _StubPlugin(Environment):
         return ['stub', 'install', package.name]
 
     @override
+    def uninstall_command(self, package: PackageRef) -> list[str]:
+        return ['stub', 'uninstall', package.name]
+
+    @override
     def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         return ['stub', 'upgrade', package.name]
 
