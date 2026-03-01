@@ -1,5 +1,6 @@
 """API for Porringer"""
 
+import asyncio
 import logging
 
 from porringer.backend.cache import DirectoryCacheManager
@@ -19,6 +20,7 @@ from porringer.schema import (
     LocalConfiguration,
     PackageUpdateInfo,
     ProgressCallback,
+    ProgressEvent,
     SetupAction,
     SetupActionResult,
 )
@@ -143,7 +145,8 @@ class API:
             resolved = await resolve_uninstall_operation(action, environments, ctx)
             return resolved_to_result(resolved)
 
-        result = await execute_uninstall(action, environments, context=ctx)
+        event_queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
+        result = await execute_uninstall(action, environments, event_queue, context=ctx)
         logger.info(
             'uninstall result: success=%s skipped=%s skip_reason=%s message=%s',
             result.success,

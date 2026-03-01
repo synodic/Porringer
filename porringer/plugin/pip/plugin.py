@@ -411,10 +411,11 @@ class PIPEnvironment(PythonEnvironment):
         if packages is not None:
             return packages
 
-        # pip module is unavailable — the pip plugin cannot operate
-        # (install, upgrade, or uninstall) without it.
-        logger.warning('pip module unavailable for %s; returning empty package list', effective_python)
-        return []
+        # pip module is unavailable — fall back to importlib.metadata
+        # so that presence detection still works in venvs created
+        # without pip (e.g. PDM-managed environments).
+        logger.debug('pip module unavailable for %s; falling back to importlib.metadata', effective_python)
+        return await self._list_packages_via_importlib(logger, effective_python)
 
     @staticmethod
     async def _list_packages_via_pip(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
@@ -453,4 +454,53 @@ class PIPEnvironment(PythonEnvironment):
             return []
         except FileNotFoundError:
             logger.warning('Python not found on PATH; cannot list pip packages')
+            return []
+
+    @staticmethod
+    async def _list_packages_via_importlib(logger: logging.Logger, python: str = 'python') -> list[Package]:
+        """List packages using ``importlib.metadata`` via a subprocess.
+
+        This is the fallback for environments where the ``pip`` module
+        is not installed (e.g. PDM-managed venvs).  Because
+        ``importlib.metadata`` is part of the standard library it is
+        always available.
+
+        Args:
+            logger: Logger instance.
+            python: Python interpreter command or path.
+
+        Returns:
+            A list of packages (empty on failure).
+        """
+        script = (
+            'import importlib.metadata, json, sys; '
+            'json.dump('
+            '[{"name": d.name, "version": d.version} '
+            'for d in importlib.metadata.distributions()], '
+            'sys.stdout)'
+        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                python,
+                '-c',
+                script,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                logger.debug('importlib.metadata fallback failed (returncode=%s)', proc.returncode)
+                return []
+            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+            entries: list[dict[str, str]] = json.loads(stdout)
+            return [
+                Package(name=entry['name'], version=entry.get('version'))
+                for entry in entries
+                if entry.get('name') is not None
+            ]
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning('Failed to parse importlib.metadata package list: %s', e)
+            return []
+        except FileNotFoundError:
+            logger.warning('Python not found on PATH; cannot list packages via importlib.metadata')
             return []
