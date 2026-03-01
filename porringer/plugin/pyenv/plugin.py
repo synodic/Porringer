@@ -9,7 +9,7 @@ from typing import override
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
-from porringer.core.plugin_schema.runtime import RuntimeProvider
+from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
 
 
@@ -64,17 +64,21 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         return 'pyenv'
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to install a Python runtime via pyenv."""
         return ['pyenv', 'install', package.name]
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to upgrade (reinstall) a Python runtime via pyenv."""
         return ['pyenv', 'install', '--skip-existing', package.name]
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a Python runtime via pyenv."""
         return ['pyenv', 'uninstall', '-f', package.name]
 
@@ -171,7 +175,9 @@ class PyenvEnvironment(Environment, RuntimeProvider):
         return results
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         """Lists installed Python runtimes via `pyenv versions --bare`.
 
         pyenv manages Python runtimes globally; *project_path* is
@@ -179,6 +185,8 @@ class PyenvEnvironment(Environment, RuntimeProvider):
 
         Args:
             project_path: Unused.  pyenv is inherently global.
+            runtime_context: Unused.  pyenv manages runtimes, not
+                per-interpreter packages.
 
         Returns:
             A list of installed Python runtime packages.

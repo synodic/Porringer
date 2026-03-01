@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -27,7 +28,9 @@ class NPMEnvironment(Environment):
         return 'npm'
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to install a package via npm."""
         # npm uses name@constraint syntax for version pinning
         if package.constraint:
@@ -35,14 +38,16 @@ class NPMEnvironment(Environment):
         return ['npm', 'install', '-g', package.name]
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to upgrade a package via npm."""
         if package.constraint:
             return ['npm', 'update', '-g', f'{package.name}@{package.constraint}']
         return ['npm', 'update', '-g', package.name]
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a package via npm."""
         return ['npm', 'uninstall', '-g', package.name]
 
@@ -65,7 +70,9 @@ class NPMEnvironment(Environment):
         )
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         """Gathers globally installed npm packages.
 
         Uses `npm ls -g --json --depth=0` to list top-level global
@@ -74,6 +81,7 @@ class NPMEnvironment(Environment):
 
         Args:
             project_path: Unused.
+            runtime_context: Unused.  npm is not Python-scoped.
 
         Returns:
             A list of installed packages.

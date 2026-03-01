@@ -22,7 +22,7 @@ import httpx
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
-from porringer.core.plugin_schema.runtime import RuntimeConsumer
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -73,15 +73,21 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         """Python environment plugins consume a Python runtime."""
         return 'python'
 
-    @property
-    def python_command(self) -> str:
+    def python_command(self, runtime_context: RuntimeContext | None = None) -> str:
         """The Python interpreter command to target.
 
-        Returns the runtime override path when set by a `RuntimeProvider`,
-        otherwise falls back to the running interpreter (`sys.executable`).
+        Returns the runtime override path from *runtime_context* when
+        a matching runtime kind is available, otherwise falls back to
+        the running interpreter (``sys.executable``).
+
+        Args:
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use the current process interpreter.
         """
-        if self.runtime_executable is not None:
-            return str(self.runtime_executable)
+        if runtime_context is not None:
+            exe = runtime_context.get(self.consumed_runtime_kind())
+            if exe is not None:
+                return str(exe)
         return sys.executable
 
     @staticmethod

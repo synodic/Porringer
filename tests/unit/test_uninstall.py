@@ -66,8 +66,8 @@ def _make_mock_env(*, installed: list[Package] | None = None) -> MockEnvironment
     env = MockEnvironment(_MOCK_PARAMS)
     pkgs = installed or []
 
-    async def _packages(*, project_path: Path | None = None) -> list[Package]:
-        del project_path
+    async def _packages(*, project_path: Path | None = None, runtime_context: object = None) -> list[Package]:
+        del project_path, runtime_context
         return pkgs
 
     env.packages = _packages  # type: ignore[assignment]

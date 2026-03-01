@@ -20,7 +20,7 @@ from pathlib import Path
 from pydantic import Field
 
 from porringer.core.plugin_schema.manifest import ManifestContributor
-from porringer.core.plugin_schema.runtime import RuntimeConsumer
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, ManifestContribution, PluginKind, PluginParameters, PorringerModel
 
@@ -48,6 +48,11 @@ class ProjectSyncParameters(PorringerModel):
 
     directory: Path = Field(description='Working directory for the sync command (manifest location)')
     dry: bool = Field(default=False, description='If True, preview the sync without modifying the environment')
+    runtime_context: RuntimeContext | None = Field(
+        default=None,
+        exclude=True,
+        description='Resolved runtime paths for this execution run.',
+    )
 
 
 class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
@@ -62,6 +67,10 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     Subclasses **must** override `tool_name()`.  Everything else has
     sensible defaults that can be overridden when the tool's CLI differs
     from the common pattern (e.g. Poetry's `poetry env use` step).
+
+    Plugin instances are **stateless** with respect to runtime
+    configuration.  A :class:`RuntimeContext` is passed explicitly to
+    methods that need to know which interpreter to target.
     """
 
     _sync_verb: str = 'install'
@@ -71,14 +80,6 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     Override to `"sync"` for tools like uv.
     """
 
-    runtime_executable: Path | None
-    """Override the language runtime interpreter for this project.
-
-    When set by a `RuntimeProvider`
-    during phased execution, the sync command is invoked with a flag
-    that selects this interpreter (e.g. `--python <path>`).
-    """
-
     def __init__(self, parameters: PluginParameters) -> None:
         """Initializes the project environment plugin.
 
@@ -86,7 +87,6 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
             parameters: Plugin parameters including distribution info
         """
         super().__init__(parameters)
-        self.runtime_executable = None
 
     # ------------------------------------------------------------------
     # Subclass hooks
@@ -219,18 +219,24 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
 
         return None
 
-    def sync_command(self) -> list[str]:
+    def sync_command(self, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Return the CLI command for syncing the project.
 
         Built from `tool_name()` and `_sync_verb`, with
-        `--python <path>` appended when a runtime override is active.
+        `--python <path>` appended when *runtime_context* supplies
+        a resolved interpreter for this plugin's consumed runtime kind.
 
-        This is used for displaying commands in dry-run / preview mode
-        and should reflect instance state.
+        This is used for displaying commands in dry-run / preview mode.
+
+        Args:
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use defaults.
         """
         cmd = [self.tool_name(), self._sync_verb]
-        if self.runtime_executable is not None:
-            cmd.extend(['--python', str(self.runtime_executable)])
+        if runtime_context is not None:
+            exe = runtime_context.get(self.consumed_runtime_kind())
+            if exe is not None:
+                cmd.extend(['--python', str(exe)])
         return cmd
 
     async def sync(self, params: ProjectSyncParameters) -> bool:
@@ -245,12 +251,12 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         (e.g. Poetry needs `poetry env use` before `poetry install`).
 
         Args:
-            params: Sync parameters (directory, dry-run flag).
+            params: Sync parameters (directory, dry-run flag, runtime context).
 
         Returns:
             `True` on success, `False` on failure.
         """
-        args = list(self.sync_command())
+        args = list(self.sync_command(runtime_context=params.runtime_context))
         if params.dry:
             args.append('--dry-run')
         return await self._run_sync(args, params.directory)

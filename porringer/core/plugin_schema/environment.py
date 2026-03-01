@@ -8,11 +8,11 @@ from pathlib import Path
 import httpx
 from pydantic import Field
 
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import (
     Package,
     PackageRef,
-    PluginParameters,
     PorringerModel,
 )
 from porringer.schema import SetupAction, SubActionProgress
@@ -35,6 +35,15 @@ class PackageParameters(PorringerModel):
         exclude=True,
         description='Optional callback for reporting sub-action progress (download %, install phase, etc.)',
     )
+    runtime_context: RuntimeContext | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            'Runtime context carrying resolved interpreter paths. '
+            'Passed to command-generation methods so that the correct '
+            'runtime is targeted without storing state on the plugin.'
+        ),
+    )
 
 
 class CheckUpdatesParameters(PorringerModel):
@@ -56,37 +65,33 @@ class CheckUpdatesParameters(PorringerModel):
 
 
 class Environment(ToolBasedPlugin):
-    """Plugin definition for package environments"""
+    """Plugin definition for package environments.
 
-    runtime_executable: Path | None
-    """Override the language runtime interpreter to target.
-
-    When set by a `RuntimeProvider` during phased execution, installers
-    use this path instead of the default interpreter on PATH.
+    Plugin instances are **stateless** with respect to runtime
+    configuration.  A :class:`RuntimeContext` is passed explicitly to
+    every method that needs to know which interpreter to target.
     """
 
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the environment plugin.
-
-        Args:
-            parameters: Plugin parameters including distribution info
-        """
-        super().__init__(parameters)
-        self.runtime_executable = None
-
     @abstractmethod
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self,
+        package: PackageRef,
+        *,
+        include_prereleases: bool = False,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command that would install a package.
 
         Override this method to provide the actual command line arguments
         that would be used to install a package.  This is used for
-        displaying commands in dry-run / preview mode and should reflect
-        instance state such as `runtime_executable`.
+        displaying commands in dry-run / preview mode.
 
         Args:
             package: The package reference (may include a version constraint).
             include_prereleases: When ``True``, allow pre-release versions
                 (e.g. append ``--pre`` for pip-based tools).
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use defaults (e.g. ``sys.executable``).
 
         Returns:
             A list of command arguments (e.g., ['pip', 'install', 'requests>=1.0']).
@@ -94,18 +99,25 @@ class Environment(ToolBasedPlugin):
         ...
 
     @abstractmethod
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self,
+        package: PackageRef,
+        *,
+        include_prereleases: bool = False,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command that would upgrade a package.
 
         Override this method to provide the actual command line arguments
         that would be used to upgrade a package.  This is used for
-        displaying commands in dry-run / preview mode and should reflect
-        instance state such as `runtime_executable`.
+        displaying commands in dry-run / preview mode.
 
         Args:
             package: The package reference (may include a version constraint).
             include_prereleases: When ``True``, allow pre-release versions
                 (e.g. append ``--pre`` for pip-based tools).
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use defaults.
 
         Returns:
             A list of command arguments (e.g., ['pip', 'install', '--upgrade', 'requests']).
@@ -113,13 +125,17 @@ class Environment(ToolBasedPlugin):
         ...
 
     @abstractmethod
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(
+        self,
+        package: PackageRef,
+        *,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command that would uninstall a package.
 
         Override this method to provide the actual command line arguments
         that would be used to remove a package.  This is used for
-        displaying commands in dry-run / preview mode and should reflect
-        instance state such as `runtime_executable`.
+        displaying commands in dry-run / preview mode.
 
         Unlike ``install_command`` and ``upgrade_command``, there is no
         ``include_prereleases`` parameter because pre-release handling
@@ -127,6 +143,8 @@ class Environment(ToolBasedPlugin):
 
         Args:
             package: The package reference (only ``name`` is used).
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use defaults.
 
         Returns:
             A list of command arguments (e.g., ['pip', 'uninstall', '-y', 'requests']).
@@ -163,7 +181,13 @@ class Environment(ToolBasedPlugin):
         Returns:
             The package, or None if installation failed
         """
-        args = list(self.install_command(params.package, include_prereleases=params.include_prereleases))
+        args = list(
+            self.install_command(
+                params.package,
+                include_prereleases=params.include_prereleases,
+                runtime_context=params.runtime_context,
+            )
+        )
         if params.progress_callback is not None:
             return await self._stream_command(args=args, params=params, phase='installing', verb='install')
         return await self._run_command(args=args, params=params, verb='install')
@@ -185,7 +209,13 @@ class Environment(ToolBasedPlugin):
         Returns:
             The package, or None if the upgrade failed.
         """
-        args = list(self.upgrade_command(params.package, include_prereleases=params.include_prereleases))
+        args = list(
+            self.upgrade_command(
+                params.package,
+                include_prereleases=params.include_prereleases,
+                runtime_context=params.runtime_context,
+            )
+        )
         if params.progress_callback is not None:
             return await self._stream_command(args=args, params=params, phase='upgrading', verb='upgrade')
         return await self._run_command(args=args, params=params, verb='upgrade')
@@ -207,7 +237,7 @@ class Environment(ToolBasedPlugin):
         Returns:
             The package, or None if the uninstall failed.
         """
-        args = list(self.uninstall_command(params.package))
+        args = list(self.uninstall_command(params.package, runtime_context=params.runtime_context))
         uninstall_logger = logging.getLogger(f'porringer.{self.tool_name()}.uninstall')
         uninstall_logger.debug('uninstall command: %s', args)
         if params.progress_callback is not None:
@@ -314,7 +344,12 @@ class Environment(ToolBasedPlugin):
         return Package(name=params.package.name, version=None)
 
     @abstractmethod
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self,
+        *,
+        project_path: Path | None = None,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[Package]:
         """Gathers installed packages in the given environment.
 
         When *project_path* is provided, plugins that manage
@@ -324,6 +359,10 @@ class Environment(ToolBasedPlugin):
         Plugins that are inherently global (pipx, apt, brew, winget)
         may ignore this parameter.
 
+        When *runtime_context* is provided, Python-ecosystem plugins
+        should target the resolved interpreter instead of
+        ``sys.executable``.
+
         Implementations should use the async helper methods
         (``_run_json_command``, ``_run_text_command``) instead of
         ``subprocess.run`` so the event loop is never blocked.
@@ -332,6 +371,8 @@ class Environment(ToolBasedPlugin):
             project_path: Optional path to a project directory.  When
                 set, the listing is scoped to the project's virtual
                 environment.
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use defaults.
 
         Returns:
             A list of packages

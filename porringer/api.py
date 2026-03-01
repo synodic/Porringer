@@ -112,6 +112,9 @@ class API:
 
         plugins = discover_all_plugins(use_cache=True)
         environments = plugins.environments
+        # Safe to use cached plugins here: plugin instances are stateless
+        # with respect to runtime configuration (RuntimeContext is threaded
+        # explicitly, not stored on the instance).
 
         if plugin_name not in environments:
             logger.warning("Plugin '%s' is not available for uninstall of '%s'", plugin_name, package.name)

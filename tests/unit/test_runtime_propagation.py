@@ -2,6 +2,7 @@
 
 import inspect
 import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,7 +18,7 @@ from porringer.backend.command.core.phase import PackagePhase, ToolPhase
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
-from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
 from porringer.schema import SetupAction, SetupParameters, SetupResults
 
@@ -71,15 +72,25 @@ class _MockRuntimeProvider(Environment):
         return self._resolved
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         return ['mock-pim', 'install', str(package)]
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
+        return ['mock-pim', 'uninstall', package.name]
+
+    @override
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         return ['mock-pim', 'upgrade', str(package)]
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         return []
 
     @override
@@ -100,15 +111,25 @@ class _MockPythonEnv(PythonEnvironment):
         return 'mock-pip'
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         return ['mock-pip', 'install', str(package)]
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
+        return ['mock-pip', 'uninstall', package.name]
+
+    @override
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         return ['mock-pip', 'upgrade', str(package)]
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         return []
 
 
@@ -150,15 +171,25 @@ class _MockNodeConsumer(Environment, RuntimeConsumer):
         return None
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         return []
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         return []
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
+        return []
+
+    @override
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         return []
 
     @override
@@ -209,7 +240,7 @@ class TestRuntimePropagationAfterPluginRefresh:
 
     @staticmethod
     async def test_refresh_all_plugins_re_propagates_runtime() -> None:
-        """Fresh consumers created by refresh_all_plugins receive the cached runtime."""
+        """Runtime context persists across plugin refresh — no per-plugin mutation needed."""
         provider = _MockRuntimeProvider(_MOCK_DIST)
         consumer = _MockPythonEnv(_MOCK_DIST)
         state = _make_state(
@@ -220,12 +251,11 @@ class TestRuntimePropagationAfterPluginRefresh:
         with _preserve_path():
             await state.propagate_runtime()
 
-        assert consumer.runtime_executable == _MOCK_RUNTIME_EXE
-        assert state._resolved_runtime == ('python', _MOCK_RUNTIME_EXE)
+        # Runtime stored on the execution state, not on the plugin
+        assert state.runtime_context.get('python') == _MOCK_RUNTIME_EXE
 
         # refresh_all_plugins replaces environments with new instances
         new_consumer = _MockPythonEnv(_MOCK_DIST)
-        assert new_consumer.runtime_executable is None
 
         with (
             patch('porringer.backend.command.core.execution.discover_all_plugins') as mock_discover,
@@ -240,13 +270,14 @@ class TestRuntimePropagationAfterPluginRefresh:
             state.refresh_all_plugins()
 
         assert state.environments['mock-pip'] is new_consumer
-        assert new_consumer.runtime_executable == _MOCK_RUNTIME_EXE
+        # The runtime context survives the refresh — it lives on the state
+        assert state.runtime_context.get('python') == _MOCK_RUNTIME_EXE
 
     @staticmethod
     def test_refresh_all_plugins_noop_without_runtime() -> None:
-        """Without a resolved runtime, refresh_all_plugins sets nothing."""
+        """Without a resolved runtime, runtime_context remains empty."""
         state = _make_state(environments={'mock-pip': _MockPythonEnv(_MOCK_DIST)})
-        assert state._resolved_runtime is None
+        assert state.runtime_context.get('python') is None
 
         new_consumer = _MockPythonEnv(_MOCK_DIST)
         with (
@@ -261,11 +292,11 @@ class TestRuntimePropagationAfterPluginRefresh:
             )
             state.refresh_all_plugins()
 
-        assert new_consumer.runtime_executable is None
+        assert state.runtime_context.get('python') is None
 
     @staticmethod
     async def test_refresh_all_plugins_re_propagates_to_project_environments() -> None:
-        """Fresh project environments from refresh receive the cached runtime."""
+        """Runtime context persists across refresh — project environments get it too."""
         provider = _MockRuntimeProvider(_MOCK_DIST)
         consumer = _MockPythonEnv(_MOCK_DIST)
         proj_env = _MockProjectEnv(_MOCK_DIST)
@@ -277,10 +308,9 @@ class TestRuntimePropagationAfterPluginRefresh:
 
         with _preserve_path():
             await state.propagate_runtime()
-        assert proj_env.runtime_executable == _MOCK_RUNTIME_EXE
+        assert state.runtime_context.get('python') == _MOCK_RUNTIME_EXE
 
         new_proj_env = _MockProjectEnv(_MOCK_DIST)
-        assert new_proj_env.runtime_executable is None
 
         with (
             patch('porringer.backend.command.core.execution.discover_all_plugins') as mock_discover,
@@ -296,7 +326,8 @@ class TestRuntimePropagationAfterPluginRefresh:
 
         assert state.project_environments is not None
         assert state.project_environments['mock-pdm'] is new_proj_env
-        assert new_proj_env.runtime_executable == _MOCK_RUNTIME_EXE
+        # The runtime context is on the state, not the plugin — it survives refresh
+        assert state.runtime_context.get('python') == _MOCK_RUNTIME_EXE
 
     @staticmethod
     async def test_non_matching_runtime_kind_not_propagated() -> None:
@@ -310,7 +341,9 @@ class TestRuntimePropagationAfterPluginRefresh:
 
         with _preserve_path():
             await state.propagate_runtime()
-        assert node_env.runtime_executable is None
+        # Python runtime is stored, but node runtime is not
+        assert state.runtime_context.get('python') == _MOCK_RUNTIME_EXE
+        assert state.runtime_context.get('node') is None
 
         new_node_env = _MockNodeConsumer(_MOCK_DIST)
         with (
@@ -325,7 +358,92 @@ class TestRuntimePropagationAfterPluginRefresh:
             )
             state.refresh_all_plugins()
 
-        assert new_node_env.runtime_executable is None
+        # Node runtime still absent from context
+        assert state.runtime_context.get('node') is None
+
+
+# ---------------------------------------------------------------------------
+# Bug 1b: Cache mutation — shared plugins must not carry runtime state
+# ---------------------------------------------------------------------------
+
+
+class TestCacheMutationRegression:
+    """Regression test for the cache mutation bug.
+
+    Previously ``_propagate_runtime`` wrote ``runtime_executable``
+    directly onto plugin instances.  Because ``DiscoveredPlugins`` is
+    cached at module level and ``copy()`` is shallow, a second
+    ``ExecutionState`` that re-uses the cached plugins would inherit
+    stale runtime state.
+
+    After the ``RuntimeContext`` refactor, plugins are stateless —
+    runtime state lives exclusively on ``ExecutionState.runtime_context``.
+    These tests prove that shared plugin instances are safe.
+    """
+
+    @staticmethod
+    async def test_shared_plugin_instance_not_mutated() -> None:
+        """Plugin instances remain clean after propagate_runtime."""
+        provider = _MockRuntimeProvider(_MOCK_DIST)
+        consumer = _MockPythonEnv(_MOCK_DIST)
+
+        state = _make_state(
+            environments={'mock-pim': provider, 'mock-pip': consumer},
+            runtime_actions=[_RUNTIME_ACTION],
+        )
+
+        with _preserve_path():
+            await state.propagate_runtime()
+
+        # Runtime is recorded on the state's context …
+        assert state.runtime_context.get('python') == _MOCK_RUNTIME_EXE
+        # … but the plugin instance itself has no mutable runtime state.
+        assert not hasattr(consumer, 'runtime_executable') or consumer.runtime_executable is None  # type: ignore[attr-defined]
+
+    @staticmethod
+    async def test_second_state_with_same_plugins_gets_clean_context() -> None:
+        """A fresh ExecutionState sharing the same plugins starts with empty context."""
+        provider = _MockRuntimeProvider(_MOCK_DIST)
+        consumer = _MockPythonEnv(_MOCK_DIST)
+
+        state1 = _make_state(
+            environments={'mock-pim': provider, 'mock-pip': consumer},
+            runtime_actions=[_RUNTIME_ACTION],
+        )
+        with _preserve_path():
+            await state1.propagate_runtime()
+        assert state1.runtime_context.get('python') == _MOCK_RUNTIME_EXE
+
+        # A second state sharing the *exact same* plugin instances
+        state2 = _make_state(
+            environments={'mock-pim': provider, 'mock-pip': consumer},
+        )
+        # Its context is unpolluted — the original bug would have failed here
+        assert state2.runtime_context.get('python') is None
+
+    @staticmethod
+    async def test_python_command_isolation_between_states() -> None:
+        """python_command() reflects only the calling state's context."""
+        provider = _MockRuntimeProvider(_MOCK_DIST)
+        consumer = _MockPythonEnv(_MOCK_DIST)
+
+        state1 = _make_state(
+            environments={'mock-pim': provider, 'mock-pip': consumer},
+            runtime_actions=[_RUNTIME_ACTION],
+        )
+        with _preserve_path():
+            await state1.propagate_runtime()
+
+        rc1 = state1.runtime_context
+        assert consumer.python_command(rc1) == str(_MOCK_RUNTIME_EXE)
+
+        # A second state with no runtime — same consumer instance
+        state2 = _make_state(
+            environments={'mock-pim': provider, 'mock-pip': consumer},
+        )
+        rc2 = state2.runtime_context
+        # Should fall back to sys.executable, not the first state's runtime
+        assert consumer.python_command(rc2) == sys.executable
 
 
 # ---------------------------------------------------------------------------
@@ -340,8 +458,8 @@ class TestPackagePhaseNoProjectPath:
     def test_python_command_uses_global_without_project_path() -> None:
         """Without project_path, python_command returns the runtime executable."""
         env = _MockPythonEnv(_MOCK_DIST)
-        env.runtime_executable = _MOCK_RUNTIME_EXE
-        assert env.python_command == str(_MOCK_RUNTIME_EXE)
+        rc = RuntimeContext(executables={'python': _MOCK_RUNTIME_EXE})
+        assert env.python_command(rc) == str(_MOCK_RUNTIME_EXE)
 
     @staticmethod
     def test_venv_discovered_only_with_project_path(tmp_path: Path) -> None:

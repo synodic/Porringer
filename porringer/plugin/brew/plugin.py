@@ -9,6 +9,7 @@ from porringer.core.plugin_schema.environment import (
     Environment,
     PackageParameters,
 )
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -51,17 +52,21 @@ class BrewEnvironment(Environment):
         return 'brew'
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to install a package via brew."""
         return ['brew', 'install', package.name]
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to upgrade a package via brew."""
         return ['brew', 'upgrade', package.name]
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a package via brew."""
         return ['brew', 'uninstall', package.name]
 
@@ -135,7 +140,9 @@ class BrewEnvironment(Environment):
         return result
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         """Lists all installed formulas in Homebrew.
 
         Homebrew manages system packages globally; *project_path* is
@@ -143,6 +150,7 @@ class BrewEnvironment(Environment):
 
         Args:
             project_path: Unused.  Homebrew is inherently global.
+            runtime_context: Unused.  Homebrew is not Python-scoped.
 
         Returns:
             A list of installed packages

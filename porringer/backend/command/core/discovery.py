@@ -43,8 +43,10 @@ class DiscoveredPlugins:
         """Return a shallow copy with independent dict instances.
 
         Plugin objects themselves are shared; only the dict containers
-        are duplicated so that per-run mutations (e.g. setting
-        ``runtime_executable``) don't leak back to the shared cache.
+        are duplicated so that per-run dict mutations (e.g. deferred
+        action resolution adding new keys) don't leak back to the
+        shared cache.  Plugin instances are stateless with respect to
+        runtime configuration, so sharing them is safe.
         """
         return DiscoveredPlugins(
             environments=dict(self.environments),

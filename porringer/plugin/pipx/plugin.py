@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind, PluginKind
 
 
@@ -99,7 +100,9 @@ class PIPXEnvironment(PythonEnvironment):
         return 'pipx'
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to install a package via pipx."""
         cmd = ['pipx', 'install', package.specifier]
         if include_prereleases:
@@ -107,7 +110,9 @@ class PIPXEnvironment(PythonEnvironment):
         return cmd
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to upgrade a package via pipx."""
         cmd = ['pipx', 'upgrade', package.specifier]
         if include_prereleases:
@@ -115,12 +120,14 @@ class PIPXEnvironment(PythonEnvironment):
         return cmd
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a package via pipx."""
         return ['pipx', 'uninstall', package.name]
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         """Gathers installed packages in the given environment.
 
         pipx manages isolated CLI tool installations globally, so
@@ -133,6 +140,8 @@ class PIPXEnvironment(PythonEnvironment):
 
         Args:
             project_path: Unused.  pipx is inherently global.
+            runtime_context: Unused.  pipx manages isolated venvs
+                independently of the active interpreter.
 
         Returns:
             A list of packages

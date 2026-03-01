@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -27,21 +28,25 @@ class PNPMEnvironment(Environment):
         return 'pnpm'
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to install a package via pnpm."""
         if package.constraint:
             return ['pnpm', 'add', '-g', f'{package.name}@{package.constraint}']
         return ['pnpm', 'add', '-g', package.name]
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to upgrade a package via pnpm."""
         if package.constraint:
             return ['pnpm', 'update', '-g', f'{package.name}@{package.constraint}']
         return ['pnpm', 'update', '-g', '--latest', package.name]
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a package via pnpm."""
         return ['pnpm', 'remove', '-g', package.name]
 
@@ -65,7 +70,9 @@ class PNPMEnvironment(Environment):
         )
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         """Gathers globally installed pnpm packages.
 
         Uses `pnpm list -g --json --depth=0` to list top-level global
@@ -74,6 +81,7 @@ class PNPMEnvironment(Environment):
 
         Args:
             project_path: Unused.
+            runtime_context: Unused.  pnpm is not Python-scoped.
 
         Returns:
             A list of installed packages.

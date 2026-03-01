@@ -57,10 +57,9 @@ async def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupRes
 def _invalidate_plugin_cache() -> None:
     """Clear the module-level plugin cache before every test.
 
-    The discovery cache (30 s TTL) holds live plugin instances whose
-    mutable state — particularly ``runtime_executable`` propagated
-    during a RuntimePhase — leaks across test boundaries.  Clearing it
-    ensures each test starts with freshly-discovered plugins.
+    The discovery cache (30 s TTL) holds live plugin instances.
+    Clearing it ensures each test starts with freshly-discovered
+    plugins and avoids any stale state leaking across test boundaries.
     """
     invalidate_plugin_cache()
 

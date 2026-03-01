@@ -7,6 +7,7 @@ from typing import override
 import httpx
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -47,17 +48,21 @@ class DenoEnvironment(Environment):
         return name
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to install a global script via Deno."""
         return ['deno', 'install', '-g', self._deno_specifier(package)]
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to upgrade a global script via Deno."""
         return ['deno', 'install', '-g', '--force', self._deno_specifier(package)]
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a global script via Deno."""
         return ['deno', 'uninstall', '-g', package.name]
 
@@ -124,7 +129,9 @@ class DenoEnvironment(Environment):
         return results
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         """Gathers globally installed Deno scripts.
 
         Deno does not provide a structured list of globally installed
@@ -133,6 +140,7 @@ class DenoEnvironment(Environment):
 
         Args:
             project_path: Unused.
+            runtime_context: Unused.  Deno is not Python-scoped.
 
         Returns:
             An empty list.

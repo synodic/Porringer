@@ -57,7 +57,7 @@ class DenoProjectEnvironment(ProjectEnvironment):
         Returns:
             `True` on success, `False` on failure.
         """
-        args = list(self.sync_command())
+        args = list(self.sync_command(runtime_context=params.runtime_context))
         if params.dry:
             logger.info('Dry run: %s', ' '.join(args))
             return True

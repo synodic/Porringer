@@ -28,7 +28,7 @@ from porringer.core.plugin_schema.project_environment import (
     ProjectEnvironment,
     ProjectSyncParameters,
 )
-from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeProvider
+from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Ecosystem, Package, PluginKind
 from porringer.schema import (
@@ -92,11 +92,10 @@ class ExecutionState:
     manifest_directory: Path
     preview: SetupResults
     results: list[SetupActionResult] = field(default_factory=list)
-    _resolved_runtime: tuple[str, Path] | None = field(default=None, repr=False)
-    """Cached ``(kind, executable)`` pair from the first successful
-    runtime resolution.  Set by :meth:`propagate_runtime` and
-    re-applied automatically after every plugin re-discovery so that
-    newly-created consumer instances inherit the resolved path."""
+    runtime_context: RuntimeContext = field(default_factory=RuntimeContext)
+    """Accumulated runtime context for this execution run.  Populated
+    by :meth:`propagate_runtime` and threaded through to every
+    operation that needs an interpreter path."""
 
     # -- convenience accessors (delegate to plugins / preview) ---------
 
@@ -153,46 +152,32 @@ class ExecutionState:
         """Refresh PATH and re-discover all plugin types.
 
         Invalidates the plugin cache, re-discovers environments,
-        project environments, and SCM environments, then re-applies
-        the cached runtime executable to all new consumer instances.
+        project environments, and SCM environments.  The
+        ``runtime_context`` is *not* re-applied to plugin instances
+        because plugins are now stateless — the context is threaded
+        explicitly through every operation.
         """
         refresh_path()
         invalidate_plugin_cache()
         self.plugins = discover_all_plugins().copy()
-        self._apply_resolved_runtime()
 
     async def propagate_runtime(self) -> None:
-        """Resolve interpreter paths from completed runtime actions and propagate downstream.
+        """Resolve interpreter paths from completed runtime actions.
 
         Finds the first ``RuntimeProvider`` among the RUNTIME-phase
         actions, resolves its executable, injects the directory onto
-        ``PATH``, and sets ``runtime_executable`` on every matching
-        ``RuntimeConsumer``.  The result is cached so that subsequent
-        calls to :meth:`refresh_all_plugins` can re-apply it to
-        newly-created plugin instances.
+        ``PATH``, and stores the result in :attr:`runtime_context`
+        so it can be threaded through subsequent operations.
+
+        Plugin instances are **not** mutated.
         """
         result = await _propagate_runtime(
             self.phases[PluginKind.RUNTIME],
             self.plugins,
         )
         if result is not None:
-            self._resolved_runtime = result
-
-    def _apply_resolved_runtime(self) -> None:
-        """Re-apply the cached runtime executable to all current consumers.
-
-        No-op when no runtime has been resolved yet.
-        """
-        if self._resolved_runtime is None:
-            return
-        kind, executable = self._resolved_runtime
-        all_plugins = self.plugins.all_plugins
-        for name, plugin in all_plugins.items():
-            if isinstance(plugin, RuntimeConsumer):
-                consumer_type = cast(type[RuntimeConsumer], type(plugin))
-                if consumer_type.consumed_runtime_kind() == kind:
-                    plugin.runtime_executable = executable
-                    logger.debug('Re-applied runtime_executable on %s to %s', name, executable)
+            kind, executable = result
+            self.runtime_context.executables[kind] = executable
 
     # -- result helpers ------------------------------------------------
 
@@ -204,7 +189,10 @@ class ExecutionState:
     @property
     def plugin_context(self) -> PluginContext:
         """Plugin-management context for this execution run."""
-        return PluginContext(project_environments=self.project_environments)
+        return PluginContext(
+            project_environments=self.project_environments,
+            runtime_context=self.runtime_context,
+        )
 
     # -- phase executor delegates --------------------------------------
 
@@ -272,12 +260,14 @@ class ExecutionState:
 class PluginContext:
     """Bundled plugin-management context for the execution helpers.
 
-    Groups the project-path and project-environment references that
-    flow through ``execute_package_actions`` → ``execute_package``.
+    Groups the project-path, project-environment references, and
+    runtime context that flow through
+    ``execute_package_actions`` → ``execute_package``.
     """
 
     project_path: Path | None = None
     project_environments: dict[str, ProjectEnvironment] | None = None
+    runtime_context: RuntimeContext | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +489,7 @@ async def execute_package(
 
     project_path = plugin_context.project_path if plugin_context else None
     project_environments = plugin_context.project_environments if plugin_context else None
+    runtime_context = plugin_context.runtime_context if plugin_context else None
 
     resolved = await resolve_operation(
         action,
@@ -508,6 +499,7 @@ async def execute_package(
             project_path=project_path,
             project_environments=project_environments,
             package_cache=package_cache,
+            runtime_context=runtime_context,
         ),
     )
 
@@ -535,7 +527,9 @@ async def execute_package(
     effective = SyncStrategy.MINIMAL if resolved.operation == OperationKind.INSTALL else strategy
     verb = 'Installing' if resolved.operation == OperationKind.INSTALL else 'Upgrading'
     logger.info(f"{verb} '{action.package}' via {action.installer}")
-    return await _attempt_package_operation(action, environment, effective, event_queue)
+    return await _attempt_package_operation(
+        action, environment, effective, event_queue, runtime_context=runtime_context
+    )
 
 
 async def _attempt_package_operation(
@@ -543,6 +537,8 @@ async def _attempt_package_operation(
     environment: Environment,
     strategy: SyncStrategy,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    *,
+    runtime_context: RuntimeContext | None = None,
 ) -> SetupActionResult:
     """Attempt to install or upgrade a package via the given environment plugin.
 
@@ -551,6 +547,7 @@ async def _attempt_package_operation(
         environment: The environment plugin to use.
         strategy: Whether to install or upgrade.
         event_queue: Optional queue to emit sub-action events into.
+        runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
         The result of the attempt.
@@ -571,6 +568,7 @@ async def _attempt_package_operation(
             verb_past=verb_past,
         ),
         event_queue=event_queue,
+        runtime_context=runtime_context,
     )
 
 
@@ -605,6 +603,7 @@ async def execute_uninstall(
 
     project_path = plugin_context.project_path if plugin_context else None
     project_environments = plugin_context.project_environments if plugin_context else None
+    runtime_context = plugin_context.runtime_context if plugin_context else None
 
     resolved = await resolve_uninstall_operation(
         action,
@@ -613,6 +612,7 @@ async def execute_uninstall(
             project_path=project_path,
             project_environments=project_environments,
             package_cache=package_cache,
+            runtime_context=runtime_context,
         ),
     )
 
@@ -642,6 +642,7 @@ async def execute_uninstall(
             verb_past='Uninstalled',
         ),
         event_queue=event_queue,
+        runtime_context=runtime_context,
     )
 
 
@@ -731,6 +732,7 @@ async def _attempt_operation(
     *,
     spec: OperationSpec,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    runtime_context: RuntimeContext | None = None,
 ) -> SetupActionResult:
     """Core helper that runs an async package operation with standard error handling.
 
@@ -741,6 +743,7 @@ async def _attempt_operation(
         action: The action being executed.
         spec: The operation specification (callable + verb forms).
         event_queue: Optional queue to emit sub-action events into.
+        runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
         The result of the attempt.
@@ -769,6 +772,7 @@ async def _attempt_operation(
             dry=False,
             include_prereleases=action.include_prereleases,
             progress_callback=sub_action_cb,
+            runtime_context=runtime_context,
         )
         result = await spec.execute(params)
 
@@ -1170,6 +1174,7 @@ async def handle_project_phase(
             state.manifest_directory,
             state.parameters,
             state.event_queue,
+            runtime_context=state.runtime_context,
         )
     return skip_actions(
         project_actions,
@@ -1265,9 +1270,9 @@ async def execute_single(
     state = ExecutionState(
         actions=actions,
         phases=group_actions_by_phase(actions),
-        # Shallow-copy the plugin dicts so that mutations (e.g.
-        # runtime_executable propagation) don't leak back into
-        # the caller's shared DiscoveredPlugins object.
+        # Shallow-copy the plugin dicts so that callers sharing the
+        # same DiscoveredPlugins object are not affected by any
+        # per-run dict mutations (e.g. deferred resolution).
         plugins=plugins.copy(),
         parameters=parameters,
         event_queue=event_queue,
@@ -1338,10 +1343,12 @@ async def _propagate_runtime(
     """Resolve the interpreter path and propagate to downstream consumers.
 
     After runtime-provider actions complete, finds the first
-    `RuntimeProvider` that can resolve an executable and sets
-    `runtime_executable` on all `RuntimeConsumer` plugins
-    whose `consumed_runtime_kind` matches the provider's
-    `provided_runtime_kind`.
+    `RuntimeProvider` that can resolve an executable.  The result
+    is returned so the caller can store it in its
+    :class:`RuntimeContext`.
+
+    Plugin instances are **not** mutated — runtime state is
+    threaded explicitly through execution parameters.
 
     Returns:
         A ``(kind, executable)`` tuple on success, or ``None`` if no
@@ -1375,15 +1382,6 @@ async def _propagate_runtime(
         # are discoverable via shutil.which() during plugin
         # re-discovery at the next phase transition.
         inject_runtime_path(executable)
-
-        # Propagate to all plugins (environment + project-environment) that consume this runtime kind
-        all_plugins = plugins.all_plugins
-        for name, downstream in all_plugins.items():
-            if isinstance(downstream, RuntimeConsumer):
-                downstream_type = cast(type[RuntimeConsumer], type(downstream))
-                if downstream_type.consumed_runtime_kind() == kind:
-                    downstream.runtime_executable = executable
-                    logger.debug('Set runtime_executable on %s to %s', name, executable)
 
         # Use only the first successfully resolved runtime
         return (kind, executable)
@@ -1502,6 +1500,8 @@ async def _execute_project_sync_actions(
     manifest_directory: Path,
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
+    *,
+    runtime_context: RuntimeContext | None = None,
 ) -> list[SetupActionResult]:
     """Execute PROJECT_SYNC actions sequentially.
 
@@ -1519,6 +1519,7 @@ async def _execute_project_sync_actions(
         manifest_directory: Directory containing the manifest file.
         parameters: Setup parameters (dry-run, etc.).
         event_queue: Optional queue for progress events.
+        runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
         List of action results.
@@ -1535,6 +1536,7 @@ async def _execute_project_sync_actions(
             manifest_directory,
             parameters,
             event_queue=event_queue,
+            runtime_context=runtime_context,
         )
 
         results.append(result)
@@ -1560,6 +1562,7 @@ async def _execute_project_sync(
     parameters: SetupParameters,
     *,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
+    runtime_context: RuntimeContext | None = None,
 ) -> SetupActionResult:
     """Execute a single PROJECT_SYNC action.
 
@@ -1582,6 +1585,7 @@ async def _execute_project_sync(
         manifest_directory: Directory containing the manifest file.
         parameters: Setup parameters.
         event_queue: Optional queue for streaming progress events.
+        runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
         The result of the sync operation.
@@ -1624,13 +1628,13 @@ async def _execute_project_sync(
                     proj_env.ecosystem(),
                 )
 
-    params = ProjectSyncParameters(directory=effective_dir, dry=parameters.dry_run)
+    params = ProjectSyncParameters(directory=effective_dir, dry=parameters.dry_run, runtime_context=runtime_context)
 
     try:
         if event_queue is not None:
             # Streaming path — build the CLI args from the plugin and
             # run them via stream_command for line-by-line output.
-            args = list(proj_env.sync_command())
+            args = list(proj_env.sync_command(runtime_context=runtime_context))
             if params.dry:
                 args.append('--dry-run')
 
