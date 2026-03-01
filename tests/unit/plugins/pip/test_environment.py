@@ -127,24 +127,49 @@ class TestVenvWithPip:
 class TestVenvWithoutPip:
     """Simulate a venv where `python -m pip list` fails.
 
-    When pip is unavailable the plugin returns an empty list with a
-    warning instead of falling back to importlib.metadata.
+    When pip is unavailable the plugin falls back to
+    ``importlib.metadata`` to list installed packages so that
+    presence detection still works in pip-less environments
+    (e.g. PDM-managed or uv-created venvs).
     """
 
     @staticmethod
-    async def test_pip_failure_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-        """Pip list fails → empty list returned (no fallback)."""
+    async def test_pip_failure_falls_back_to_importlib(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pip list fails → importlib.metadata fallback used."""
+        importlib_json = json.dumps(
+            [
+                {'name': 'packaging', 'version': '24.0'},
+                {'name': 'pytest', 'version': '9.0.2'},
+            ]
+        )
         call_count = 0
 
-        async def run(*a: Any, **kw: Any) -> AsyncMock:
+        async def run(*args: Any, **kw: Any) -> AsyncMock:
             nonlocal call_count
             call_count += 1
-            return _fake_proc(returncode=1, stderr='pip error')
+            # First call is `python -m pip list`; second is `python -c ...`
+            if call_count == 1:
+                return _fake_proc(returncode=1, stderr='pip error')
+            return _fake_proc(stdout=importlib_json)
 
         _mock_subprocess(monkeypatch, run)
         result = await _make_env().packages()
 
-        assert call_count == 1  # only pip list attempted, no fallback
+        expected_calls = 2
+        assert call_count == expected_calls
+        assert len(result) == 2
+        assert result[0] == Package(name='packaging', version='24.0')
+
+    @staticmethod
+    async def test_both_pip_and_importlib_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+        """When both pip and importlib.metadata fail, return empty."""
+
+        async def run(*args: Any, **kw: Any) -> AsyncMock:
+            return _fake_proc(returncode=1, stderr='error')
+
+        _mock_subprocess(monkeypatch, run)
+        result = await _make_env().packages()
+
         assert result == []
 
 
