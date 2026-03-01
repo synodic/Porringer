@@ -157,7 +157,7 @@ class TestVenvWithoutPip:
 
         expected_calls = 2
         assert call_count == expected_calls
-        assert len(result) == 2
+        assert len(result) == expected_calls
         assert result[0] == Package(name='packaging', version='24.0')
 
     @staticmethod
