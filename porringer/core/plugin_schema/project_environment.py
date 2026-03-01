@@ -22,7 +22,7 @@ from pydantic import Field
 from porringer.core.plugin_schema.manifest import ManifestContributor
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
-from porringer.core.schema import Ecosystem, ManifestContribution, PluginKind, PluginParameters, PorringerModel
+from porringer.core.schema import Ecosystem, ManifestContribution, PluginKind, PorringerModel
 
 logger = logging.getLogger(__name__)
 
@@ -79,14 +79,6 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     Defaults to `"install"` (used by PDM and Poetry).
     Override to `"sync"` for tools like uv.
     """
-
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the project environment plugin.
-
-        Args:
-            parameters: Plugin parameters including distribution info
-        """
-        super().__init__(parameters)
 
     # ------------------------------------------------------------------
     # Subclass hooks

@@ -283,6 +283,13 @@ _path_lock = threading.Lock()
 def _prepend_to_path(dirs: list[str], *, require_exists: bool = False) -> None:
     """Prepend directories to ``os.environ['PATH']`` if not already present.
 
+    Mutations are **process-global** by design — ``shutil.which()``
+    and ``asyncio.create_subprocess_exec()`` inherit the process
+    environment, so every concurrent ``execute_single()`` run
+    benefits from directories added by earlier runtime resolution.
+    Additions are idempotent and append-only (directories already
+    present are skipped).
+
     Uses a lock to prevent concurrent mutations from interleaving.
 
     Args:

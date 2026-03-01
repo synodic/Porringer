@@ -5,7 +5,7 @@ from typing import override
 
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from porringer.core.schema import Package, PackageRef, PluginParameters
+from porringer.core.schema import Package, PackageRef
 
 
 class UvEnvironment(PythonEnvironment):
@@ -14,10 +14,6 @@ class UvEnvironment(PythonEnvironment):
     Provides methods to install, search, uninstall, upgrade, and list Python packages using uv
     as the backend package manager.
     """
-
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the uv environment plugin."""
-        super().__init__(parameters)
 
     def _python_args(self, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Return `['--python', '<path>']` when an override is active.

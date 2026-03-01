@@ -16,6 +16,7 @@ import importlib
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from porringer.backend.builder import Builder, PluginInformation
@@ -142,9 +143,32 @@ class _ScanCache:
 
 _cache = _ScanCache()
 
+# Callbacks invoked by ``invalidate_plugin_cache()`` so that other
+# modules (e.g. manifest contribution cache) can piggy-back on the
+# same invalidation signal without creating circular imports.
+_invalidation_hooks: list[Callable[[], None]] = []
+
+
+def register_invalidation_hook(hook: Callable[[], None]) -> None:
+    """Register a callback to be called on :func:`invalidate_plugin_cache`.
+
+    Allows modules that maintain their own scan-derived caches
+    (e.g. manifest contributions) to clear them whenever the
+    plugin cache is invalidated, without introducing circular
+    imports back into ``discovery``.
+
+    Args:
+        hook: Zero-argument callable invoked during invalidation.
+    """
+    _invalidation_hooks.append(hook)
+
 
 def invalidate_plugin_cache() -> None:
     """Clear the in-memory plugin scan cache.
+
+    Also invokes every callback registered via
+    :func:`register_invalidation_hook` so that derived caches
+    (e.g. manifest contributions) stay in sync.
 
     Call this when the process environment changes (e.g. after
     installing a new backend) so that the next
@@ -155,6 +179,8 @@ def invalidate_plugin_cache() -> None:
         _cache.proj_infos = None
         _cache.scm_infos = None
         _cache.timestamp = 0.0
+    for hook in _invalidation_hooks:
+        hook()
 
 
 def _scan_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> list[PluginInformation[T]]:

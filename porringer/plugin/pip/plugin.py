@@ -15,7 +15,7 @@ from porringer.core.plugin_schema.environment import (
 )
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from porringer.core.schema import Package, PackageRef, PluginKind, PluginParameters
+from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.schema import SetupAction, SubActionProgress
 from porringer.utility.utility import run_command
 
@@ -43,14 +43,6 @@ class PIPEnvironment(PythonEnvironment):
     This plugin can optionally use a Python runtime provider (like pim) for managing
     the underlying Python installation.
     """
-
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the pip environment plugin.
-
-        Args:
-            parameters: Plugin parameters including distribution info
-        """
-        super().__init__(parameters)
 
     @classmethod
     @override

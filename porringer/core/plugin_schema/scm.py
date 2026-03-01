@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
-from porringer.core.schema import Ecosystem, PluginKind, PluginParameters
+from porringer.core.schema import Ecosystem, PluginKind
 from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 logger = logging.getLogger(__name__)
@@ -33,14 +33,6 @@ class ScmEnvironment(ToolBasedPlugin):
     matches ``upstream`` rather than ``origin``) are handled
     automatically.
     """
-
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the SCM environment plugin.
-
-        Args:
-            parameters: Plugin parameters including distribution info.
-        """
-        super().__init__(parameters)
 
     # ------------------------------------------------------------------
     # Subclass hooks
