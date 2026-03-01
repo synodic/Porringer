@@ -285,6 +285,10 @@ class SyncCommands:
                 if event is None:
                     break
                 yield event
+            # Propagate any exception from _run() so callers see the
+            # real error instead of silently receiving an empty stream.
+            if task.done() and not task.cancelled():
+                task.result()
         finally:
             if not task.done():
                 task.cancel()

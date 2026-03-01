@@ -166,14 +166,17 @@ def register_invalidation_hook(hook: Callable[[], None]) -> None:
 def invalidate_plugin_cache() -> None:
     """Clear the in-memory plugin scan cache.
 
-    Also invokes every callback registered via
-    :func:`register_invalidation_hook` so that derived caches
-    (e.g. manifest contributions) stay in sync.
+    Also calls ``importlib.invalidate_caches()`` so that
+    distributions installed since the last scan are visible to
+    the next :func:`discover_all_plugins` call, and invokes
+    every callback registered via :func:`register_invalidation_hook`
+    so that derived caches (e.g. manifest contributions) stay
+    in sync.
 
     Call this when the process environment changes (e.g. after
-    installing a new backend) so that the next
-    :func:`discover_all_plugins` call performs a fresh scan.
+    installing a new backend).
     """
+    importlib.invalidate_caches()
     with _cache.lock:
         _cache.env_infos = None
         _cache.proj_infos = None
@@ -186,8 +189,12 @@ def invalidate_plugin_cache() -> None:
 def _scan_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> list[PluginInformation[T]]:
     """Scan entry points and return plugin metadata without instantiating.
 
-    Calls ``importlib.invalidate_caches()`` before discovery so that
-    distributions installed earlier in the same process are visible.
+    Does **not** call ``importlib.invalidate_caches()`` — that is the
+    responsibility of :func:`invalidate_plugin_cache`, which callers
+    invoke before requesting a fresh (non-cached) scan.  Keeping the
+    invalidation out of the scan path avoids a race where one thread's
+    ``invalidate_caches()`` corrupts another thread's in-flight
+    ``entry_points()`` call (observed as flaky failures on Windows CI).
 
     Args:
         group: Entry-point group suffix (e.g. ``'environment'``).
@@ -198,17 +205,16 @@ def _scan_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) ->
     Returns:
         List of plugin information objects (class + distribution metadata).
     """
-    importlib.invalidate_caches()
     return Builder.find_plugins(group, base_class, **kwargs)
 
 
 def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> dict[str, T]:
     """Discover and instantiate plugins, returning a name-keyed dict.
 
-    Calls `importlib.invalidate_caches()` before discovery so that
-    distributions installed earlier in the same process (e.g. a tool
-    backend installed via pip in Phase 2a) are visible to
-    `importlib.metadata.entry_points()`.
+    Callers that need freshly-installed distributions to be visible
+    should call :func:`invalidate_plugin_cache` first — it handles
+    ``importlib.invalidate_caches()`` so that concurrent scans are
+    never disrupted by a stale-cache flush.
 
     Args:
         group: Entry-point group suffix (e.g. `'environment'`).
