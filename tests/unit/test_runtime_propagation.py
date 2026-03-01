@@ -1,5 +1,6 @@
 """Tests for runtime propagation across phase transitions and venv scoping."""
 
+import asyncio
 import inspect
 import os
 import sys
@@ -224,7 +225,7 @@ def _make_state(
         phases=phases,
         plugins=plugins,
         parameters=SetupParameters(),
-        event_queue=None,
+        event_queue=asyncio.Queue(),
         manifest_directory=Path('.'),
         preview=preview,
     )

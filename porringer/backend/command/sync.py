@@ -23,6 +23,7 @@ from porringer.schema import (
     ManifestValidationResult,
     ProgressEvent,
     ProgressEventKind,
+    SetupActionResult,
     SetupParameters,
     SetupResults,
     SyncStrategy,
@@ -298,21 +299,42 @@ class SyncCommands:
     async def run(self, parameters: SetupParameters) -> BatchSetupResults:
         """Execute setup and return collected results.
 
+        Drains :meth:`execute_stream` internally so that there is exactly
+        one execution path.  All ``ProgressEvent`` items are consumed
+        and partitioned into a ``BatchSetupResults``.
+
         Args:
             parameters: The setup parameters (paths, dry_run, strategy, etc.).
 
         Returns:
             BatchSetupResults from execution.
         """
-        previews, failed_paths = await asyncio.to_thread(self._load_manifests, parameters)
+        manifests: list[SetupResults] = []
+        collected: list[SetupActionResult] = []
+        failed_paths: list[tuple[Path, str]] = []
 
+        async for event in self.execute_stream(parameters):
+            if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+                manifests.append(event.manifest)
+            elif event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
+                failed_paths.append(event.failed_path)
+            elif event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+                collected.append(event.result)
+
+        # Partition collected results by manifest based on action identity
+        manifest_action_sets = [set(id(a) for a in m.actions) for m in manifests]
         manifest_results: list[SetupResults] = []
-        if previews:
-            if not parameters.dry_run:
-                invalidate_plugin_cache()
-            shared_plugins = await asyncio.to_thread(discover_all_plugins, use_cache=parameters.dry_run)
-            for preview in previews:
-                sr = await execute_single(preview, parameters, plugins=shared_plugins)
-                manifest_results.append(sr)
+
+        for preview, action_ids in zip(manifests, manifest_action_sets, strict=False):
+            mr_results = [r for r in collected if id(r.action) in action_ids]
+            sr = SetupResults(
+                actions=preview.actions,
+                results=mr_results,
+                manifest_path=preview.manifest_path,
+                root_directory=preview.root_directory,
+                metadata=preview.metadata,
+                preferences=preview.preferences,
+            )
+            manifest_results.append(sr)
 
         return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)

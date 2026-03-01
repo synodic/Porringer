@@ -16,7 +16,7 @@ from porringer.core.schema import (
     PorringerModel,
 )
 from porringer.schema import SetupAction, SubActionProgress
-from porringer.utility.utility import StreamProgress, run_command, stream_command
+from porringer.utility.utility import StreamProgress, stream_command
 
 
 class PackageParameters(PorringerModel):
@@ -167,9 +167,9 @@ class Environment(ToolBasedPlugin):
     async def install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package identified by its name.
 
-        Uses a native async subprocess via `install_command()`.  When
-        `params.progress_callback` is set, output is streamed
-        line-by-line; otherwise output is collected silently.
+        Uses a native async subprocess via `install_command()`.  Output
+        is always streamed line-by-line; when `params.progress_callback`
+        is set, progress events are emitted to the caller.
 
         Subclasses only need to override this when the streaming command
         differs from `install_command()` or when post-install logic
@@ -188,16 +188,14 @@ class Environment(ToolBasedPlugin):
                 runtime_context=params.runtime_context,
             )
         )
-        if params.progress_callback is not None:
-            return await self._stream_command(args=args, params=params, phase='installing', verb='install')
-        return await self._run_command(args=args, params=params, verb='install')
+        return await self._execute_command(args=args, params=params, phase='installing', verb='install')
 
     async def upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrades the given package.
 
-        Uses a native async subprocess via `upgrade_command()`.  When
-        `params.progress_callback` is set, output is streamed
-        line-by-line; otherwise output is collected silently.
+        Uses a native async subprocess via `upgrade_command()`.  Output
+        is always streamed line-by-line; when `params.progress_callback`
+        is set, progress events are emitted to the caller.
 
         Subclasses only need to override this when the streaming command
         differs from `upgrade_command()` or when post-upgrade logic
@@ -216,16 +214,14 @@ class Environment(ToolBasedPlugin):
                 runtime_context=params.runtime_context,
             )
         )
-        if params.progress_callback is not None:
-            return await self._stream_command(args=args, params=params, phase='upgrading', verb='upgrade')
-        return await self._run_command(args=args, params=params, verb='upgrade')
+        return await self._execute_command(args=args, params=params, phase='upgrading', verb='upgrade')
 
     async def uninstall(self, params: PackageParameters) -> Package | None:
         """Asynchronously uninstalls the given package.
 
-        Uses a native async subprocess via `uninstall_command()`.  When
-        `params.progress_callback` is set, output is streamed
-        line-by-line; otherwise output is collected silently.
+        Uses a native async subprocess via `uninstall_command()`.  Output
+        is always streamed line-by-line; when `params.progress_callback`
+        is set, progress events are emitted to the caller.
 
         Subclasses only need to override this when the streaming command
         differs from `uninstall_command()` or when post-uninstall logic
@@ -240,9 +236,7 @@ class Environment(ToolBasedPlugin):
         args = list(self.uninstall_command(params.package, runtime_context=params.runtime_context))
         uninstall_logger = logging.getLogger(f'porringer.{self.tool_name()}.uninstall')
         uninstall_logger.debug('uninstall command: %s', args)
-        if params.progress_callback is not None:
-            return await self._stream_command(args=args, params=params, phase='uninstalling', verb='uninstall')
-        return await self._run_command(args=args, params=params, verb='uninstall')
+        return await self._execute_command(args=args, params=params, phase='uninstalling', verb='uninstall')
 
     # --- Helpers ----------------------------------------------------------
 
@@ -260,41 +254,7 @@ class Environment(ToolBasedPlugin):
             package=package,
         )
 
-    async def _run_command(
-        self,
-        *,
-        args: list[str],
-        params: PackageParameters,
-        verb: str,
-    ) -> Package | None:
-        """Run *args* as a native async subprocess without streaming.
-
-        Provides a truly non-blocking async subprocess execution path.
-
-        Args:
-            args: Command and arguments to run.
-            params: Package parameters.
-            verb: Human-readable verb for log messages (e.g. `"install"`).
-
-        Returns:
-            The installed/upgraded package, or `None` on failure.
-        """
-        logger = logging.getLogger(f'porringer.{self.tool_name()}.{verb}')
-        try:
-            result = await run_command(args)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except FileNotFoundError:
-            logger.error(f'{self.tool_name()} not found')
-            return None
-        except Exception as e:
-            logger.error(f'Failed to {verb} {params.package.name}: {e}')
-            return None
-        return Package(name=params.package.name, version=None)
-
-    async def _stream_command(
+    async def _execute_command(
         self,
         *,
         args: list[str],
@@ -302,32 +262,33 @@ class Environment(ToolBasedPlugin):
         phase: str,
         verb: str,
     ) -> Package | None:
-        """Run *args* with line-by-line streaming and standard error handling.
+        """Run *args* as an async subprocess with line-by-line streaming.
 
-        Constructs the `SetupAction` automatically from plugin
-        metadata and delegates to `stream_command()`.
+        When ``params.progress_callback`` is set, progress events are
+        emitted to the caller.  When it is ``None``, output is still
+        collected via streaming but no progress events are emitted.
 
         Args:
             args: Command and arguments to run.
-            params: Package parameters (must have `progress_callback` set).
-            phase: Phase label for progress events (e.g. `"installing"`).
-            verb: Human-readable verb for log messages (e.g. `"install"`).
+            params: Package parameters.
+            phase: Phase label for progress events (e.g. ``"installing"``).
+            verb: Human-readable verb for log messages (e.g. ``"install"``).
 
         Returns:
-            The installed/upgraded package, or `None` on failure.
+            The installed/upgraded package, or ``None`` on failure.
         """
-        assert params.progress_callback is not None
         logger = logging.getLogger(f'porringer.{self.tool_name()}.{verb}')
         action = self._build_action(
             description=f'{verb.capitalize()} {params.package.specifier}',
             package=params.package,
         )
+        callback = params.progress_callback if params.progress_callback is not None else lambda _: None
         try:
             result = await stream_command(
                 args,
                 progress=StreamProgress(
                     action=action,
-                    callback=params.progress_callback,
+                    callback=callback,
                     phase=phase,
                 ),
             )

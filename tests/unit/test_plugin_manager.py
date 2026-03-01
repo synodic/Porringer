@@ -1,5 +1,6 @@
 """Tests for the PluginManager protocol and native plugin management routing."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from packaging.version import Version
@@ -274,7 +275,7 @@ class TestPluginAddRouting:
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(action, {}, SyncStrategy.MINIMAL, None, context)
+        result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert result.message is not None
         assert 'native' in result.message.lower()
@@ -293,7 +294,7 @@ class TestPluginAddRouting:
             plugin_target=PackageRef.model_validate('pdm'),
         )
 
-        result = await execute_package(action, {}, SyncStrategy.MINIMAL)
+        result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue())
         assert result.success is False
         assert result.message is not None
         assert 'No PluginManager found' in result.message
@@ -544,7 +545,7 @@ class TestExecutePackagePluginPresence:
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
@@ -557,7 +558,7 @@ class TestExecutePackagePluginPresence:
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert result.skipped is not True
         assert len(mock_pm.operations) == 1
@@ -897,7 +898,7 @@ class TestPluginUpgradeRouting:
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'update'
@@ -910,7 +911,7 @@ class TestPluginUpgradeRouting:
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'add'
@@ -922,7 +923,7 @@ class TestPluginUpgradeRouting:
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'add'

@@ -230,7 +230,7 @@ class TestDryRunConcurrencyBounding:
             results = await _dry_run_package_actions(
                 actions,
                 environments,
-                None,
+                asyncio.Queue(),
                 parameters=params,
             )
 
@@ -261,7 +261,7 @@ class TestDryRunConcurrencyBounding:
             results = await _dry_run_package_actions(
                 actions,
                 environments,
-                None,
+                asyncio.Queue(),
                 parameters=params,
             )
 
@@ -344,7 +344,7 @@ class TestSharedHttpClient:
             await _dry_run_package_actions(
                 actions,
                 environments,
-                None,
+                asyncio.Queue(),
                 parameters=params,
             )
 
