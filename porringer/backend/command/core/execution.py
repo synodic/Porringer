@@ -1594,7 +1594,7 @@ async def _execute_project_sync(
             phase='sync',
         )
 
-        cmd_result = await stream_command(args, progress=progress, timeout=300.0)
+        cmd_result = await stream_command(args, progress=progress, cwd=effective_dir, timeout=300.0)
         success = cmd_result.returncode == 0
 
         if success:
