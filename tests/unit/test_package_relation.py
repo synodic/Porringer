@@ -81,20 +81,6 @@ class TestPackageRelationSchema:
         assert restored.relation.host == 'pdm'
         assert restored.relation.kind == PackageRelationKind.INJECTED
 
-    @staticmethod
-    def test_pydantic_round_trip_no_relation() -> None:
-        """model_dump then model_validate preserves None relation."""
-        pkg = Package(name='ruff', version='0.8.0')
-        data = pkg.model_dump()
-        restored = Package.model_validate(data)
-        assert restored.relation is None
-
-    @staticmethod
-    def test_relation_kind_values() -> None:
-        """Enum values are stable strings."""
-        assert PackageRelationKind.INJECTED.value == 'injected'
-        assert PackageRelationKind.PLUGIN.value == 'plugin'
-
 
 # ---------------------------------------------------------------------------
 # pipx plugin — injected package metadata

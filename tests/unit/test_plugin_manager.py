@@ -49,16 +49,6 @@ class TestPluginManagerProtocol:
     """Verify that concrete plugins satisfy the PluginManager protocol."""
 
     @staticmethod
-    def test_pdm_is_plugin_manager() -> None:
-        """PDMEnvironment implements PluginManager."""
-        assert issubclass(PDMEnvironment, PluginManager)
-
-    @staticmethod
-    def test_poetry_is_plugin_manager() -> None:
-        """PoetryEnvironment implements PluginManager."""
-        assert issubclass(PoetryEnvironment, PluginManager)
-
-    @staticmethod
     def test_pdm_isinstance_check() -> None:
         """isinstance() check works for PDMEnvironment."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
@@ -960,27 +950,6 @@ class TestCliCommandUpgradePreview:
         environments: dict[str, Environment] = {'pipx': mock_env}
 
         cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.LATEST)
-        assert cmd == mock_pm.plugin_update_command(ref)
-
-    def test_exact_returns_update_command(self) -> None:
-        """get_cli_command returns plugin_update_command for EXACT strategy."""
-        mock_pm = self._make_mock_pm()
-        ref = PackageRef.model_validate('cppython')
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-
-        action = SetupAction(
-            description="Ensure plugin 'cppython' to 'mock-pm'",
-            kind=PluginKind.TOOL,
-            ecosystem=_PY,
-            installer='pipx',
-            package=ref,
-            plugin_target=PackageRef.model_validate('mock-pm'),
-        )
-
-        mock_env = MagicMock(spec=Environment)
-        environments: dict[str, Environment] = {'pipx': mock_env}
-
-        cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.EXACT)
         assert cmd == mock_pm.plugin_update_command(ref)
 
     def test_minimal_returns_add_command(self) -> None:

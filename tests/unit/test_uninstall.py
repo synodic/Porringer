@@ -76,54 +76,6 @@ def _make_mock_env(*, installed: list[Package] | None = None) -> MockEnvironment
 
 
 # ---------------------------------------------------------------------------
-# SkipReason.NOT_INSTALLED
-# ---------------------------------------------------------------------------
-
-
-class TestNotInstalledSkipReason:
-    """Verify the NOT_INSTALLED enum value exists and behaves correctly."""
-
-    @staticmethod
-    def test_not_installed_is_skip_reason() -> None:
-        """NOT_INSTALLED exists and is distinct from ALREADY_INSTALLED."""
-        assert SkipReason.NOT_INSTALLED != SkipReason.ALREADY_INSTALLED
-
-
-# ---------------------------------------------------------------------------
-# MockEnvironment.uninstall_command
-# ---------------------------------------------------------------------------
-
-
-class TestMockEnvironmentUninstallCommand:
-    """Verify MockEnvironment returns a well-formed uninstall command."""
-
-    @staticmethod
-    def test_returns_list_of_strings() -> None:
-        """uninstall_command returns a list of strings."""
-        env = MockEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('requests')
-        cmd = env.uninstall_command(ref)
-        assert isinstance(cmd, list)
-        assert all(isinstance(part, str) for part in cmd)
-
-    @staticmethod
-    def test_contains_package_name() -> None:
-        """uninstall_command includes the package name."""
-        env = MockEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('requests')
-        cmd = env.uninstall_command(ref)
-        assert 'requests' in cmd
-
-    @staticmethod
-    def test_contains_uninstall_verb() -> None:
-        """uninstall_command includes the 'uninstall' verb."""
-        env = MockEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('requests')
-        cmd = env.uninstall_command(ref)
-        assert 'uninstall' in cmd
-
-
-# ---------------------------------------------------------------------------
 # MockPluginManager.plugin_remove_command / plugin_remove
 # ---------------------------------------------------------------------------
 

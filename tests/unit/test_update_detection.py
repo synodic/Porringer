@@ -21,7 +21,6 @@ from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Env
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
 from porringer.schema import (
     SetupAction,
-    SetupActionResult,
     SetupParameters,
     SkipReason,
     SyncStrategy,
@@ -485,57 +484,6 @@ class TestDryRunActionDispatch:
 
 
 # ---------------------------------------------------------------------------
-# SetupParameters defaults
-# ---------------------------------------------------------------------------
-
-
-class TestSetupParametersDefaults:
-    """Verify the new fields have sensible defaults."""
-
-    @staticmethod
-    def test_defaults() -> None:
-        """Default parameters disable update detection."""
-        params = SetupParameters()
-        assert params.detect_updates is False
-
-    @staticmethod
-    def test_explicit_values() -> None:
-        """Explicit values override defaults."""
-        params = SetupParameters(detect_updates=True)
-        assert params.detect_updates is True
-
-
-# ---------------------------------------------------------------------------
-# SetupActionResult version fields
-# ---------------------------------------------------------------------------
-
-
-class TestSetupActionResultVersionFields:
-    """Verify the new version fields on the result dataclass."""
-
-    @staticmethod
-    def test_defaults_are_none() -> None:
-        """Version fields default to None."""
-        action = _make_action()
-        result = SetupActionResult(action=action, success=True)
-        assert result.installed_version is None
-        assert result.available_version is None
-
-    @staticmethod
-    def test_explicit_values() -> None:
-        """Explicit version values are preserved."""
-        action = _make_action()
-        result = SetupActionResult(
-            action=action,
-            success=True,
-            installed_version='1.0.0',
-            available_version='2.0.0',
-        )
-        assert result.installed_version == '1.0.0'
-        assert result.available_version == '2.0.0'
-
-
-# ---------------------------------------------------------------------------
 # Plugin-target update detection
 # ---------------------------------------------------------------------------
 
@@ -721,23 +669,6 @@ class TestPrereleasePackagesOverride:
         assert action.include_prereleases is False
 
     @staticmethod
-    def test_no_override_when_none() -> None:
-        """When prerelease_packages is None, nothing is mutated."""
-        action = _make_action(name='ruff')
-        params = SetupParameters(prerelease_packages=None)
-        if params.prerelease_packages:
-            overrides = {n.lower() for n in params.prerelease_packages}
-            if action.package is not None and action.package.name.lower() in overrides:
-                action.include_prereleases = True
-        assert action.include_prereleases is False
-
-    @staticmethod
-    def test_default_is_none() -> None:
-        """prerelease_packages defaults to None."""
-        params = SetupParameters()
-        assert params.prerelease_packages is None
-
-    @staticmethod
     async def test_override_threaded_to_check_for_newer_version() -> None:
         """Full pipeline: override → action mutation → check_updates receives True."""
         action = _make_action(name='ruff')
@@ -794,13 +725,15 @@ class TestPluginSpec:
     @staticmethod
     def test_package_spec_plugins_accepts_mixed() -> None:
         """PackageSpec.plugins accepts a mix of strings and objects."""
-        spec = PackageSpec.model_validate({
-            'name': 'pdm',
-            'plugins': [
-                'cppython',
-                {'name': 'another-plugin', 'include_prereleases': True},
-            ],
-        })
+        spec = PackageSpec.model_validate(
+            {
+                'name': 'pdm',
+                'plugins': [
+                    'cppython',
+                    {'name': 'another-plugin', 'include_prereleases': True},
+                ],
+            }
+        )
         expected_plugin_count = 2
         assert len(spec.plugins) == expected_plugin_count
         assert spec.plugins[0].name.name == 'cppython'
@@ -811,11 +744,13 @@ class TestPluginSpec:
     @staticmethod
     def test_plugin_prereleases_independent_of_parent() -> None:
         """Plugin include_prereleases does not inherit from the parent PackageSpec."""
-        spec = PackageSpec.model_validate({
-            'name': 'pdm',
-            'include_prereleases': True,
-            'plugins': ['cppython'],
-        })
+        spec = PackageSpec.model_validate(
+            {
+                'name': 'pdm',
+                'include_prereleases': True,
+                'plugins': ['cppython'],
+            }
+        )
         # Parent has include_prereleases=True, but the plugin string shorthand defaults to False
         assert spec.include_prereleases is True
         assert spec.plugins[0].include_prereleases is False

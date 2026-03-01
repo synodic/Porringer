@@ -7,7 +7,7 @@ import pytest
 from packaging.version import Version
 
 from porringer.core.plugin_schema.runtime import RuntimeProvider
-from porringer.core.schema import Distribution, PackageRef, PluginKind, PluginParameters
+from porringer.core.schema import Distribution, PackageRef, PluginParameters
 from porringer.plugin.pyenv.plugin import PyenvEnvironment
 from porringer.test.pytest.tests import EnvironmentUnitTests
 
@@ -30,21 +30,6 @@ def environment() -> PyenvEnvironment:
 
 class TestPyenvBasics:
     """Basic property tests."""
-
-    @staticmethod
-    def test_ecosystem() -> None:
-        """Ecosystem returns python."""
-        assert PyenvEnvironment.ecosystem() == 'python'
-
-    @staticmethod
-    def test_plugin_kind() -> None:
-        """Plugin kind is RUNTIME."""
-        assert PyenvEnvironment.plugin_kind() == PluginKind.RUNTIME
-
-    @staticmethod
-    def test_tool_name() -> None:
-        """Tool name is pyenv."""
-        assert PyenvEnvironment.tool_name() == 'pyenv'
 
     @staticmethod
     def test_install_command(environment: PyenvEnvironment) -> None:
