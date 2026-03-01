@@ -152,10 +152,13 @@ class ExecutionState:
         """Refresh PATH and re-discover all plugin types.
 
         Invalidates the plugin cache, re-discovers environments,
-        project environments, and SCM environments.  The
-        ``runtime_context`` is *not* re-applied to plugin instances
-        because plugins are now stateless — the context is threaded
-        explicitly through every operation.
+        project environments, and SCM environments.
+
+        ``discover_all_plugins()`` always returns fresh instances
+        (scan metadata is cached, instances are not), and ``.copy()``
+        mints another fresh set for this execution state.
+        ``runtime_context`` is *not* baked into plugin instances —
+        it is threaded explicitly through every operation.
         """
         refresh_path()
         invalidate_plugin_cache()
@@ -1270,9 +1273,9 @@ async def execute_single(
     state = ExecutionState(
         actions=actions,
         phases=group_actions_by_phase(actions),
-        # Shallow-copy the plugin dicts so that callers sharing the
-        # same DiscoveredPlugins object are not affected by any
-        # per-run dict mutations (e.g. deferred resolution).
+        # .copy() builds fresh plugin instances (when factory metadata
+        # is present) so that accidental state on a plugin object
+        # cannot leak between runs or back to the caller.
         plugins=plugins.copy(),
         parameters=parameters,
         event_queue=event_queue,

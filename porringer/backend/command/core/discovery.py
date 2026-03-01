@@ -4,6 +4,12 @@ Provides `discover_plugins` which wraps entry-point discovery and
 instantiation into a single canonical-name-keyed dict.  Extracted from
 the sync module so that both `manifest` and `execution` can import
 it without circular dependencies.
+
+Plugin *scan* results (the ``PluginInformation`` metadata returned by
+``Builder.find_plugins()``) are cached so that repeatedly calling
+``discover_all_plugins()`` does not re-scan entry points.  Plugin
+*instances* are created fresh on every call so that accidentally
+mutated state on a plugin object cannot leak between API calls.
 """
 
 import importlib
@@ -12,7 +18,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from porringer.backend.builder import Builder
+from porringer.backend.builder import Builder, PluginInformation
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
@@ -26,13 +32,24 @@ class DiscoveredPlugins:
     """Result of discovering all three plugin groups at once.
 
     Provides :attr:`all_plugins` for a merged view and :meth:`copy`
-    for shallow-copying the dict fields (used by the execution engine
-    to prevent mutation from leaking back to callers).
+    for creating an independent set of plugin instances.
+
+    When the optional ``_*_infos`` fields are populated (the normal
+    production path), :meth:`copy` constructs **fresh** plugin objects
+    from the stored metadata so that per-run mutation cannot leak
+    between callers.  When infos are absent (the test convenience
+    path), :meth:`copy` shallow-copies the dict containers instead.
     """
 
     environments: dict[str, Environment]
     project_environments: dict[str, ProjectEnvironment]
     scm_environments: dict[str, ScmEnvironment]
+
+    # Optional factory metadata — populated by production discovery,
+    # omitted by test helpers that construct instances directly.
+    _env_infos: list[PluginInformation[Environment]] | None = field(default=None, repr=False)
+    _proj_infos: list[PluginInformation[ProjectEnvironment]] | None = field(default=None, repr=False)
+    _scm_infos: list[PluginInformation[ScmEnvironment]] | None = field(default=None, repr=False)
 
     @property
     def all_plugins(self) -> dict[str, Environment | ProjectEnvironment | ScmEnvironment]:
@@ -40,14 +57,20 @@ class DiscoveredPlugins:
         return {**self.environments, **self.project_environments, **self.scm_environments}
 
     def copy(self) -> DiscoveredPlugins:
-        """Return a shallow copy with independent dict instances.
+        """Return an independent copy with freshly constructed plugin instances.
 
-        Plugin objects themselves are shared; only the dict containers
-        are duplicated so that per-run dict mutations (e.g. deferred
-        action resolution adding new keys) don't leak back to the
-        shared cache.  Plugin instances are stateless with respect to
-        runtime configuration, so sharing them is safe.
+        When factory metadata (``_*_infos``) is available, every plugin
+        is re-instantiated so that accidental mutable state on an
+        instance cannot leak between execution runs.  The cheap
+        ``__init__`` (sets one field) makes this negligible compared
+        to the entry-point scan that produced the infos.
+
+        When infos are absent (e.g. hand-built ``DiscoveredPlugins``
+        in tests), the dict containers are shallow-copied and plugin
+        instances are shared — identical to the pre-factory behaviour.
         """
+        if self._env_infos is not None and self._proj_infos is not None and self._scm_infos is not None:
+            return _build_from_infos(self._env_infos, self._proj_infos, self._scm_infos)
         return DiscoveredPlugins(
             environments=dict(self.environments),
             project_environments=dict(self.project_environments),
@@ -55,35 +78,102 @@ class DiscoveredPlugins:
         )
 
 
+def _build_instances[T: Plugin](infos: list[PluginInformation[T]]) -> dict[str, T]:
+    """Build a name-keyed dict of fresh plugin instances from scan metadata.
+
+    Args:
+        infos: Plugin information list from ``Builder.find_plugins()``.
+
+    Returns:
+        Dict mapping canonical plugin name to a new plugin instance.
+    """
+    instances = Builder.build_plugins(infos)
+    return {info.name: inst for info, inst in zip(infos, instances, strict=True)}
+
+
+def _build_from_infos(
+    env_infos: list[PluginInformation[Environment]],
+    proj_infos: list[PluginInformation[ProjectEnvironment]],
+    scm_infos: list[PluginInformation[ScmEnvironment]],
+) -> DiscoveredPlugins:
+    """Construct a ``DiscoveredPlugins`` with fresh instances from cached scan metadata.
+
+    Args:
+        env_infos: Environment plugin scan results.
+        proj_infos: Project-environment plugin scan results.
+        scm_infos: SCM-environment plugin scan results.
+
+    Returns:
+        A fully populated ``DiscoveredPlugins`` carrying both
+        instances and their factory metadata.
+    """
+    return DiscoveredPlugins(
+        environments=_build_instances(env_infos),
+        project_environments=_build_instances(proj_infos),
+        scm_environments=_build_instances(scm_infos),
+        _env_infos=env_infos,
+        _proj_infos=proj_infos,
+        _scm_infos=scm_infos,
+    )
+
+
 # ---------------------------------------------------------------------------
-# Plugin cache
+# Plugin cache — stores scan metadata, not instances
 # ---------------------------------------------------------------------------
 
 CACHE_TTL: float = 30.0  # seconds
 
 
 @dataclass(slots=True)
-class _PluginCache:
-    """Mutable container for the in-memory plugin cache."""
+class _ScanCache:
+    """Mutable container for cached entry-point scan results.
 
-    plugins: DiscoveredPlugins | None = None
+    Only the lightweight ``PluginInformation`` lists are stored —
+    plugin instances are constructed fresh on every
+    :func:`discover_all_plugins` call.
+    """
+
+    env_infos: list[PluginInformation[Environment]] | None = None
+    proj_infos: list[PluginInformation[ProjectEnvironment]] | None = None
+    scm_infos: list[PluginInformation[ScmEnvironment]] | None = None
     timestamp: float = 0.0
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
-_cache = _PluginCache()
+_cache = _ScanCache()
 
 
 def invalidate_plugin_cache() -> None:
-    """Clear the in-memory plugin cache.
+    """Clear the in-memory plugin scan cache.
 
     Call this when the process environment changes (e.g. after
     installing a new backend) so that the next
     :func:`discover_all_plugins` call performs a fresh scan.
     """
     with _cache.lock:
-        _cache.plugins = None
+        _cache.env_infos = None
+        _cache.proj_infos = None
+        _cache.scm_infos = None
         _cache.timestamp = 0.0
+
+
+def _scan_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> list[PluginInformation[T]]:
+    """Scan entry points and return plugin metadata without instantiating.
+
+    Calls ``importlib.invalidate_caches()`` before discovery so that
+    distributions installed earlier in the same process are visible.
+
+    Args:
+        group: Entry-point group suffix (e.g. ``'environment'``).
+        base_class: Expected base class for the plugins.
+        **kwargs: Forwarded to ``Builder.find_plugins()``
+            (e.g. ``check_dependencies=True``).
+
+    Returns:
+        List of plugin information objects (class + distribution metadata).
+    """
+    importlib.invalidate_caches()
+    return Builder.find_plugins(group, base_class, **kwargs)
 
 
 def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> dict[str, T]:
@@ -103,12 +193,8 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
     Returns:
         Dict mapping canonical plugin name to instantiated plugin.
     """
-    # Ensure newly-installed distributions are visible to the metadata API.
-    importlib.invalidate_caches()
-
-    infos = Builder.find_plugins(group, base_class, **kwargs)
-    instances = Builder.build_plugins(infos)
-    result = {info.name: inst for info, inst in zip(infos, instances, strict=True)}
+    infos = _scan_plugins(group, base_class, **kwargs)
+    result = _build_instances(infos)
     logger.info('Discovered %d %s plugin(s): %s', len(result), group, sorted(result))
     return result
 
@@ -116,31 +202,37 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
 def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
     """Discover all three plugin groups in one call.
 
-    Convenience wrapper that discovers environments (with dependency
-    checking), project environments, and SCM environments, returning
-    them as a :class:`DiscoveredPlugins` named tuple.
+    The expensive entry-point scan is cached for :data:`CACHE_TTL`
+    seconds.  Plugin *instances* are always constructed fresh so that
+    accidentally mutated state cannot leak between API calls.
 
     Args:
-        use_cache: When ``True``, return a cached result if one exists
-            and is younger than :data:`CACHE_TTL` seconds.  Callers
-            on the hot path (preview, dry-run) set this to ``True``.
-            Callers that need freshness after installing packages
-            (execution phase transitions) leave it ``False``.
+        use_cache: When ``True``, reuse cached scan results if they
+            exist and are younger than :data:`CACHE_TTL` seconds.
+            Callers on the hot path (preview, dry-run) set this to
+            ``True``.  Callers that need freshness after installing
+            packages (execution phase transitions) leave it ``False``.
 
     Returns:
-        A ``DiscoveredPlugins`` with ``environments``,
-        ``project_environments``, and ``scm_environments``.
+        A ``DiscoveredPlugins`` with fresh plugin instances and
+        the scan metadata needed for subsequent :meth:`copy` calls.
     """
     with _cache.lock:
-        if use_cache and _cache.plugins is not None and (time.monotonic() - _cache.timestamp) < CACHE_TTL:
-            logger.debug('Plugin cache hit')
-            return _cache.plugins
+        if (
+            use_cache
+            and _cache.env_infos is not None
+            and _cache.proj_infos is not None
+            and _cache.scm_infos is not None
+            and (time.monotonic() - _cache.timestamp) < CACHE_TTL
+        ):
+            logger.debug('Plugin scan cache hit — building fresh instances')
+            return _build_from_infos(_cache.env_infos, _cache.proj_infos, _cache.scm_infos)
 
-    result = DiscoveredPlugins(
-        environments=discover_plugins('environment', Environment, check_dependencies=True),
-        project_environments=discover_plugins('project_environment', ProjectEnvironment),
-        scm_environments=discover_plugins('scm', ScmEnvironment),
-    )
+    env_infos = _scan_plugins('environment', Environment, check_dependencies=True)
+    proj_infos = _scan_plugins('project_environment', ProjectEnvironment)
+    scm_infos = _scan_plugins('scm', ScmEnvironment)
+
+    result = _build_from_infos(env_infos, proj_infos, scm_infos)
     logger.info(
         'Plugin discovery complete — environments: %s, project: %s, scm: %s',
         sorted(result.environments),
@@ -149,7 +241,9 @@ def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
     )
 
     with _cache.lock:
-        _cache.plugins = result
+        _cache.env_infos = env_infos
+        _cache.proj_infos = proj_infos
+        _cache.scm_infos = scm_infos
         _cache.timestamp = time.monotonic()
 
     return result

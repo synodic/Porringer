@@ -371,14 +371,22 @@ class TestCacheMutationRegression:
     """Regression test for the cache mutation bug.
 
     Previously ``_propagate_runtime`` wrote ``runtime_executable``
-    directly onto plugin instances.  Because ``DiscoveredPlugins`` is
-    cached at module level and ``copy()`` is shallow, a second
-    ``ExecutionState`` that re-uses the cached plugins would inherit
+    directly onto plugin instances.  Because ``DiscoveredPlugins`` was
+    cached at module level and ``copy()`` was shallow, a second
+    ``ExecutionState`` that re-used the cached plugins would inherit
     stale runtime state.
 
-    After the ``RuntimeContext`` refactor, plugins are stateless —
-    runtime state lives exclusively on ``ExecutionState.runtime_context``.
-    These tests prove that shared plugin instances are safe.
+    The bug is now prevented at two levels:
+
+    1. **RuntimeContext refactor** — runtime state lives exclusively
+       on ``ExecutionState.runtime_context``, never on plugin objects.
+    2. **Factory pattern** — the plugin scan cache stores only
+       lightweight ``PluginInformation`` metadata;
+       ``DiscoveredPlugins.copy()`` creates fresh plugin instances,
+       so accidental mutable state on a plugin can never leak
+       between execution runs.
+
+    These tests prove both guarantees hold.
     """
 
     @staticmethod
