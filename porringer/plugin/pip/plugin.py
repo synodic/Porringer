@@ -55,16 +55,15 @@ class PIPEnvironment(PythonEnvironment):
     def is_available(cls) -> bool:
         """Checks if pip is usable.
 
-        Pip can be invoked either as a standalone `pip` executable or
-        via `python -m pip`.  A standalone `pip` may be absent in
-        uv-created virtual environments even though `python -m pip`
-        works perfectly.  This override accepts either form so that the
-        plugin is not incorrectly reported as unavailable.
+        Requires the ``pip`` executable to be on PATH.  Environments
+        that only have ``python`` (e.g. uv-created virtual
+        environments without pip) should use the ``uv`` plugin
+        instead.
 
         Returns:
-            True if `pip` or `python` is found on PATH, False otherwise.
+            True if ``pip`` is found on PATH, False otherwise.
         """
-        return shutil.which('pip') is not None or shutil.which('python') is not None
+        return shutil.which('pip') is not None
 
     @override
     def install_command(
@@ -412,12 +411,9 @@ class PIPEnvironment(PythonEnvironment):
         if packages is not None:
             return packages
 
-        # Fallback: importlib.metadata (works without pip module installed)
-        logger.warning('pip module unavailable for %s, falling back to importlib.metadata', effective_python)
-        packages = await self._list_packages_via_importlib(logger, effective_python)
-        if packages is not None:
-            return packages
-
+        # pip module is unavailable — the pip plugin cannot operate
+        # (install, upgrade, or uninstall) without it.
+        logger.warning('pip module unavailable for %s; returning empty package list', effective_python)
         return []
 
     @staticmethod
@@ -458,49 +454,3 @@ class PIPEnvironment(PythonEnvironment):
         except FileNotFoundError:
             logger.warning('Python not found on PATH; cannot list pip packages')
             return []
-
-    @staticmethod
-    async def _list_packages_via_importlib(logger: logging.Logger, python: str = 'python') -> list[Package] | None:
-        """List packages using `importlib.metadata` via subprocess.
-
-        This fallback works in any Python environment, even when the pip
-        module is not installed (e.g. uv-created virtual environments).
-
-        Args:
-            logger: Logger instance.
-            python: Python interpreter command or path.
-
-        Returns:
-            A list of packages, or `None` on failure.
-        """
-        script = (
-            'import json, importlib.metadata; '
-            'print(json.dumps([{"name": d.metadata.get("Name"), "version": d.version} '
-            'for d in importlib.metadata.distributions() '
-            'if d.metadata.get("Name") is not None]))'
-        )
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                python,
-                '-c',
-                script,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode != 0:
-                logger.warning('importlib.metadata fallback failed')
-                return None
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
-            entries: list[dict[str, str]] = json.loads(stdout)
-            return [
-                Package(name=entry['name'], version=entry.get('version'))
-                for entry in entries
-                if entry.get('name') is not None
-            ]
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.warning(f'Failed to parse importlib.metadata output: {e}')
-            return None
-        except FileNotFoundError:
-            logger.warning('Python not found on PATH; cannot list packages')
-            return None

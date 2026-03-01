@@ -16,7 +16,7 @@ from packaging.version import Version
 
 from porringer.backend.command.core.action_builder import get_uninstall_cli_command
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from porringer.backend.command.core.execution import PluginContext, execute_uninstall
+from porringer.backend.command.core.execution import execute_uninstall
 from porringer.backend.command.core.resolution import (
     OperationKind,
     ResolutionContext,
@@ -307,7 +307,7 @@ class TestExecuteUninstall:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=proj_envs)
+        context = ResolutionContext(project_environments=proj_envs)
 
         result = await execute_uninstall(action, {}, None, context)
         assert result.success is True
@@ -320,7 +320,7 @@ class TestExecuteUninstall:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=proj_envs)
+        context = ResolutionContext(project_environments=proj_envs)
 
         result = await execute_uninstall(action, {}, None, context)
         assert result.skipped is True

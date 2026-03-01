@@ -40,6 +40,7 @@ class StreamProgress(NamedTuple):
 async def run_command(
     args: list[str],
     *,
+    cwd: str | os.PathLike[str] | None = None,
     timeout: float | None = None,
     cancellation_check: asyncio.Event | None = None,
 ) -> CommandResult:
@@ -50,6 +51,7 @@ async def run_command(
 
     Args:
         args: Command and arguments to run.
+        cwd: Optional working directory for the subprocess.
         timeout: Optional timeout in seconds.
         cancellation_check: Optional Event that, when set, triggers cancellation.
 
@@ -65,6 +67,7 @@ async def run_command(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
     )
 
     async def communicate_or_cancel() -> tuple[bytes, bytes]:
@@ -113,6 +116,7 @@ async def stream_command(
     args: list[str],
     *,
     progress: StreamProgress,
+    cwd: str | os.PathLike[str] | None = None,
     timeout: float | None = None,
     cancellation_check: asyncio.Event | None = None,
 ) -> CommandResult:
@@ -125,6 +129,7 @@ async def stream_command(
     Args:
         args: Command and arguments to run.
         progress: Streaming progress configuration (action, callback, phase).
+        cwd: Optional working directory for the subprocess.
         timeout: Optional timeout in seconds.
         cancellation_check: Optional Event that, when set, triggers cancellation.
 
@@ -140,6 +145,7 @@ async def stream_command(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
     )
 
     stdout_lines: list[str] = []

@@ -6,7 +6,7 @@ from packaging.version import Version
 
 from porringer.backend.command.core.action_builder import get_cli_command
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from porringer.backend.command.core.execution import PluginContext, execute_package
+from porringer.backend.command.core.execution import execute_package
 from porringer.backend.command.core.presence import dry_run_action
 from porringer.backend.command.core.resolution import OperationKind, ResolutionContext, resolve_operation
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
@@ -272,7 +272,7 @@ class TestPluginAddRouting:
         )
 
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(action, {}, SyncStrategy.MINIMAL, None, context)
         assert result.success is True
@@ -465,7 +465,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=project_environments,
+            context=ResolutionContext(project_environments=project_environments),
         )
 
         assert result.skipped is True
@@ -478,7 +478,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=project_environments,
+            context=ResolutionContext(project_environments=project_environments),
         )
 
         assert result.skipped is not True
@@ -490,7 +490,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=None,
+            context=None,
         )
 
         assert result.skipped is not True
@@ -505,7 +505,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=project_environments,
+            context=ResolutionContext(project_environments=project_environments),
             parameters=params,
         )
 
@@ -521,7 +521,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=project_environments,
+            context=ResolutionContext(project_environments=project_environments),
             parameters=params,
         )
 
@@ -542,7 +542,7 @@ class TestExecutePackagePluginPresence:
         """execute_package skips plugin-target action when already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
         assert result.success is True
@@ -555,7 +555,7 @@ class TestExecutePackagePluginPresence:
         """execute_package installs plugin when not already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
         assert result.success is True
@@ -895,7 +895,7 @@ class TestPluginUpgradeRouting:
         """execute_package with LATEST calls plugin_update for installed plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
         assert result.success is True
@@ -908,7 +908,7 @@ class TestPluginUpgradeRouting:
         """execute_package with LATEST calls plugin_add for missing plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
         assert result.success is True
@@ -920,7 +920,7 @@ class TestPluginUpgradeRouting:
         """execute_package with MINIMAL uses plugin_add for new plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
         assert result.success is True

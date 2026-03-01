@@ -7,10 +7,7 @@ skip redundant operations.
 import logging
 from pathlib import Path
 
-import httpx
-
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import PluginKind
 from porringer.schema import (
@@ -22,7 +19,7 @@ from porringer.schema import (
 )
 from porringer.schema.execution import CloneStatus, CloneStatusKind
 
-from .resolution import PackageCache, ResolutionContext, resolve_operation, resolved_to_result
+from .resolution import ResolutionContext, resolve_operation, resolved_to_result
 
 __all__ = ['dry_run_action', 'clone_status_to_result']
 
@@ -33,13 +30,10 @@ async def dry_run_action(
     action: SetupAction,
     environments: dict[str, Environment],
     *,
-    project_path: Path | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    context: ResolutionContext | None = None,
     scm_environments: dict[str, ScmEnvironment] | None = None,
     working_dir: Path | None = None,
     parameters: SetupParameters | None = None,
-    http_client: httpx.AsyncClient | None = None,
-    package_cache: PackageCache | None = None,
 ) -> SetupActionResult:
     """Simulate executing an action in dry-run mode (async).
 
@@ -57,21 +51,15 @@ async def dry_run_action(
     Args:
         action: The action to simulate.
         environments: Dict of instantiated environment plugins.
-        project_path: Optional project directory for scoped package queries.
-        project_environments: Optional dict of project-environment
-            plugins, used to look up ``PluginManager`` instances for
-            plugin-target presence checks.
+        context: Optional resolution context providing runtime paths,
+            project-environment references, HTTP client, and package
+            cache for presence detection.
         scm_environments: Optional dict of SCM-environment plugins,
             used for SCM clone presence detection.
         working_dir: Working directory (manifest location) for SCM checks.
         parameters: Full setup parameters.  When provided, ``strategy``
             and ``detect_updates`` are read from it.  When ``None``,
             ``SyncStrategy.MINIMAL`` is used.
-        http_client: Shared ``httpx.AsyncClient`` for connection pooling.
-            When ``None``, each update check creates its own client.
-        package_cache: Optional shared cache for ``packages()`` results.
-            When set, concurrent dry-run checks share a single query
-            per installer instead of each task querying independently.
 
     Returns:
         The simulated result.
@@ -81,11 +69,8 @@ async def dry_run_action(
             return await _dry_run_package_action(
                 action,
                 environments,
-                project_path=project_path,
-                project_environments=project_environments,
+                context=context,
                 parameters=parameters,
-                http_client=http_client,
-                package_cache=package_cache,
             )
         case PluginKind.SCM:
             return await _dry_run_scm_action(
@@ -191,11 +176,8 @@ async def _dry_run_package_action(
     action: SetupAction,
     environments: dict[str, Environment],
     *,
-    project_path: Path | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    context: ResolutionContext | None = None,
     parameters: SetupParameters | None = None,
-    http_client: httpx.AsyncClient | None = None,
-    package_cache: PackageCache | None = None,
 ) -> SetupActionResult:
     """Simulate a package or plugin action in dry-run mode.
 
@@ -208,12 +190,15 @@ async def _dry_run_package_action(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=True)
 
+    ctx = context or ResolutionContext()
+    # Merge strategy-derived fields into the context
     ctx = ResolutionContext(
-        project_path=project_path,
-        project_environments=project_environments,
+        project_path=ctx.project_path,
+        project_environments=ctx.project_environments,
         detect_updates=detect_updates,
-        http_client=http_client,
-        package_cache=package_cache,
+        http_client=ctx.http_client,
+        package_cache=ctx.package_cache,
+        runtime_context=ctx.runtime_context,
     )
 
     resolved = await resolve_operation(action, environments, strategy, ctx)

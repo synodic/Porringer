@@ -304,13 +304,13 @@ class SyncCommands:
         Returns:
             BatchSetupResults from execution.
         """
-        previews, failed_paths = self._load_manifests(parameters)
+        previews, failed_paths = await asyncio.to_thread(self._load_manifests, parameters)
 
         manifest_results: list[SetupResults] = []
         if previews:
             if not parameters.dry_run:
                 invalidate_plugin_cache()
-            shared_plugins = discover_all_plugins(use_cache=parameters.dry_run)
+            shared_plugins = await asyncio.to_thread(discover_all_plugins, use_cache=parameters.dry_run)
             for preview in previews:
                 sr = await execute_single(preview, parameters, plugins=shared_plugins)
                 manifest_results.append(sr)

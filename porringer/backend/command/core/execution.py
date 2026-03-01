@@ -8,7 +8,6 @@ prerequisites are met before proceeding.
 import asyncio
 import logging
 import os
-import subprocess
 import sysconfig
 import threading
 from collections.abc import Awaitable, Callable
@@ -44,7 +43,7 @@ from porringer.schema import (
     SyncStrategy,
 )
 from porringer.utility.exception import PluginError
-from porringer.utility.utility import StreamProgress, stream_command
+from porringer.utility.utility import StreamProgress, run_command, stream_command
 
 from .action_builder import (
     PHASE_ORDER,
@@ -190,9 +189,13 @@ class ExecutionState:
             self.event_queue.put_nowait(event)
 
     @property
-    def plugin_context(self) -> PluginContext:
-        """Plugin-management context for this execution run."""
-        return PluginContext(
+    def resolution_context(self) -> ResolutionContext:
+        """Resolution context for this execution run.
+
+        Bundles the project-environment references and runtime context
+        that flow through every resolution and execution helper.
+        """
+        return ResolutionContext(
             project_environments=self.project_environments,
             runtime_context=self.runtime_context,
         )
@@ -210,7 +213,7 @@ class ExecutionState:
             self.environments,
             self.parameters,
             self.event_queue,
-            self.plugin_context,
+            self.resolution_context,
         )
 
     async def run_project_phase(self, actions: list[SetupAction]) -> list[SetupActionResult]:
@@ -257,20 +260,6 @@ class ExecutionState:
             metadata=self.metadata,
             preferences=self.preview.preferences,
         )
-
-
-@dataclass(slots=True)
-class PluginContext:
-    """Bundled plugin-management context for the execution helpers.
-
-    Groups the project-path, project-environment references, and
-    runtime context that flow through
-    ``execute_package_actions`` → ``execute_package``.
-    """
-
-    project_path: Path | None = None
-    project_environments: dict[str, ProjectEnvironment] | None = None
-    runtime_context: RuntimeContext | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +388,7 @@ async def execute_run_command(
             result = await stream_command(
                 action.command,
                 progress=progress,
+                cwd=working_dir,
                 timeout=float(timeout),
             )
             if result.returncode == 0:
@@ -417,46 +407,28 @@ async def execute_run_command(
             message = f'Command not found: {action.command[0]}' if isinstance(e, FileNotFoundError) else str(e)
             return SetupActionResult(action=action, success=False, message=message)
     else:
-        # Non-streaming path — run in thread to avoid blocking the loop
-        return await asyncio.to_thread(_run_command_sync, action, working_dir, timeout)
-
-
-def _run_command_sync(action: SetupAction, working_dir: Path, timeout: int) -> SetupActionResult:
-    """Synchronous subprocess helper for post-sync commands.
-
-    Runs the command with ``subprocess.run`` and returns a result.
-    Called via ``asyncio.to_thread`` so the event loop stays unblocked.
-    """
-    assert action.command is not None  # guaranteed by caller guard
-
-    try:
-        result = subprocess.run(
-            action.command,
-            cwd=working_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-
-        if result.returncode == 0:
-            return SetupActionResult(action=action, success=True)
-        else:
+        # Non-streaming path — fully async, no thread required
+        try:
+            result = await run_command(
+                action.command,
+                cwd=working_dir,
+                timeout=float(timeout),
+            )
+            if result.returncode == 0:
+                return SetupActionResult(action=action, success=True)
             stderr = result.stderr.strip() if result.stderr else 'Unknown error'
             return SetupActionResult(
                 action=action,
                 success=False,
                 message=f'Exit code {result.returncode}: {stderr}',
             )
-    except subprocess.TimeoutExpired:
-        message = f'Command timed out after {timeout} seconds'
-        logger.error(message)
-        return SetupActionResult(action=action, success=False, message=message)
-    except FileNotFoundError:
-        message = f'Command not found: {action.command[0]}'
-        return SetupActionResult(action=action, success=False, message=message)
-    except Exception as e:
-        return SetupActionResult(action=action, success=False, message=str(e))
+        except TimeoutError:
+            message = f'Command timed out after {timeout} seconds'
+            logger.error(message)
+            return SetupActionResult(action=action, success=False, message=message)
+        except Exception as e:
+            message = f'Command not found: {action.command[0]}' if isinstance(e, FileNotFoundError) else str(e)
+            return SetupActionResult(action=action, success=False, message=message)
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +441,7 @@ async def execute_package(
     environments: dict[str, Environment],
     strategy: SyncStrategy,
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
-    plugin_context: PluginContext | None = None,
+    context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
 ) -> SetupActionResult:
@@ -484,8 +456,8 @@ async def execute_package(
         environments: Dict of instantiated environment plugins.
         strategy: The sync strategy.
         event_queue: Optional queue to emit sub-action events into.
-        plugin_context: Optional plugin-management context providing
-            project-path and project-environment references.
+        context: Optional resolution context providing runtime paths,
+            project-environment references, and package cache.
         package_cache: Optional shared cache for ``packages()`` results.
             When provided, presence checks share a single query per
             installer.  Invalidated after successful installs/upgrades
@@ -497,20 +469,23 @@ async def execute_package(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=False, message='Installer or package not specified')
 
-    project_path = plugin_context.project_path if plugin_context else None
-    project_environments = plugin_context.project_environments if plugin_context else None
-    runtime_context = plugin_context.runtime_context if plugin_context else None
+    ctx = context or ResolutionContext()
+    # Merge caller-provided cache into the context for resolution
+    if package_cache is not None:
+        ctx = ResolutionContext(
+            project_path=ctx.project_path,
+            project_environments=ctx.project_environments,
+            detect_updates=ctx.detect_updates,
+            http_client=ctx.http_client,
+            package_cache=package_cache,
+            runtime_context=ctx.runtime_context,
+        )
 
     resolved = await resolve_operation(
         action,
         environments,
         strategy,
-        ResolutionContext(
-            project_path=project_path,
-            project_environments=project_environments,
-            package_cache=package_cache,
-            runtime_context=runtime_context,
-        ),
+        ctx,
     )
 
     # --- Skip -------------------------------------------------------------
@@ -525,7 +500,7 @@ async def execute_package(
             operation=resolved.operation,
             event_queue=event_queue,
             plugin_manager=resolved.plugin_manager,
-            project_environments=project_environments,
+            project_environments=ctx.project_environments,
         )
 
     # --- Normal package actions -------------------------------------------
@@ -538,7 +513,7 @@ async def execute_package(
     verb = 'Installing' if resolved.operation == OperationKind.INSTALL else 'Upgrading'
     logger.info(f"{verb} '{action.package}' via {action.installer}")
     return await _attempt_package_operation(
-        action, environment, effective, event_queue, runtime_context=runtime_context
+        action, environment, effective, event_queue, runtime_context=ctx.runtime_context
     )
 
 
@@ -586,7 +561,7 @@ async def execute_uninstall(
     action: SetupAction,
     environments: dict[str, Environment],
     event_queue: asyncio.Queue[ProgressEvent | None] | None = None,
-    plugin_context: PluginContext | None = None,
+    context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
 ) -> SetupActionResult:
@@ -601,8 +576,8 @@ async def execute_uninstall(
         action: The package action describing what to uninstall.
         environments: Dict of instantiated environment plugins.
         event_queue: Optional queue to emit sub-action events into.
-        plugin_context: Optional plugin-management context providing
-            project-path and project-environment references.
+        context: Optional resolution context providing runtime paths,
+            project-environment references, and package cache.
         package_cache: Optional shared cache for ``packages()`` results.
 
     Returns:
@@ -611,19 +586,22 @@ async def execute_uninstall(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=False, message='Installer or package not specified')
 
-    project_path = plugin_context.project_path if plugin_context else None
-    project_environments = plugin_context.project_environments if plugin_context else None
-    runtime_context = plugin_context.runtime_context if plugin_context else None
+    ctx = context or ResolutionContext()
+    # Merge caller-provided cache into the context for resolution
+    if package_cache is not None:
+        ctx = ResolutionContext(
+            project_path=ctx.project_path,
+            project_environments=ctx.project_environments,
+            detect_updates=ctx.detect_updates,
+            http_client=ctx.http_client,
+            package_cache=package_cache,
+            runtime_context=ctx.runtime_context,
+        )
 
     resolved = await resolve_uninstall_operation(
         action,
         environments,
-        ResolutionContext(
-            project_path=project_path,
-            project_environments=project_environments,
-            package_cache=package_cache,
-            runtime_context=runtime_context,
-        ),
+        ctx,
     )
 
     # --- Skip (not installed) ---------------------------------------------
@@ -638,7 +616,7 @@ async def execute_uninstall(
             operation=OperationKind.UNINSTALL,
             event_queue=event_queue,
             plugin_manager=resolved.plugin_manager,
-            project_environments=project_environments,
+            project_environments=ctx.project_environments,
         )
 
     # --- Normal package actions -------------------------------------------
@@ -652,7 +630,7 @@ async def execute_uninstall(
             verb_past='Uninstalled',
         ),
         event_queue=event_queue,
-        runtime_context=runtime_context,
+        runtime_context=ctx.runtime_context,
     )
 
 
@@ -816,7 +794,7 @@ async def execute_package_actions(
     environments: dict[str, Environment],
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
-    plugin_context: PluginContext | None = None,
+    context: ResolutionContext | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Execute PACKAGE actions with parallel support.
 
@@ -829,7 +807,7 @@ async def execute_package_actions(
                 package_actions,
                 environments,
                 event_queue,
-                plugin_context=plugin_context,
+                context=context,
                 parameters=parameters,
             ),
             True,
@@ -850,7 +828,7 @@ async def execute_package_actions(
             environments,
             parameters,
             event_queue,
-            plugin_context,
+            context,
             package_cache=cache,
         )
         results.extend(parallel_results)
@@ -863,7 +841,7 @@ async def execute_package_actions(
         environments,
         parameters,
         event_queue,
-        plugin_context,
+        context,
         package_cache=cache,
     )
     results.extend(sequential_results)
@@ -876,7 +854,7 @@ async def _dry_run_package_actions(
     environments: dict[str, Environment],
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
     *,
-    plugin_context: PluginContext | None = None,
+    context: ResolutionContext | None = None,
     parameters: SetupParameters | None = None,
 ) -> list[SetupActionResult]:
     """Execute dry-run for package actions in parallel.
@@ -890,8 +868,7 @@ async def _dry_run_package_actions(
     which checks finish first, preserving deterministic card ordering
     for GUI consumers.
     """
-    project_path = plugin_context.project_path if plugin_context else None
-    project_environments = plugin_context.project_environments if plugin_context else None
+    ctx = context or ResolutionContext()
     max_concurrency = parameters.max_concurrency if parameters else 0
 
     result_slots: list[SetupActionResult | None] = [None] * len(package_actions)
@@ -913,11 +890,14 @@ async def _dry_run_package_actions(
                 result = await dry_run_action(
                     action,
                     environments,
-                    project_path=project_path,
-                    project_environments=project_environments,
+                    context=ResolutionContext(
+                        project_path=ctx.project_path,
+                        project_environments=ctx.project_environments,
+                        runtime_context=ctx.runtime_context,
+                        http_client=client,
+                        package_cache=cache,
+                    ),
                     parameters=parameters,
-                    http_client=client,
-                    package_cache=cache,
                 )
             except Exception as exc:
                 logger.debug('Dry-run check failed for %s: %s', action.description, exc)
@@ -982,11 +962,12 @@ async def _run_sequential_packages(
     environments: dict[str, Environment],
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
-    plugin_context: PluginContext | None = None,
+    context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions sequentially."""
+    ctx = context or ResolutionContext()
     results: list[SetupActionResult] = []
     for action in sequential_actions:
         if event_queue is not None:
@@ -996,15 +977,14 @@ async def _run_sequential_packages(
             environments,
             parameters.strategy,
             event_queue,
-            plugin_context,
+            context,
             package_cache=package_cache,
         )
         results.append(result)
         # Invalidate cache after successful install/upgrade so the next
         # action sees fresh state for the same installer.
         if result.success and not result.skipped and package_cache is not None and action.installer:
-            project_path = plugin_context.project_path if plugin_context else None
-            package_cache.invalidate_packages(action.installer, project_path)
+            package_cache.invalidate_packages(action.installer, ctx.project_path)
             if action.plugin_target is not None:
                 package_cache.invalidate_plugins(action.plugin_target.name)
         if event_queue is not None:
@@ -1026,7 +1006,7 @@ async def _run_parallel_packages(
     environments: dict[str, Environment],
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None] | None,
-    plugin_context: PluginContext | None = None,
+    context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
@@ -1055,7 +1035,7 @@ async def _run_parallel_packages(
                     environments,
                     parameters.strategy,
                     event_queue,
-                    plugin_context,
+                    context,
                     package_cache=package_cache,
                 )
             except Exception as e:

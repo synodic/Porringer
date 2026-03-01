@@ -330,7 +330,8 @@ class TestSharedHttpClient:
         seen_clients: list[httpx.AsyncClient | None] = []
 
         async def _capture_client(action, envs, **kwargs):
-            seen_clients.append(kwargs.get('http_client'))
+            ctx = kwargs.get('context')
+            seen_clients.append(ctx.http_client if ctx else None)
             return SetupActionResult(action=action, success=True, skipped=True, message='ok')
 
         num_actions = 3
