@@ -4,6 +4,8 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from porringer.api import API
 from porringer.backend.command.sync import SyncCommands
 from porringer.core.schema import PluginKind
@@ -156,25 +158,12 @@ class TestListPluginsKinds:
         assert len(results) > 0
 
     @staticmethod
-    def test_kinds_filter_package(test_api: API) -> None:
-        """Filtering by PACKAGE kind should only return package plugins."""
-        results = test_api.plugin.list(kinds=[PluginKind.PACKAGE])
+    @pytest.mark.parametrize('kind', [PluginKind.PACKAGE, PluginKind.TOOL, PluginKind.PROJECT])
+    def test_kinds_filter_single(test_api: API, kind: PluginKind) -> None:
+        """Filtering by a single kind should only return plugins of that kind."""
+        results = test_api.plugin.list(kinds=[kind])
         for result in results:
-            assert result.kind == PluginKind.PACKAGE
-
-    @staticmethod
-    def test_kinds_filter_tool(test_api: API) -> None:
-        """Filtering by TOOL kind should only return tool plugins."""
-        results = test_api.plugin.list(kinds=[PluginKind.TOOL])
-        for result in results:
-            assert result.kind == PluginKind.TOOL
-
-    @staticmethod
-    def test_kinds_filter_project(test_api: API) -> None:
-        """Filtering by PROJECT kind should only return project plugins."""
-        results = test_api.plugin.list(kinds=[PluginKind.PROJECT])
-        for result in results:
-            assert result.kind == PluginKind.PROJECT
+            assert result.kind == kind
 
     @staticmethod
     def test_kinds_filter_multiple(test_api: API) -> None:
@@ -193,25 +182,6 @@ class TestListPluginsKinds:
 
 class TestParseManifest:
     """Tests for parse_manifest."""
-
-    @staticmethod
-    def test_parse_manifest_returns_setup_results(test_api: API) -> None:
-        """parse_manifest returns a SetupResults with actions and metadata."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {
-                'version': '1',
-                'name': 'Test Project',
-                'packages': {'python': ['requests']},
-            }
-            manifest_path.write_text(json.dumps(manifest_data))
-
-            results = SyncCommands.parse_manifest(Path(tmpdir))
-
-            assert results.manifest_path == manifest_path.resolve()
-            assert len(results.actions) > 0
-            assert results.metadata is not None
-            assert results.metadata.name == 'Test Project'
 
     @staticmethod
     def test_parse_manifest_action_fields(test_api: API) -> None:

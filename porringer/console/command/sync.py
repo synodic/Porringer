@@ -354,13 +354,10 @@ def _handle_manifest(configuration: ConsoleConfiguration, options: _SyncOptions)
             include_packages=options.include_packages,
         )
 
-    # For dry runs, use the simple async method (no progress bar needed).
-    # For real execution, use the streaming progress display.
+    # Always use the streaming progress display — the Rich bar is
+    # automatically disabled for dry-runs via ``disable=setup_params.dry_run``.
     try:
-        if setup_params.dry_run:
-            execute_results = asyncio.run(api.sync.run(setup_params))
-        else:
-            execute_results = _execute_with_progress(configuration, api, setup_params)
+        execute_results = _execute_with_progress(configuration, api, setup_params)
     except ValueError as e:
         configuration.console.print(f'[red]Error:[/red] {e}')
         raise typer.Exit(EXIT_FAILURE) from e

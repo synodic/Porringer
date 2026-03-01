@@ -132,7 +132,7 @@ class APTEnvironment(Environment):
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
             return Package(name=params.package.name, version=None)
 
-        result = await self._stream_command(
+        result = await self._execute_command(
             args=['apt', 'install', '-y', package],
             params=params,
             phase='installing',
@@ -161,7 +161,7 @@ class APTEnvironment(Environment):
             logger.info(f'[dry-run] Would run: {" ".join(args)}')
             return Package(name=params.package.name, version=None)
 
-        result = await self._stream_command(
+        result = await self._execute_command(
             args=['apt', 'install', '-y', '--only-upgrade', package],
             params=params,
             phase='upgrading',

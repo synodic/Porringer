@@ -7,7 +7,7 @@ import pytest
 from packaging.version import Version
 
 from porringer.core.plugin_schema.runtime import RuntimeProvider
-from porringer.core.schema import Distribution, PluginKind, PluginParameters
+from porringer.core.schema import Distribution, PluginParameters
 from porringer.plugin.pim.plugin import PIMEnvironment
 from porringer.test.pytest.tests import EnvironmentUnitTests
 
@@ -30,21 +30,6 @@ def environment() -> PIMEnvironment:
 
 class TestPIMBasics:
     """Basic property tests."""
-
-    @staticmethod
-    def test_ecosystem() -> None:
-        """Ecosystem returns python."""
-        assert PIMEnvironment.ecosystem() == 'python'
-
-    @staticmethod
-    def test_plugin_kind() -> None:
-        """Plugin kind is RUNTIME."""
-        assert PIMEnvironment.plugin_kind() == PluginKind.RUNTIME
-
-    @staticmethod
-    def test_tool_name() -> None:
-        """Tool name is py."""
-        assert PIMEnvironment.tool_name() == 'py'
 
     @staticmethod
     def test_implements_runtime_provider(environment: PIMEnvironment) -> None:

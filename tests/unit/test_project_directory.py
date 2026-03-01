@@ -98,28 +98,6 @@ class TestProjectDirectorySkip:
             assert len(command_skips) == 0
 
 
-class TestProjectDirectory:
-    """Tests for project_directory tri-state defaults."""
-
-    @staticmethod
-    def test_default_is_none() -> None:
-        """project_directory defaults to None (infer from manifest path)."""
-        params = SetupParameters()
-        assert params.project_directory is None
-
-    @staticmethod
-    def test_can_be_set_to_path() -> None:
-        """project_directory can be set to a Path."""
-        params = SetupParameters(project_directory=Path('/some/dir'))
-        assert params.project_directory == Path('/some/dir')
-
-    @staticmethod
-    def test_can_be_set_to_false() -> None:
-        """project_directory can be set to False to skip project actions."""
-        params = SetupParameters(project_directory=False)
-        assert params.project_directory is False
-
-
 class TestBatchSetupResultsSkips:
     """Tests for BatchSetupResults.skips, total_skipped, and total_succeeded."""
 

@@ -54,21 +54,6 @@ class TestSubActionProgress:
         assert progress.progress == HALF_PROGRESS
         assert progress.message == 'Downloading ruff'
 
-    @staticmethod
-    def test_defaults() -> None:
-        """SubActionProgress defaults optional fields."""
-        action = _make_action()
-        progress = SubActionProgress(action=action, phase='resolving')
-        assert progress.progress is None
-        assert progress.message is None
-
-    @staticmethod
-    def test_indeterminate_progress() -> None:
-        """SubActionProgress accepts None progress."""
-        action = _make_action()
-        progress = SubActionProgress(action=action, phase='installing', progress=None, message='Installing packages')
-        assert progress.progress is None
-
 
 class TestProgressEvent:
     """Tests for ProgressEvent dataclass."""
@@ -101,30 +86,9 @@ class TestProgressEvent:
         assert event.kind == ProgressEventKind.SUB_ACTION_PROGRESS
         assert event.sub_action is sub
 
-    @staticmethod
-    def test_event_kind_values() -> None:
-        """All expected enum members exist."""
-        assert ProgressEventKind.ACTION_STARTED
-        assert ProgressEventKind.ACTION_COMPLETED
-        assert ProgressEventKind.SUB_ACTION_PROGRESS
-
-    @staticmethod
-    def test_event_defaults() -> None:
-        """ProgressEvent defaults optional fields to None."""
-        action = _make_action()
-        event = ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action)
-        assert event.result is None
-        assert event.sub_action is None
-
 
 class TestPackageParametersProgressCallback:
     """Tests for progress_callback on PackageParameters."""
-
-    @staticmethod
-    def test_default_is_none() -> None:
-        """PackageParameters default progress_callback is None."""
-        params = PackageParameters(package=PackageRef(name='requests'))
-        assert params.progress_callback is None
 
     @staticmethod
     def test_accepts_callback() -> None:

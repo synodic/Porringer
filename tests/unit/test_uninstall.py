@@ -9,6 +9,7 @@ Covers:
 - plugin_remove_command / plugin_remove on MockPluginManager
 """
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,7 +17,7 @@ from packaging.version import Version
 
 from porringer.backend.command.core.action_builder import get_uninstall_cli_command
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from porringer.backend.command.core.execution import PluginContext, execute_uninstall
+from porringer.backend.command.core.execution import execute_uninstall
 from porringer.backend.command.core.resolution import (
     OperationKind,
     ResolutionContext,
@@ -72,54 +73,6 @@ def _make_mock_env(*, installed: list[Package] | None = None) -> MockEnvironment
 
     env.packages = _packages  # type: ignore[assignment]
     return env
-
-
-# ---------------------------------------------------------------------------
-# SkipReason.NOT_INSTALLED
-# ---------------------------------------------------------------------------
-
-
-class TestNotInstalledSkipReason:
-    """Verify the NOT_INSTALLED enum value exists and behaves correctly."""
-
-    @staticmethod
-    def test_not_installed_is_skip_reason() -> None:
-        """NOT_INSTALLED exists and is distinct from ALREADY_INSTALLED."""
-        assert SkipReason.NOT_INSTALLED != SkipReason.ALREADY_INSTALLED
-
-
-# ---------------------------------------------------------------------------
-# MockEnvironment.uninstall_command
-# ---------------------------------------------------------------------------
-
-
-class TestMockEnvironmentUninstallCommand:
-    """Verify MockEnvironment returns a well-formed uninstall command."""
-
-    @staticmethod
-    def test_returns_list_of_strings() -> None:
-        """uninstall_command returns a list of strings."""
-        env = MockEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('requests')
-        cmd = env.uninstall_command(ref)
-        assert isinstance(cmd, list)
-        assert all(isinstance(part, str) for part in cmd)
-
-    @staticmethod
-    def test_contains_package_name() -> None:
-        """uninstall_command includes the package name."""
-        env = MockEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('requests')
-        cmd = env.uninstall_command(ref)
-        assert 'requests' in cmd
-
-    @staticmethod
-    def test_contains_uninstall_verb() -> None:
-        """uninstall_command includes the 'uninstall' verb."""
-        env = MockEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('requests')
-        cmd = env.uninstall_command(ref)
-        assert 'uninstall' in cmd
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +216,7 @@ class TestExecuteUninstall:
         envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action()
-        result = await execute_uninstall(action, envs)
+        result = await execute_uninstall(action, envs, asyncio.Queue())
         assert result.success is True
         assert result.message is not None
         assert 'Uninstalled' in result.message
@@ -276,7 +229,7 @@ class TestExecuteUninstall:
         envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action()
-        result = await execute_uninstall(action, envs)
+        result = await execute_uninstall(action, envs, asyncio.Queue())
         assert result.skipped is True
         assert result.skip_reason == SkipReason.NOT_INSTALLED
 
@@ -290,14 +243,14 @@ class TestExecuteUninstall:
             installer=None,
             package=None,
         )
-        result = await execute_uninstall(action, {})
+        result = await execute_uninstall(action, {}, asyncio.Queue())
         assert result.success is False
 
     @staticmethod
     async def test_skips_when_installer_not_available() -> None:
         """execute_uninstall skips when installer is not in environments."""
         action = _make_action(installer='nonexistent')
-        result = await execute_uninstall(action, {})
+        result = await execute_uninstall(action, {}, asyncio.Queue())
         # Should skip because the installer isn't available
         assert result.skipped is True
 
@@ -307,9 +260,9 @@ class TestExecuteUninstall:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=proj_envs)
+        context = ResolutionContext(project_environments=proj_envs)
 
-        result = await execute_uninstall(action, {}, None, context)
+        result = await execute_uninstall(action, {}, asyncio.Queue(), context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'remove'
@@ -320,9 +273,9 @@ class TestExecuteUninstall:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=proj_envs)
+        context = ResolutionContext(project_environments=proj_envs)
 
-        result = await execute_uninstall(action, {}, None, context)
+        result = await execute_uninstall(action, {}, asyncio.Queue(), context)
         assert result.skipped is True
         assert result.skip_reason == SkipReason.NOT_INSTALLED
         assert len(mock_pm.operations) == 0

@@ -5,12 +5,13 @@ import logging
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core.discovery import discover_all_plugins
 from porringer.backend.command.core.execution import execute_uninstall
-from porringer.backend.command.core.resolution import resolve_uninstall_operation, resolved_to_result
+from porringer.backend.command.core.resolution import ResolutionContext, resolve_uninstall_operation, resolved_to_result
 from porringer.backend.command.plugin import PluginCommands
 from porringer.backend.command.self import check_self_updates
 from porringer.backend.command.sync import SyncCommands
 from porringer.backend.resolver import resolve_configuration
 from porringer.backend.schema import GlobalConfiguration
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import PackageRef
 from porringer.schema import (
     DownloadParameters,
@@ -86,6 +87,7 @@ class API:
         plugin_name: str,
         package: PackageRef,
         *,
+        runtime_context: RuntimeContext | None = None,
         dry_run: bool = False,
     ) -> SetupActionResult:
         """Uninstall a globally-installed package.
@@ -103,6 +105,9 @@ class API:
             plugin_name: The installer plugin name (e.g. ``"pipx"``,
                 ``"uv"``, ``"npm"``).
             package: The package to uninstall (only ``name`` is used).
+            runtime_context: Optional resolved runtime paths.  When
+                provided, Python-ecosystem plugins use this to target
+                the correct interpreter instead of ``sys.executable``.
             dry_run: When ``True``, resolve presence but do not execute.
 
         Returns:
@@ -132,11 +137,13 @@ class API:
             package=package,
         )
 
+        ctx = ResolutionContext(runtime_context=runtime_context) if runtime_context else None
+
         if dry_run:
-            resolved = await resolve_uninstall_operation(action, environments)
+            resolved = await resolve_uninstall_operation(action, environments, ctx)
             return resolved_to_result(resolved)
 
-        result = await execute_uninstall(action, environments)
+        result = await execute_uninstall(action, environments, context=ctx)
         logger.info(
             'uninstall result: success=%s skipped=%s skip_reason=%s message=%s',
             result.success,

@@ -98,11 +98,13 @@ class TestVenvWithPip:
     @staticmethod
     async def test_skips_entries_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
         """Entries missing a `name` key are silently dropped."""
-        pip_json = json.dumps([
-            {'name': 'ruff', 'version': '0.15.0'},
-            {'version': '1.0.0'},
-            {'name': None, 'version': '2.0.0'},
-        ])
+        pip_json = json.dumps(
+            [
+                {'name': 'ruff', 'version': '0.15.0'},
+                {'version': '1.0.0'},
+                {'name': None, 'version': '2.0.0'},
+            ]
+        )
         _mock_subprocess(monkeypatch, lambda *a, **kw: _fake_proc(stdout=pip_json))
 
         result = await _make_env().packages()
@@ -118,46 +120,32 @@ class TestVenvWithPip:
 
 
 # ---------------------------------------------------------------------------
-# Scenario: uv-created venv (no pip module, importlib.metadata fallback)
+# Scenario: uv-created venv (no pip module, pip list fails)
 # ---------------------------------------------------------------------------
 
 
 class TestVenvWithoutPip:
-    """Simulate a uv-created venv with no `pip` but `importlib.metadata`.
+    """Simulate a venv where `python -m pip list` fails.
 
-    This tests the fallback mechanism that uses importlib.metadata when
-    `python -m pip` is not available to enumerate installed distributions.
+    When pip is unavailable the plugin returns an empty list with a
+    warning instead of falling back to importlib.metadata.
     """
 
     @staticmethod
-    async def test_fallback_lists_packages(monkeypatch: pytest.MonkeyPatch) -> None:
-        """Pip list fails → importlib.metadata fallback returns packages."""
-        importlib_json = json.dumps(_SAMPLE_PACKAGES)
+    async def test_pip_failure_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pip list fails → empty list returned (no fallback)."""
         call_count = 0
 
         async def run(*a: Any, **kw: Any) -> AsyncMock:
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                return _fake_proc(returncode=1, stderr='pip error')
-            return _fake_proc(stdout=importlib_json)
+            return _fake_proc(returncode=1, stderr='pip error')
 
         _mock_subprocess(monkeypatch, run)
         result = await _make_env().packages()
 
-        expected_call_count = 2  # pip list + importlib.metadata fallback
-        assert call_count == expected_call_count
-        assert result == [Package(name=p['name'], version=p['version']) for p in _SAMPLE_PACKAGES]
-
-    @staticmethod
-    async def test_both_methods_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-        """Both pip list and importlib.metadata fail → empty list."""
-
-        async def run(*a: Any, **kw: Any) -> AsyncMock:
-            return _fake_proc(returncode=1, stderr='error')
-
-        _mock_subprocess(monkeypatch, run)
-        assert await _make_env().packages() == []
+        assert call_count == 1  # only pip list attempted, no fallback
+        assert result == []
 
 
 # ---------------------------------------------------------------------------

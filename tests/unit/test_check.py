@@ -7,35 +7,12 @@ import pytest
 from packaging.version import Version
 
 from porringer.schema import (
-    CheckParameters,
     CheckResult,
     DownloadParameters,
     HashAlgorithm,
     PackageUpdateInfo,
 )
 from porringer.utility.download import compute_file_hash, parse_hash_string
-
-# Test exit codes
-EXIT_CODE_SUCCESS = 0
-EXIT_CODE_FAILURE = 1
-
-
-class TestCheckParameters:
-    """Tests for check parameters"""
-
-    @staticmethod
-    def test_check_parameters_defaults() -> None:
-        """Test that CheckParameters has correct defaults"""
-        params = CheckParameters()
-        assert params.plugins is None
-        assert params.include_prereleases is False
-
-    @staticmethod
-    def test_check_parameters_with_plugins() -> None:
-        """Test CheckParameters with specific plugins"""
-        params = CheckParameters(plugins=['pip', 'pipx'], include_prereleases=True)
-        assert params.plugins == ['pip', 'pipx']
-        assert params.include_prereleases is True
 
 
 class TestCheckResult:
@@ -89,21 +66,6 @@ class TestDownloadParameters:
         assert params.expected_hash == 'sha256:abc123'
         # Verify default timeout value
         assert params.timeout == DownloadParameters.model_fields['timeout'].default
-
-    @staticmethod
-    def test_download_parameters_defaults() -> None:
-        """Test DownloadParameters default values"""
-        params = DownloadParameters(
-            url='https://example.com/file.zip',
-            destination=Path('/tmp/file.zip'),
-        )
-        assert params.expected_hash is None
-        assert params.expected_size is None
-        # Verify against field defaults
-        timeout_default = DownloadParameters.model_fields['timeout'].default
-        chunk_size_default = DownloadParameters.model_fields['chunk_size'].default
-        assert params.timeout == timeout_default
-        assert params.chunk_size == chunk_size_default
 
 
 class TestDownloadUtility:

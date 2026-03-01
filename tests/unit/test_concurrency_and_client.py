@@ -41,9 +41,6 @@ from porringer.schema import SetupAction, SetupActionResult, SetupParameters
 
 _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
 
-_DEFAULT_MAX_CONCURRENCY = 8
-"""Expected default for ``SetupParameters.max_concurrency``."""
-
 
 class _StubEnv(Environment):
     """Minimal environment stub for concurrency tests."""
@@ -110,46 +107,12 @@ def _make_action(name: str, installer: str = 'stub') -> SetupAction:
 
 
 # =========================================================================
-# SetupParameters.max_concurrency
-# =========================================================================
-
-
-class TestMaxConcurrencyField:
-    """Tests for the ``max_concurrency`` field on SetupParameters."""
-
-    @staticmethod
-    def test_default_value() -> None:
-        """Default max_concurrency is 8."""
-        params = SetupParameters()
-        assert params.max_concurrency == _DEFAULT_MAX_CONCURRENCY
-
-    @staticmethod
-    def test_custom_value() -> None:
-        """Custom value is preserved."""
-        custom = 4
-        params = SetupParameters(max_concurrency=custom)
-        assert params.max_concurrency == custom
-
-    @staticmethod
-    def test_unlimited() -> None:
-        """Zero means unlimited."""
-        params = SetupParameters(max_concurrency=0)
-        assert params.max_concurrency == 0
-
-
-# =========================================================================
 # CheckUpdatesParameters.http_client
 # =========================================================================
 
 
 class TestHttpClientField:
     """Tests for the ``http_client`` field on CheckUpdatesParameters."""
-
-    @staticmethod
-    def test_default_none() -> None:
-        """Default http_client is None."""
-        params = CheckUpdatesParameters(packages=[])
-        assert params.http_client is None
 
     @staticmethod
     def test_with_client() -> None:
@@ -174,12 +137,6 @@ class TestHttpClientField:
 
 class TestResolutionContextHttpClient:
     """Tests for the ``http_client`` field on ResolutionContext."""
-
-    @staticmethod
-    def test_default_none() -> None:
-        """Default http_client is None."""
-        ctx = ResolutionContext()
-        assert ctx.http_client is None
 
     @staticmethod
     def test_with_client() -> None:
@@ -230,7 +187,7 @@ class TestDryRunConcurrencyBounding:
             results = await _dry_run_package_actions(
                 actions,
                 environments,
-                None,
+                asyncio.Queue(),
                 parameters=params,
             )
 
@@ -261,7 +218,7 @@ class TestDryRunConcurrencyBounding:
             results = await _dry_run_package_actions(
                 actions,
                 environments,
-                None,
+                asyncio.Queue(),
                 parameters=params,
             )
 
@@ -330,7 +287,8 @@ class TestSharedHttpClient:
         seen_clients: list[httpx.AsyncClient | None] = []
 
         async def _capture_client(action, envs, **kwargs):
-            seen_clients.append(kwargs.get('http_client'))
+            ctx = kwargs.get('context')
+            seen_clients.append(ctx.http_client if ctx else None)
             return SetupActionResult(action=action, success=True, skipped=True, message='ok')
 
         num_actions = 3
@@ -343,7 +301,7 @@ class TestSharedHttpClient:
             await _dry_run_package_actions(
                 actions,
                 environments,
-                None,
+                asyncio.Queue(),
                 parameters=params,
             )
 

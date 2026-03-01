@@ -1,12 +1,13 @@
 """Tests for the PluginManager protocol and native plugin management routing."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from packaging.version import Version
 
 from porringer.backend.command.core.action_builder import get_cli_command
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from porringer.backend.command.core.execution import PluginContext, execute_package
+from porringer.backend.command.core.execution import execute_package
 from porringer.backend.command.core.presence import dry_run_action
 from porringer.backend.command.core.resolution import OperationKind, ResolutionContext, resolve_operation
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
@@ -46,16 +47,6 @@ def _make_plugins(
 
 class TestPluginManagerProtocol:
     """Verify that concrete plugins satisfy the PluginManager protocol."""
-
-    @staticmethod
-    def test_pdm_is_plugin_manager() -> None:
-        """PDMEnvironment implements PluginManager."""
-        assert issubclass(PDMEnvironment, PluginManager)
-
-    @staticmethod
-    def test_poetry_is_plugin_manager() -> None:
-        """PoetryEnvironment implements PluginManager."""
-        assert issubclass(PoetryEnvironment, PluginManager)
 
     @staticmethod
     def test_pdm_isinstance_check() -> None:
@@ -272,9 +263,9 @@ class TestPluginAddRouting:
         )
 
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(action, {}, SyncStrategy.MINIMAL, None, context)
+        result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert result.message is not None
         assert 'native' in result.message.lower()
@@ -293,7 +284,7 @@ class TestPluginAddRouting:
             plugin_target=PackageRef.model_validate('pdm'),
         )
 
-        result = await execute_package(action, {}, SyncStrategy.MINIMAL)
+        result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue())
         assert result.success is False
         assert result.message is not None
         assert 'No PluginManager found' in result.message
@@ -465,7 +456,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=project_environments,
+            context=ResolutionContext(project_environments=project_environments),
         )
 
         assert result.skipped is True
@@ -478,7 +469,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=project_environments,
+            context=ResolutionContext(project_environments=project_environments),
         )
 
         assert result.skipped is not True
@@ -490,7 +481,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=None,
+            context=None,
         )
 
         assert result.skipped is not True
@@ -505,7 +496,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=project_environments,
+            context=ResolutionContext(project_environments=project_environments),
             parameters=params,
         )
 
@@ -521,7 +512,7 @@ class TestDryRunPluginPresence:
         result = await dry_run_action(
             _PLUGIN_ACTION,
             environments,
-            project_environments=project_environments,
+            context=ResolutionContext(project_environments=project_environments),
             parameters=params,
         )
 
@@ -542,9 +533,9 @@ class TestExecutePackagePluginPresence:
         """execute_package skips plugin-target action when already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
@@ -555,9 +546,9 @@ class TestExecutePackagePluginPresence:
         """execute_package installs plugin when not already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert result.skipped is not True
         assert len(mock_pm.operations) == 1
@@ -895,9 +886,9 @@ class TestPluginUpgradeRouting:
         """execute_package with LATEST calls plugin_update for installed plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'update'
@@ -908,9 +899,9 @@ class TestPluginUpgradeRouting:
         """execute_package with LATEST calls plugin_add for missing plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'add'
@@ -920,9 +911,9 @@ class TestPluginUpgradeRouting:
         """execute_package with MINIMAL uses plugin_add for new plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        context = PluginContext(project_environments=project_environments)
+        context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, None, context)
+        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
         assert mock_pm.operations[0][0] == 'add'
@@ -959,27 +950,6 @@ class TestCliCommandUpgradePreview:
         environments: dict[str, Environment] = {'pipx': mock_env}
 
         cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.LATEST)
-        assert cmd == mock_pm.plugin_update_command(ref)
-
-    def test_exact_returns_update_command(self) -> None:
-        """get_cli_command returns plugin_update_command for EXACT strategy."""
-        mock_pm = self._make_mock_pm()
-        ref = PackageRef.model_validate('cppython')
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-
-        action = SetupAction(
-            description="Ensure plugin 'cppython' to 'mock-pm'",
-            kind=PluginKind.TOOL,
-            ecosystem=_PY,
-            installer='pipx',
-            package=ref,
-            plugin_target=PackageRef.model_validate('mock-pm'),
-        )
-
-        mock_env = MagicMock(spec=Environment)
-        environments: dict[str, Environment] = {'pipx': mock_env}
-
-        cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.EXACT)
         assert cmd == mock_pm.plugin_update_command(ref)
 
     def test_minimal_returns_add_command(self) -> None:

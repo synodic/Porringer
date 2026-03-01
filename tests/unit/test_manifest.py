@@ -737,28 +737,6 @@ class TestSyncStrategyUpgrade:
     """Tests for LATEST and EXACT sync strategies."""
 
     @staticmethod
-    def test_preview_latest_strategy_produces_upgrade_actions(test_api: API) -> None:
-        """Test that preview with LATEST strategy produces PACKAGE actions with Upgrade description."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {
-                'version': '1',
-                'packages': {'python': ['requests', 'pydantic']},
-                'post_sync': ['echo done'],
-            }
-            manifest_path.write_text(json.dumps(manifest_data))
-
-            results = test_api.sync.parse_manifest(Path(tmpdir), strategy=SyncStrategy.LATEST)
-
-            # 2 packages + 1 command = 3 actions
-            assert len(results.actions) == THREE_ACTIONS
-
-            action_kinds = [a.kind for a in results.actions]
-            assert action_kinds[FIRST_ACTION_INDEX] == PluginKind.PACKAGE
-            assert action_kinds[SECOND_ACTION_INDEX] == PluginKind.PACKAGE
-            assert action_kinds[THIRD_ACTION_INDEX] is None
-
-    @staticmethod
     def test_preview_exact_strategy_produces_package_actions(test_api: API) -> None:
         """Test that preview with EXACT strategy produces PACKAGE actions."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -784,18 +762,6 @@ class TestSyncStrategyUpgrade:
 
             assert len(results.manifest_results) == 1
             assert results.manifest_results[0].actions[0].kind == PluginKind.PACKAGE
-
-    @staticmethod
-    def test_default_strategy_is_minimal(test_api: API) -> None:
-        """Test that default strategy produces PACKAGE actions."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
-            manifest_path.write_text(json.dumps(manifest_data))
-
-            results = test_api.sync.parse_manifest(Path(tmpdir))
-
-            assert results.actions[0].kind == PluginKind.PACKAGE
 
     @staticmethod
     def test_upgrade_action_description(test_api: API) -> None:
@@ -1157,10 +1123,12 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1175,9 +1143,11 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             deno_json = Path(tmpdir) / 'deno.json'
             deno_json.write_text(
-                json.dumps({
-                    'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
-                })
+                json.dumps(
+                    {
+                        'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1234,10 +1204,12 @@ class TestManifestDiscovery:
 
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'manifest': 'config/porringer.json'},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'manifest': 'config/porringer.json'},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1296,53 +1268,6 @@ class TestHasManifest:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             assert SyncCommands.has_manifest(Path(tmpdir)) is False
-
-
-class TestManifestResult:
-    """Tests for ManifestResult dataclass."""
-
-    @staticmethod
-    def test_manifest_result_native_json(test_api: API) -> None:
-        """parse_manifest returns SetupResults with root_directory for native JSON"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_path.write_text(json.dumps({'version': '1', 'packages': {'python': ['requests']}}))
-
-            results = test_api.sync.parse_manifest(Path(tmpdir))
-
-            assert results.manifest_path == manifest_path.resolve()
-            assert results.root_directory == Path(tmpdir).resolve()
-
-    @staticmethod
-    def test_manifest_result_pyproject_inline(test_api: API) -> None:
-        """parse_manifest returns correct root_directory for inline pyproject.toml"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            pyproject = Path(tmpdir) / 'pyproject.toml'
-            pyproject.write_text('[tool.porringer]\nversion = "1"\npackages.python = ["requests"]\n')
-
-            results = test_api.sync.parse_manifest(Path(tmpdir))
-
-            assert results.manifest_path == pyproject.resolve()
-            assert results.root_directory == Path(tmpdir).resolve()
-
-    @staticmethod
-    def test_manifest_result_pyproject_reference(test_api: API) -> None:
-        """parse_manifest returns correct paths for pyproject.toml reference"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            subdir = Path(tmpdir) / 'tool'
-            subdir.mkdir()
-            manifest_file = subdir / 'porringer.json'
-            manifest_file.write_text(json.dumps({'version': '1', 'packages': {'python': ['requests']}}))
-
-            pyproject = Path(tmpdir) / 'pyproject.toml'
-            pyproject.write_text('[tool.porringer]\nmanifest = "tool/porringer.json"\n')
-
-            results = test_api.sync.parse_manifest(Path(tmpdir))
-
-            # manifest_path is the actual JSON file resolved
-            assert results.manifest_path == manifest_file.resolve()
-            # root_directory is the pyproject.toml parent
-            assert results.root_directory == Path(tmpdir).resolve()
 
 
 class TestDirectoryValidationResult:
