@@ -9,11 +9,44 @@ the resolved path.
 The two-part protocol system keeps phasing logic entirely protocol-driven —
 the sync engine never needs to match on backend-name strings to decide
 which plugins provide or consume runtimes.
+
+Runtime state is held externally in a :class:`RuntimeContext`, not on
+plugin instances.  This keeps cached plugin objects stateless and
+prevents mutation from leaking across execution boundaries.
 """
 
 from abc import abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+# ---------------------------------------------------------------------------
+# Runtime context — externalised runtime state
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class RuntimeContext:
+    """Resolved runtime executables for a single execution run.
+
+    Owned by ``ExecutionState``; passed explicitly to every plugin
+    method that needs to know which interpreter to target.  Plugin
+    instances themselves never store runtime state.
+
+    ``executables`` maps a *kind* string (e.g. ``"python"``) to the
+    resolved filesystem path of the managed interpreter.
+    """
+
+    executables: dict[str, Path] = field(default_factory=dict)
+
+    def get(self, kind: str) -> Path | None:
+        """Return the resolved executable for *kind*, or ``None``."""
+        return self.executables.get(kind)
+
+
+# ---------------------------------------------------------------------------
+# Provider / consumer protocols
+# ---------------------------------------------------------------------------
 
 
 @runtime_checkable
@@ -59,16 +92,15 @@ class RuntimeProvider(Protocol):
 
 @runtime_checkable
 class RuntimeConsumer(Protocol):
-    """A plugin that accepts a runtime executable override.
+    """A plugin that consumes a resolved runtime executable.
 
     Plugins that operate against a specific language runtime (pip, uv,
-    pipx, PDM, Poetry, etc.) implement this protocol so the sync engine
-    can propagate the resolved interpreter after runtime providers finish.
-    """
+    pipx, PDM, Poetry, etc.) implement this protocol so the sync
+    engine knows which runtime *kind* to supply via
+    :class:`RuntimeContext`.
 
-    runtime_executable: Path | None
-    """The resolved runtime path, set by the sync engine after a
-    `RuntimeProvider` completes.  `None` when no override is active.
+    Runtime state is **not** stored on the plugin instance.  Instead,
+    a ``RuntimeContext`` is passed to every method that needs it.
     """
 
     @classmethod

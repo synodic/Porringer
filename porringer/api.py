@@ -112,6 +112,8 @@ class API:
 
         plugins = discover_all_plugins(use_cache=True)
         environments = plugins.environments
+        # Cached *scan metadata* is reused; plugin instances are fresh
+        # (constructed by the factory inside discover_all_plugins).
 
         if plugin_name not in environments:
             logger.warning("Plugin '%s' is not available for uninstall of '%s'", plugin_name, package.name)

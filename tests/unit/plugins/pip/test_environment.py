@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 from packaging.version import Version
 
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Distribution, Package, PluginParameters
 from porringer.plugin.pip.plugin import PIPEnvironment
 from porringer.test.pytest.tests import EnvironmentUnitTests
@@ -272,15 +273,15 @@ class TestPythonCommand:
     def test_default_is_sys_executable() -> None:
         """Without a runtime provider the command must be `sys.executable`."""
         env = _make_env()
-        assert env.python_command == sys.executable
+        assert env.python_command() == sys.executable
 
     @staticmethod
     def test_runtime_override_takes_precedence() -> None:
         """When a runtime provider resolves a path, that path wins."""
         env = _make_env()
         custom = Path('/custom/python3')
-        env.runtime_executable = custom
-        assert env.python_command == str(custom)
+        rc = RuntimeContext(executables={'python': custom})
+        assert env.python_command(rc) == str(custom)
 
 
 # ---------------------------------------------------------------------------
@@ -307,5 +308,5 @@ class TestLivePackages:
         missing = expected - installed
         assert not missing, (
             f'Dev-dependencies not visible to PIPEnvironment.packages(): {missing}. '
-            f'python_command={env.python_command!r}'
+            f'python_command={env.python_command()!r}'
         )

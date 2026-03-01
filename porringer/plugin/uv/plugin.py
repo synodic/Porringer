@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
-from porringer.core.schema import Package, PackageRef, PluginParameters
+from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.schema import Package, PackageRef
 
 
 class UvEnvironment(PythonEnvironment):
@@ -14,18 +15,16 @@ class UvEnvironment(PythonEnvironment):
     as the backend package manager.
     """
 
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the uv environment plugin."""
-        super().__init__(parameters)
-
-    def _python_args(self) -> list[str]:
+    def _python_args(self, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Return `['--python', '<path>']` when an override is active.
 
-        Uses `self.python_command` (inherited from `PythonEnvironment`)
-        to check whether a runtime override is set.
+        Args:
+            runtime_context: Resolved runtime paths for this execution run.
         """
-        if self.runtime_executable is not None:
-            return ['--python', self.python_command]
+        if runtime_context is not None:
+            exe = runtime_context.get(self.consumed_runtime_kind())
+            if exe is not None:
+                return ['--python', self.python_command(runtime_context)]
         return []
 
     @classmethod
@@ -35,22 +34,34 @@ class UvEnvironment(PythonEnvironment):
         return 'uv'
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self,
+        package: PackageRef,
+        *,
+        include_prereleases: bool = False,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command to install a package via uv."""
-        cmd = ['uv', 'pip', 'install', *self._python_args(), package.specifier]
+        cmd = ['uv', 'pip', 'install', *self._python_args(runtime_context), package.specifier]
         if include_prereleases:
             cmd.append('--prerelease=allow')
         return cmd
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self,
+        package: PackageRef,
+        *,
+        include_prereleases: bool = False,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command to upgrade a package via uv."""
         cmd = [
             'uv',
             'pip',
             'install',
             '--upgrade',
-            *self._python_args(),
+            *self._python_args(runtime_context),
             package.specifier,
         ]
         if include_prereleases:
@@ -58,28 +69,40 @@ class UvEnvironment(PythonEnvironment):
         return cmd
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(
+        self,
+        package: PackageRef,
+        *,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command to uninstall a package via uv."""
-        return ['uv', 'pip', 'uninstall', *self._python_args(), package.name]
+        return ['uv', 'pip', 'uninstall', *self._python_args(runtime_context), package.name]
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self,
+        *,
+        project_path: Path | None = None,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[Package]:
         """Gathers installed packages using `uv pip list --format=json`.
 
         When *project_path* is provided, the method discovers the
         project's virtual environment (`<project_path>/.venv`) and
         lists packages from that interpreter.  Otherwise it falls back
-        to the runtime-override or the default Python.
+        to the runtime context or the default Python.
 
         Args:
             project_path: Optional project directory.  When set, the
                 listing is scoped to the project's `.venv`.
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use defaults.
 
         Returns:
             A list of installed packages.
         """
         # Determine the effective Python target
-        effective_args = self._python_args()
+        effective_args = self._python_args(runtime_context)
         if project_path is not None:
             venv_python = self._discover_venv_python(project_path)
             if venv_python is not None:

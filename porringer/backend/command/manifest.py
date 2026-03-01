@@ -19,7 +19,6 @@ import json
 import logging
 import tomllib
 from collections.abc import Callable
-from functools import lru_cache
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -40,7 +39,7 @@ from porringer.schema import (
 from porringer.schema.manifest import ManifestResult
 from porringer.utility.exception import ManifestError, ManifestValidationCode
 
-from .core.discovery import discover_all_plugins
+from .core.discovery import discover_all_plugins, register_invalidation_hook
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,29 @@ NATIVE_MANIFEST = 'porringer.json'
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
+# ---------------------------------------------------------------------------
+# Manifest contribution cache — invalidated alongside the plugin scan cache
+# ---------------------------------------------------------------------------
+
+_manifest_contributions: tuple[ManifestContribution, ...] | None = None
+
+
+def invalidate_manifest_cache() -> None:
+    """Clear the cached manifest contributions.
+
+    Called automatically when :func:`invalidate_plugin_cache` fires
+    (via the registered hook).  Can also be called directly.
+    """
+    global _manifest_contributions  # noqa: PLW0603
+    _manifest_contributions = None
+
+
+# Wire into the plugin scan invalidation so that newly installed
+# project-environment plugins (and their manifest contributions)
+# are visible after a cache clear.
+register_invalidation_hook(invalidate_manifest_cache)
+
+
 def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
     """Discover manifest contributions from all installed project plugins.
 
@@ -63,11 +84,16 @@ def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
     ``ManifestContributor``, and returns a deduplicated tuple of
     contributions ordered by first occurrence.
 
-    The result is cached for the lifetime of the process.
+    The result is cached until :func:`invalidate_plugin_cache` (or
+    :func:`invalidate_manifest_cache`) is called.
 
     Returns:
         Unique ``ManifestContribution`` instances contributed by plugins.
     """
+    global _manifest_contributions  # noqa: PLW0603
+    if _manifest_contributions is not None:
+        return _manifest_contributions
+
     seen_filenames: set[str] = set()
     contributions: list[ManifestContribution] = []
 
@@ -80,7 +106,8 @@ def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
                 seen_filenames.add(contrib.filename)
                 contributions.append(contrib)
 
-    return tuple(contributions)
+    _manifest_contributions = tuple(contributions)
+    return _manifest_contributions
 
 
 def manifest_filenames() -> tuple[str, ...]:

@@ -281,7 +281,7 @@ class TestPackageCache:
         env = MagicMock(spec=Environment)
         call_count = 0
 
-        async def _packages(*, project_path=None):
+        async def _packages(*, project_path=None, runtime_context=None):
             nonlocal call_count
             call_count += 1
             return [Package(name='ruff', version=f'0.{call_count}.0')]
@@ -332,7 +332,7 @@ class TestPackageCache:
         """Concurrent get_packages calls for the same key don't race."""
         call_count = 0
 
-        async def _slow_packages(*, project_path=None):
+        async def _slow_packages(*, project_path=None, runtime_context=None):
             nonlocal call_count
             call_count += 1
             await asyncio.sleep(0.05)  # Simulate slow I/O

@@ -14,7 +14,8 @@ from porringer.core.plugin_schema.environment import (
     PackageParameters,
 )
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
-from porringer.core.schema import Package, PackageRef, PluginKind, PluginParameters
+from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.schema import SetupAction, SubActionProgress
 from porringer.utility.utility import run_command
 
@@ -43,14 +44,6 @@ class PIPEnvironment(PythonEnvironment):
     the underlying Python installation.
     """
 
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the pip environment plugin.
-
-        Args:
-            parameters: Plugin parameters including distribution info
-        """
-        super().__init__(parameters)
-
     @classmethod
     @override
     def tool_name(cls) -> str:
@@ -74,18 +67,30 @@ class PIPEnvironment(PythonEnvironment):
         return shutil.which('pip') is not None or shutil.which('python') is not None
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self,
+        package: PackageRef,
+        *,
+        include_prereleases: bool = False,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command to install a package via pip."""
-        cmd = [self.python_command, '-m', 'pip', 'install', package.specifier]
+        cmd = [self.python_command(runtime_context), '-m', 'pip', 'install', package.specifier]
         if include_prereleases:
             cmd.append('--pre')
         return cmd
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self,
+        package: PackageRef,
+        *,
+        include_prereleases: bool = False,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command to upgrade a package via pip."""
         cmd = [
-            self.python_command,
+            self.python_command(runtime_context),
             '-m',
             'pip',
             'install',
@@ -97,9 +102,14 @@ class PIPEnvironment(PythonEnvironment):
         return cmd
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(
+        self,
+        package: PackageRef,
+        *,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[str]:
         """Returns the CLI command to uninstall a package via pip."""
-        return [self.python_command, '-m', 'pip', 'uninstall', '-y', package.name]
+        return [self.python_command(runtime_context), '-m', 'pip', 'uninstall', '-y', package.name]
 
     @staticmethod
     @override
@@ -116,7 +126,11 @@ class PIPEnvironment(PythonEnvironment):
         `run_command` path for zero overhead.
         """
         logger = logging.getLogger('porringer.pip.install')
-        args = list(self.install_command(params.package, include_prereleases=params.include_prereleases))
+        args = list(
+            self.install_command(
+                params.package, include_prereleases=params.include_prereleases, runtime_context=params.runtime_context
+            )
+        )
         if params.dry:
             args.append('--dry-run')
 
@@ -331,7 +345,7 @@ class PIPEnvironment(PythonEnvironment):
         """
         logger = logging.getLogger('porringer.pip.check_updates')
 
-        cmd = [self.python_command, '-m', 'pip', 'list', '--outdated', '--format=json']
+        cmd = [self.python_command(), '-m', 'pip', 'list', '--outdated', '--format=json']
         if params.include_prereleases:
             cmd.append('--pre')
 
@@ -361,27 +375,30 @@ class PIPEnvironment(PythonEnvironment):
         return results
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self,
+        *,
+        project_path: Path | None = None,
+        runtime_context: RuntimeContext | None = None,
+    ) -> list[Package]:
         """Gathers installed packages visible to the active Python.
 
         When *project_path* is provided, the method discovers the
         project's virtual environment (`<project_path>/.venv`) and
         lists packages from that interpreter.  Otherwise it falls back
-        to the runtime-override or the system Python on PATH.
-
-        Tries `python -m pip list --format=json` first.  If the pip
-        module is not installed (common in uv-created virtual
-        environments), falls back to `importlib.metadata`.
+        to the runtime context or the system Python on PATH.
 
         Args:
             project_path: Optional project directory.  When set, the
                 listing is scoped to the project's `.venv`.
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use ``sys.executable``.
 
         Returns:
             A list of packages
         """
         # Determine the effective Python interpreter
-        effective_python = self.python_command
+        effective_python = self.python_command(runtime_context)
         if project_path is not None:
             venv_python = self._discover_venv_python(project_path)
             if venv_python is not None:

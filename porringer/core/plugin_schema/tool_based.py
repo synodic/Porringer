@@ -22,7 +22,7 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
-from porringer.core.schema import Plugin, PluginParameters
+from porringer.core.schema import Plugin
 
 
 class ToolBasedPlugin(Plugin):
@@ -33,14 +33,6 @@ class ToolBasedPlugin(Plugin):
     Subclasses with `tool_name() → None` (the default) are always
     considered available.
     """
-
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the tool-based plugin.
-
-        Args:
-            parameters: Plugin parameters including distribution info.
-        """
-        super().__init__(parameters)
 
     @classmethod
     def tool_name(cls) -> str | None:

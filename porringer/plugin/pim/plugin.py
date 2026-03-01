@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
-from porringer.core.plugin_schema.runtime import RuntimeProvider
+from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginDependency, PluginKind
 
 
@@ -125,17 +125,21 @@ class PIMEnvironment(Environment, RuntimeProvider):
         return None
 
     @override
-    def install_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def install_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to install a Python runtime via pymanager."""
         return ['py', 'install', package.name]
 
     @override
-    def upgrade_command(self, package: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def upgrade_command(
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
+    ) -> list[str]:
         """Returns the CLI command to upgrade a Python runtime via pymanager."""
         return ['py', 'install', '--update', package.name]
 
     @override
-    def uninstall_command(self, package: PackageRef) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a Python runtime via pymanager."""
         return ['py', 'uninstall', '-y', package.name]
 
@@ -171,7 +175,9 @@ class PIMEnvironment(Environment, RuntimeProvider):
         return results
 
     @override
-    async def packages(self, *, project_path: Path | None = None) -> list[Package]:
+    async def packages(
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
+    ) -> list[Package]:
         """Lists all installed Python runtimes.
 
         pim manages Python runtimes globally; *project_path* is
@@ -179,6 +185,8 @@ class PIMEnvironment(Environment, RuntimeProvider):
 
         Args:
             project_path: Unused.  pim is inherently global.
+            runtime_context: Unused.  pim manages runtimes, not
+                per-interpreter packages.
 
         Returns:
             A list of installed Python runtime packages

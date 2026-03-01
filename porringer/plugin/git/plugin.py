@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.scm import ScmEnvironment
-from porringer.core.schema import Ecosystem, PluginParameters
+from porringer.core.schema import Ecosystem
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +17,6 @@ class GitScm(ScmEnvironment):
     Provides clone and presence-check operations using the `git`
     command-line tool.
     """
-
-    def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the Git SCM plugin.
-
-        Args:
-            parameters: Plugin parameters including distribution info.
-        """
-        super().__init__(parameters)
 
     @classmethod
     @override

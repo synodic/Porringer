@@ -8,6 +8,7 @@ from porringer.core.plugin_schema.project_environment import (
     ProjectEnvironment,
     ProjectSyncParameters,
 )
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
@@ -91,7 +92,7 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
         return plugins
 
     @override
-    def sync_command(self) -> list[str]:
+    def sync_command(self, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Return the bare `poetry install` command.
 
         Poetry does not accept `--python` inline; runtime selection
@@ -114,12 +115,14 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
             True on success.
         """
         # Poetry requires `env use` to select a non-default interpreter
-        if self.runtime_executable is not None:
-            env_args = ['poetry', 'env', 'use', str(self.runtime_executable)]
-            if not await self._run_sync(env_args, params.directory):
-                return False
+        if params.runtime_context is not None:
+            exe = params.runtime_context.get(self.consumed_runtime_kind())
+            if exe is not None:
+                env_args = ['poetry', 'env', 'use', str(exe)]
+                if not await self._run_sync(env_args, params.directory):
+                    return False
 
-        args = list(self.sync_command())
+        args = list(self.sync_command(runtime_context=params.runtime_context))
         if params.dry:
             args.append('--dry-run')
         return await self._run_sync(args, params.directory)

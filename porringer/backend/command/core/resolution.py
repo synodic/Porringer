@@ -23,6 +23,7 @@ from packaging.version import InvalidVersion, Version
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.plugin_manager import PluginManager, find_plugin_manager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.schema import (
     SetupAction,
@@ -121,6 +122,7 @@ class PackageCache:
         installer: str,
         environment: Environment,
         project_path: Path | None = None,
+        runtime_context: RuntimeContext | None = None,
     ) -> list[Package]:
         """Return cached ``packages()`` result, querying on first access.
 
@@ -131,6 +133,7 @@ class PackageCache:
             installer: The installer/plugin name.
             environment: The environment plugin instance.
             project_path: Optional project directory scope.
+            runtime_context: Resolved runtime paths for this execution run.
 
         Returns:
             The list of installed packages.
@@ -138,7 +141,9 @@ class PackageCache:
         key = f'pkg:{installer}:{project_path}'
         async with self._lock_for(key):
             if key not in self._packages:
-                self._packages[key] = await environment.packages(project_path=project_path)
+                self._packages[key] = await environment.packages(
+                    project_path=project_path, runtime_context=runtime_context
+                )
             return self._packages[key]
 
     async def get_plugins(
@@ -216,6 +221,10 @@ class ResolutionContext:
     """Optional shared cache for ``packages()`` results.  When set,
     multiple actions using the same installer share a single
     ``packages()`` call instead of querying independently."""
+    runtime_context: RuntimeContext | None = None
+    """Resolved runtime paths.  Threaded through to ``packages()``
+    so Python-ecosystem plugins can query packages from the correct
+    interpreter."""
 
 
 async def resolve_operation(
@@ -328,9 +337,13 @@ async def _resolve_package_operation(
     presence = _PresenceResult(env_for_updates=environment)
     try:
         if ctx.package_cache is not None:
-            installed_packages = await ctx.package_cache.get_packages(action.installer, environment, ctx.project_path)
+            installed_packages = await ctx.package_cache.get_packages(
+                action.installer, environment, ctx.project_path, ctx.runtime_context
+            )
         else:
-            installed_packages = await environment.packages(project_path=ctx.project_path)
+            installed_packages = await environment.packages(
+                project_path=ctx.project_path, runtime_context=ctx.runtime_context
+            )
         presence.is_installed, presence.detail, presence.matched = is_package_installed(
             action.package, installed_packages, validator, action.kind
         )
@@ -523,9 +536,13 @@ async def resolve_uninstall_operation(
 
     try:
         if ctx.package_cache is not None:
-            installed_packages = await ctx.package_cache.get_packages(action.installer, environment, ctx.project_path)
+            installed_packages = await ctx.package_cache.get_packages(
+                action.installer, environment, ctx.project_path, ctx.runtime_context
+            )
         else:
-            installed_packages = await environment.packages(project_path=ctx.project_path)
+            installed_packages = await environment.packages(
+                project_path=ctx.project_path, runtime_context=ctx.runtime_context
+            )
         logger.debug('packages query for %s returned %d entries', action.installer, len(installed_packages))
         is_installed, detail, matched = is_package_installed(action.package, installed_packages, validator, action.kind)
         logger.debug(
