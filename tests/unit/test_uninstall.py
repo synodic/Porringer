@@ -12,7 +12,7 @@ Covers:
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from packaging.version import Version
 
@@ -374,8 +374,6 @@ class TestUninstallAutoResolveRuntimeContext:
     @staticmethod
     async def test_auto_resolves_when_none() -> None:
         """When runtime_context=None, Builder.resolve_runtime_context is called."""
-        from unittest.mock import patch
-
         ctx = RuntimeContext(executables={'python': Path('/fake/python')})
         mock_env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
 
@@ -401,8 +399,6 @@ class TestUninstallAutoResolveRuntimeContext:
     @staticmethod
     async def test_explicit_context_skips_auto_resolve() -> None:
         """When runtime_context is provided, Builder.resolve_runtime_context is NOT called."""
-        from unittest.mock import patch
-
         ctx = RuntimeContext(executables={'python': Path('/explicit/python')})
         mock_env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
 
