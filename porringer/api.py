@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core.discovery import discover_all_plugins
 from porringer.backend.command.core.execution import execute_uninstall
@@ -122,6 +123,11 @@ class API:
         # Cached *scan metadata* is reused; plugin instances are fresh
         # (constructed by the factory inside discover_all_plugins).
 
+        # Auto-resolve runtime context when the caller did not supply one,
+        # matching the pattern used by PluginCommands.list_packages().
+        if runtime_context is None:
+            runtime_context = await Builder.resolve_runtime_context(environments)
+
         if plugin_name not in environments:
             logger.warning("Plugin '%s' is not available for uninstall of '%s'", plugin_name, package.name)
             return SetupActionResult(
@@ -139,7 +145,7 @@ class API:
             package=package,
         )
 
-        ctx = ResolutionContext(runtime_context=runtime_context) if runtime_context else None
+        ctx = ResolutionContext(runtime_context=runtime_context)
 
         if dry_run:
             resolved = await resolve_uninstall_operation(action, environments, ctx)

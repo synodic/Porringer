@@ -7,6 +7,7 @@ Covers:
 - SkipReason.NOT_INSTALLED enum value
 - uninstall_command on MockEnvironment
 - plugin_remove_command / plugin_remove on MockPluginManager
+- API.uninstall() auto-resolves runtime_context
 """
 
 import asyncio
@@ -15,6 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 from packaging.version import Version
 
+from porringer.api import API
+from porringer.backend.builder import Builder
 from porringer.backend.command.core.action_builder import get_uninstall_cli_command
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.core.execution import execute_uninstall
@@ -26,8 +29,9 @@ from porringer.backend.command.core.resolution import (
 )
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
-from porringer.schema import SetupAction, SkipReason
+from porringer.schema import LocalConfiguration, SetupAction, SkipReason
 from porringer.test.mock.environment import MockEnvironment
 from porringer.test.mock.plugin_manager import MockPluginManager
 
@@ -352,3 +356,76 @@ class TestUninstallCliCommand:
         plugins = _make_plugins()
         cmd = get_uninstall_cli_command(action, plugins)
         assert cmd == []
+
+
+# ---------------------------------------------------------------------------
+# API.uninstall — runtime context auto-resolution
+# ---------------------------------------------------------------------------
+
+
+class TestUninstallAutoResolveRuntimeContext:
+    """API.uninstall() auto-resolves RuntimeContext when none is provided.
+
+    This ensures that RuntimeConsumer plugins (e.g. pip) can
+    locate and remove packages using the correct interpreter even
+    when the caller does not supply a runtime context.
+    """
+
+    @staticmethod
+    async def test_auto_resolves_when_none() -> None:
+        """When runtime_context=None, Builder.resolve_runtime_context is called."""
+        from unittest.mock import patch
+
+        ctx = RuntimeContext(executables={'python': Path('/fake/python')})
+        mock_env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
+
+        plugins = DiscoveredPlugins(
+            environments={'mock': mock_env},
+            project_environments={},
+            scm_environments={},
+        )
+
+        with (
+            patch('porringer.api.discover_all_plugins', return_value=plugins),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
+            patch.object(type(mock_env), 'ecosystem', return_value=_PY),
+            patch.object(type(mock_env), 'plugin_kind', return_value=PluginKind.PACKAGE),
+        ):
+            config = LocalConfiguration()
+            api = API(config)
+            result = await api.uninstall('mock', PackageRef.model_validate('requests'), dry_run=True)
+
+        mock_resolve.assert_called_once()
+        assert result is not None
+
+    @staticmethod
+    async def test_explicit_context_skips_auto_resolve() -> None:
+        """When runtime_context is provided, Builder.resolve_runtime_context is NOT called."""
+        from unittest.mock import patch
+
+        ctx = RuntimeContext(executables={'python': Path('/explicit/python')})
+        mock_env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
+
+        plugins = DiscoveredPlugins(
+            environments={'mock': mock_env},
+            project_environments={},
+            scm_environments={},
+        )
+
+        with (
+            patch('porringer.api.discover_all_plugins', return_value=plugins),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock) as mock_resolve,
+            patch.object(type(mock_env), 'ecosystem', return_value=_PY),
+            patch.object(type(mock_env), 'plugin_kind', return_value=PluginKind.PACKAGE),
+        ):
+            config = LocalConfiguration()
+            api = API(config)
+            result = await api.uninstall(
+                'mock',
+                PackageRef.model_validate('requests'),
+                runtime_context=ctx,
+                dry_run=True,
+            )
+
+        mock_resolve.assert_not_called()
+        assert result is not None
