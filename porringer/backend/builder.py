@@ -13,6 +13,8 @@ from importlib.metadata import Distribution as MetadataDistribution
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
+from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Distribution, Plugin, PluginDependency, PluginParameters
 
 logger = logging.getLogger(__name__)
@@ -187,3 +189,86 @@ class Builder:
         """
         all_deps = plugin_type.dependencies()
         return [dep for dep in all_deps if dep.is_applicable()]
+
+    # ------------------------------------------------------------------
+    # Runtime context resolution
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def resolve_runtime_context(environments: dict[str, Environment]) -> RuntimeContext:
+        """Build a :class:`RuntimeContext` from available runtime providers.
+
+        Scans *environments* for :class:`RuntimeProvider` instances that
+        are supported and available on the current system, queries each
+        for installed runtimes, picks the highest version per runtime
+        *kind*, and resolves its executable path.
+
+        This mirrors what the sync pipeline does in
+        ``_propagate_runtime()`` but is decoupled from ``SetupAction``
+        objects so it can be used by the query path
+        (``list_packages``, ``build_plugin_info``, etc.).
+
+        Args:
+            environments: Name-keyed dict of plugin instances
+                (typically from ``_discover_environments()``).
+
+        Returns:
+            A ``RuntimeContext`` populated with resolved executables.
+            May be empty when no provider or runtime is available.
+        """
+        ctx = RuntimeContext()
+
+        for name, env in environments.items():
+            if not isinstance(env, RuntimeProvider):
+                continue
+            if not env.is_supported() or not env.is_available():
+                logger.debug("RuntimeProvider '%s' is not available; skipping", name)
+                continue
+
+            kind = env.provided_runtime_kind()
+            if kind in ctx.executables:
+                # Already resolved this kind from a previous provider
+                continue
+
+            try:
+                installed = await env.packages()
+            except Exception:
+                logger.debug("Failed to list runtimes for provider '%s'", name, exc_info=True)
+                continue
+
+            if not installed:
+                logger.debug("RuntimeProvider '%s' reports no installed runtimes", name)
+                continue
+
+            # Sort by Version descending to resolve the highest installed runtime
+            sorted_runtimes = sorted(
+                installed,
+                key=lambda pkg: Version(pkg.version) if pkg.version else Version('0'),
+                reverse=True,
+            )
+
+            for runtime_pkg in sorted_runtimes:
+                try:
+                    executable = await env.resolve_executable(runtime_pkg.name)
+                except Exception:
+                    logger.debug(
+                        "resolve_executable failed for '%s' tag '%s'",
+                        name,
+                        runtime_pkg.name,
+                        exc_info=True,
+                    )
+                    continue
+                if executable is not None:
+                    ctx.executables[kind] = executable
+                    logger.debug(
+                        "Resolved runtime '%s' via provider '%s': tag=%s path=%s",
+                        kind,
+                        name,
+                        runtime_pkg.name,
+                        executable,
+                    )
+                    break  # One executable per kind is sufficient
+            else:
+                logger.debug("RuntimeProvider '%s' could not resolve any executable", name)
+
+        return ctx

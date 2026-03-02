@@ -3,6 +3,7 @@
 import logging
 
 from porringer.backend.schema import GlobalConfiguration, ResolvedDirectories
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Plugin, PluginKind
 from porringer.schema import LocalConfiguration, PluginInfo
@@ -37,6 +38,8 @@ def resolve_configuration(
 def build_plugin_info(
     plugins: dict[str, Plugin] | list[Plugin],
     kinds: list[PluginKind] | None = None,
+    *,
+    runtime_context: RuntimeContext | None = None,
 ) -> list[PluginInfo]:
     """Build metadata for discovered plugins, optionally filtered by kind.
 
@@ -44,10 +47,17 @@ def build_plugin_info(
     `ScmEnvironment`).  The `tool_version` field is populated for any
     `ToolBasedPlugin` that reports itself as available.
 
+    When *runtime_context* is supplied, ``RuntimeConsumer`` plugins are
+    probed via the runtime-aware ``query_availability()`` path so that
+    plugins available only through a managed runtime (e.g. pip via pim)
+    are correctly reported as installed.
+
     Args:
         plugins: Discovered plugin instances, either as a name-keyed dict
             or a flat list (names taken from the dict keys when available).
         kinds: Only include plugins matching these kinds.  `None` returns all.
+        runtime_context: Resolved runtime paths.  ``None`` means use
+            PATH-only detection.
 
     Returns:
         A filtered list of plugin metadata.
@@ -67,11 +77,9 @@ def build_plugin_info(
         if kinds and kind not in kinds:
             continue
 
-        installed = plugin.is_available()
-
-        tool_version = None
-        if installed and isinstance(plugin, ToolBasedPlugin):
-            tool_version = plugin.tool_version()
+        is_tool_based = isinstance(plugin, ToolBasedPlugin)
+        installed = plugin.query_availability(runtime_context) if is_tool_based else plugin.is_available()
+        tool_version = plugin.tool_version() if installed and is_tool_based else None
 
         # Use the entry-point name when available; fall back to empty string
         plugin_name = name if name is not None else ''

@@ -13,6 +13,7 @@ from porringer.backend.builder import Builder
 from porringer.backend.resolver import build_plugin_info
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Package, Plugin, PluginKind
 from porringer.schema import PluginInfo, PluginOperationResult
@@ -74,7 +75,12 @@ class PluginCommands:
         return build_plugin_info(all_plugins, kinds=kinds)
 
     @staticmethod
-    async def list_packages(plugin_name: str, project_path: Path | None = None) -> builtins.list[Package]:
+    async def list_packages(
+        plugin_name: str,
+        project_path: Path | None = None,
+        *,
+        runtime_context: RuntimeContext | None = None,
+    ) -> builtins.list[Package]:
         """List packages installed in a plugin's environment.
 
         Discovers the named plugin among `environment` plugins,
@@ -86,10 +92,18 @@ class PluginCommands:
         list packages from that interpreter.  Globally-scoped plugins
         (pipx, apt, brew) ignore the parameter.
 
+        When *runtime_context* is ``None`` (the default), the method
+        auto-resolves a context from available ``RuntimeProvider``
+        plugins so that ``RuntimeConsumer`` plugins (e.g. pip) can be
+        queried even when their tool is not on PATH.
+
         Args:
             plugin_name: The canonical plugin name to query.
             project_path: Path to the project directory.  `None` queries
                 the global / default environment.
+            runtime_context: Pre-resolved runtime context.  When
+                ``None``, a context is resolved automatically from
+                available runtime providers.
 
         Returns:
             The packages managed by the named plugin.
@@ -100,18 +114,21 @@ class PluginCommands:
         logger.debug('Listing packages for plugin: %s', plugin_name)
 
         environments = PluginCommands._discover_environments()
-        normalized = str(canonicalize_name(plugin_name))
 
-        for name, env in environments.items():
-            if str(canonicalize_name(name)) == normalized:
-                plugin_type = type(env)
-                if not plugin_type.is_supported() or not env.is_available():
-                    logger.debug("Plugin '%s' is not available; returning empty package list", plugin_name)
-                    return []
-                return await env.packages(project_path=project_path)
+        # Auto-resolve runtime context when the caller did not supply one.
+        if runtime_context is None:
+            runtime_context = await Builder.resolve_runtime_context(environments)
 
-        available = sorted(environments.keys())
-        raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(available)}")
+        # Keys from _discover_environments() are already PEP 503-canonicalised.
+        env = environments.get(str(canonicalize_name(plugin_name)))
+        if env is None:
+            available = sorted(environments.keys())
+            raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(available)}")
+
+        if not env.query_availability(runtime_context):
+            logger.debug("Plugin '%s' is not available; returning empty package list", plugin_name)
+            return []
+        return await env.packages(project_path=project_path, runtime_context=runtime_context)
 
     _PLUGIN_GROUPS = (
         'porringer.environment',

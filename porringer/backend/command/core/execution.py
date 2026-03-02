@@ -28,6 +28,7 @@ from porringer.core.plugin_schema.project_environment import (
 )
 from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, Package, PluginKind
 from porringer.schema import (
     ManifestMetadata,
@@ -1139,20 +1140,25 @@ async def handle_project_phase(
 # ---------------------------------------------------------------------------
 
 
-def _plugins_discovered_event(plugins: DiscoveredPlugins) -> ProgressEvent:
+def _plugins_discovered_event(
+    plugins: DiscoveredPlugins,
+    runtime_context: RuntimeContext | None = None,
+) -> ProgressEvent:
     """Build a ``PLUGINS_DISCOVERED`` progress event.
 
-    Collects ``is_available()`` for every discovered plugin and
-    returns a single ``ProgressEvent`` that GUI clients can use to
-    render availability badges.
+    Collects availability for every discovered plugin and returns a
+    single ``ProgressEvent`` that GUI clients can use to render
+    availability badges.
+
+    When *runtime_context* is provided, ``RuntimeConsumer`` plugins are
+    probed via the runtime-aware ``query_availability()`` path.
     """
-    plugin_availability: dict[str, bool] = {}
-    for name, env in plugins.environments.items():
-        plugin_availability[name] = env.is_available()
-    for name, proj in plugins.project_environments.items():
-        plugin_availability[name] = proj.is_available()
-    for name, scm in plugins.scm_environments.items():
-        plugin_availability[name] = scm.is_available()
+    all_plugins: dict[str, ToolBasedPlugin] = {
+        **plugins.environments,
+        **plugins.project_environments,
+        **plugins.scm_environments,
+    }
+    plugin_availability = {name: plugin.query_availability(runtime_context) for name, plugin in all_plugins.items()}
     logger.info('Plugins discovered — availability: %s', plugin_availability)
     return ProgressEvent(
         kind=ProgressEventKind.PLUGINS_DISCOVERED,
