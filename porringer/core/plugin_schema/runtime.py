@@ -115,3 +115,34 @@ class RuntimeConsumer(Protocol):
             A runtime kind identifier (e.g. `"python"`).
         """
         ...
+
+    @classmethod
+    def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
+        """Check whether this plugin can operate with *runtime_context*.
+
+        Called during **deferred resolution** — after a preceding phase
+        has resolved a runtime and injected it onto ``PATH``.  This
+        gives plugins an opportunity to probe the *target* interpreter
+        rather than only checking the host process.
+
+        The default implementation delegates to the class-level
+        ``is_available()`` (if present) so that plugins which do not
+        need runtime-aware probing continue to work unchanged.
+
+        Subclasses should override when their availability depends on
+        the resolved runtime (e.g. ``pip`` checking whether
+        ``python -m pip`` works with the target interpreter).
+
+        Args:
+            runtime_context: The resolved runtime executables for the
+                current execution run.
+
+        Returns:
+            ``True`` if the plugin can handle operations with the
+            given runtime, ``False`` otherwise.
+        """
+        # Default: fall back to the class-level is_available() when
+        # the concrete type defines one (all ToolBasedPlugin subclasses do).
+        if hasattr(cls, 'is_available'):
+            return cls.is_available()
+        return True

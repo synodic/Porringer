@@ -15,6 +15,7 @@ focus on their tool-specific behaviour.
 """
 
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -72,6 +73,64 @@ class PythonEnvironment(Environment, RuntimeConsumer):
     def consumed_runtime_kind(cls) -> str:
         """Python environment plugins consume a Python runtime."""
         return 'python'
+
+    @classmethod
+    def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
+        """Check whether this plugin can operate with the given runtime.
+
+        Determines the target Python interpreter from *runtime_context*
+        (falling back to ``sys.executable``) and verifies that the
+        plugin's underlying tool is importable in that interpreter.
+
+        Subclasses that wrap a standalone binary (e.g. ``uv``) rather
+        than a Python module should override this to delegate to
+        ``is_available()`` instead.
+
+        Args:
+            runtime_context: Resolved runtime paths for this execution.
+
+        Returns:
+            ``True`` if the tool module (identified by ``tool_name()``)
+            is importable in the target interpreter.
+        """
+        tool = cls.tool_name()
+        if tool is None:
+            return True
+
+        # Determine which interpreter to probe
+        exe = runtime_context.get(cls.consumed_runtime_kind())
+        python = str(exe) if exe is not None else sys.executable
+
+        return cls._probe_module(python, tool)
+
+    @staticmethod
+    def _probe_module(python: str, module: str) -> bool:
+        """Check whether *module* is importable in the interpreter at *python*.
+
+        Uses a lightweight subprocess invocation with ``-c "import <module>"``
+        to avoid loading the module into the current process.
+
+        This is called during deferred resolution (in a thread via
+        ``asyncio.to_thread``), so blocking briefly on a subprocess
+        is acceptable.
+
+        Args:
+            python: Path or command for the Python interpreter.
+            module: The module name to check (e.g. ``'pip'``).
+
+        Returns:
+            ``True`` if the import succeeds, ``False`` otherwise.
+        """
+        try:
+            result = subprocess.run(
+                [python, '-c', f'import {module}'],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+            return result.returncode == 0
+        except OSError, subprocess.SubprocessError:
+            return False
 
     def python_command(self, runtime_context: RuntimeContext | None = None) -> str:
         """The Python interpreter command to target.

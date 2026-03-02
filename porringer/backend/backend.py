@@ -10,6 +10,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Mapping
 
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Ecosystem, Plugin, PluginKind
 
 logger = logging.getLogger(__name__)
@@ -38,15 +39,27 @@ class BackendResolver:
         self,
         plugins: Mapping[str, BackendPlugin],
         preferences: Mapping[Ecosystem, str] | None = None,
+        runtime_context: RuntimeContext | None = None,
+        needed_pairs: set[tuple[PluginKind, Ecosystem]] | None = None,
     ) -> None:
         """Initialize the backend resolver with available plugins and preferences.
 
         Args:
             plugins: All instantiated plugins keyed by canonical name.
             preferences: Optional ecosystem → plugin-name preference mapping.
+            runtime_context: Resolved runtime executables.  When provided,
+                ``RuntimeConsumer`` plugins are probed via
+                ``is_available_for(runtime_context)`` instead of the
+                class-level ``is_available()``.
+            needed_pairs: When provided, only these ``(kind, ecosystem)``
+                pairs are eagerly resolved.  Pairs not in the set are
+                still indexed (available to ``is_registered`` /
+                ``registered_names``) but not resolved, suppressing
+                log messages for irrelevant ecosystems.
         """
         self._all_plugins: dict[str, BackendPlugin] = dict(plugins)
         self._preferences = preferences or {}
+        self._runtime_context = runtime_context
 
         # Index: (kind, ecosystem) -> [plugin_name, ...]
         self._backend_plugins: dict[tuple[PluginKind, Ecosystem], list[str]] = defaultdict(list)
@@ -55,10 +68,19 @@ class BackendResolver:
             if ecosystem is not None:
                 self._backend_plugins[(type(plugin).plugin_kind(), ecosystem)].append(name)
 
+        # Resolve only the pairs the caller actually needs.  When
+        # *needed_pairs* is ``None`` every registered pair is resolved
+        # (existing behaviour).  Passing an explicit set avoids
+        # spurious "No available plugin" log messages for ecosystems
+        # that are registered via entry-points but irrelevant to the
+        # current manifest.
+        resolve_keys = needed_pairs if needed_pairs is not None else set(self._backend_plugins)
+
         # Resolve once and cache
         self._resolved: dict[tuple[PluginKind, Ecosystem], str | None] = {}
-        for key in self._backend_plugins:
-            self._resolved[key] = self._resolve(key)
+        for key in resolve_keys:
+            if key in self._backend_plugins:
+                self._resolved[key] = self._resolve(key)
 
         logger.debug(
             'Backend resolution map: %s',
@@ -144,7 +166,7 @@ class BackendResolver:
         # 2. Alphabetical among supported & available candidates
         suitable = sorted(name for name in candidates if self._is_suitable(name))
         if not suitable:
-            logger.warning("No available plugin for (%s, '%s')", kind.value, ecosystem)
+            logger.debug("No available plugin for (%s, '%s')", kind.value, ecosystem)
             return None
 
         if len(suitable) > 1:
@@ -159,7 +181,14 @@ class BackendResolver:
         return suitable[0]
 
     def _is_suitable(self, plugin_name: str) -> bool:
-        """Check if *plugin_name* is both supported and available."""
+        """Check if *plugin_name* is both supported and available.
+
+        When a ``runtime_context`` was provided at construction time
+        and the plugin implements ``RuntimeConsumer``, the runtime-aware
+        ``is_available_for(runtime_context)`` is used instead of the
+        plain ``is_available()`` so that module-only tools (e.g.
+        ``python -m pip``) can be detected in the target interpreter.
+        """
         plugin = self._all_plugins.get(plugin_name)
         if plugin is None:
             return False
@@ -167,6 +196,10 @@ class BackendResolver:
             plugin_type = type(plugin)
             if not plugin_type.is_supported():
                 return False
+            # Runtime-aware probe when a runtime context is available
+            if self._runtime_context is not None and isinstance(plugin, RuntimeConsumer):
+                consumer_type: type[RuntimeConsumer] = type(plugin)
+                return consumer_type.is_available_for(self._runtime_context)
             return plugin.is_available()
         except Exception:
             logger.warning("Suitability check failed for plugin '%s'", plugin_name, exc_info=True)

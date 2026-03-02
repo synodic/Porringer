@@ -239,6 +239,7 @@ class ExecutionState:
             self.plugins,
             self.strategy,
             preferences=self.preferences,
+            runtime_context=self.runtime_context,
         )
         for action in actions:
             if action.cli_command is None or action.installer is not None:
@@ -1343,6 +1344,7 @@ def resolve_deferred_actions(
     plugins: DiscoveredPlugins,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
     preferences: dict[Ecosystem, str] | None = None,
+    runtime_context: RuntimeContext | None = None,
 ) -> None:
     """Resolve deferred actions whose `installer` is `None`.
 
@@ -1352,17 +1354,29 @@ def resolve_deferred_actions(
     cannot be resolved are left with `installer = None` so that the
     normal execution path reports them as unavailable.
 
+    When a *runtime_context* is provided (i.e. the RUNTIME phase has
+    already resolved an interpreter), the resolver uses
+    ``RuntimeConsumer.is_available_for(runtime_context)`` to probe
+    plugin availability against the target interpreter rather than
+    only checking the host process's PATH.
+
     Args:
         actions: Mutable list of actions to resolve in-place.
         plugins: Freshly-discovered plugin container.
         strategy: Sync strategy (for description verb).
         preferences: Optional ecosystem → plugin-name preferences from the manifest.
+        runtime_context: Resolved runtime executables, if any.
     """
     deferred = [a for a in actions if a.installer is None and a.ecosystem is not None]
     if not deferred:
         return
 
-    resolver = BackendResolver(plugins.all_plugins, preferences)
+    # Pass runtime_context so that RuntimeConsumer plugins can be
+    # probed against the target interpreter, not just the host PATH.
+    needed_pairs = {(a.kind, a.ecosystem) for a in deferred if a.kind is not None and a.ecosystem is not None}
+    resolver = BackendResolver(
+        plugins.all_plugins, preferences, runtime_context=runtime_context, needed_pairs=needed_pairs
+    )
     verb = STRATEGY_VERB[strategy]
 
     for action in deferred:

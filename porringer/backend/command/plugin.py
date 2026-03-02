@@ -104,6 +104,10 @@ class PluginCommands:
 
         for name, env in environments.items():
             if str(canonicalize_name(name)) == normalized:
+                plugin_type = type(env)
+                if not plugin_type.is_supported() or not env.is_available():
+                    logger.debug("Plugin '%s' is not available; returning empty package list", plugin_name)
+                    return []
                 return await env.packages(project_path=project_path)
 
         available = sorted(environments.keys())

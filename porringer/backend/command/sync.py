@@ -290,6 +290,14 @@ class SyncCommands:
             # real error instead of silently receiving an empty stream.
             if task.done() and not task.cancelled():
                 task.result()
+        except GeneratorExit:
+            # Consumer closed the async generator (e.g. ``break`` or
+            # ``aclose()``).  Cancel synchronously only — ``await``
+            # inside a ``GeneratorExit`` handler causes
+            # ``RuntimeError: async generator ignored GeneratorExit``.
+            if not task.done():
+                task.cancel()
+            return
         finally:
             if not task.done():
                 task.cancel()
