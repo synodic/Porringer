@@ -148,7 +148,7 @@ class ToolBasedPlugin(Plugin):
                 return None
             return json.loads(stdout) if stdout.strip() else None
         except FileNotFoundError:
-            logger.error('%s not found on PATH', args[0])
+            logger.warning('%s not found on PATH', args[0])
         except (OSError, TimeoutError) as e:
             logger.error('Failed to run %s: %s', args[0], e)
         except json.JSONDecodeError as e:
@@ -195,7 +195,7 @@ class ToolBasedPlugin(Plugin):
                 return None
             return stdout
         except FileNotFoundError:
-            logger.error('%s not found on PATH', args[0])
+            logger.warning('%s not found on PATH', args[0])
         except (OSError, TimeoutError) as e:
             logger.error('Failed to run %s: %s', args[0], e)
         return None
@@ -240,7 +240,7 @@ class ToolBasedPlugin(Plugin):
                 logger.error(stderr)
                 return False
         except FileNotFoundError:
-            logger.error('%s not found on PATH', args[0])
+            logger.warning('%s not found on PATH', args[0])
             return False
         except (OSError, TimeoutError) as e:
             logger.error('Failed to run %s: %s', label, e)

@@ -248,7 +248,13 @@ def build_actions(
 
     actions: list[SetupAction] = []
 
-    resolver = BackendResolver(plugins.all_plugins, manifest.preferences)
+    # Only resolve ecosystems actually referenced by this manifest so
+    # the resolver doesn't warn about irrelevant registered plugins.
+    needed_pairs: set[tuple[PluginKind, Ecosystem]] = set()
+    for kind, ecosystem, _packages in manifest.iter_sections():
+        needed_pairs.add((kind, ecosystem))
+
+    resolver = BackendResolver(plugins.all_plugins, manifest.preferences, needed_pairs=needed_pairs)
 
     verb = STRATEGY_VERB[strategy]
 

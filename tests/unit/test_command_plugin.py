@@ -394,27 +394,23 @@ class TestResolveDependenciesFilter:
 
 
 # ---------------------------------------------------------------------------
-# Regression: list_packages must not gate on is_available()
+# list_packages gates on is_available / is_supported
 # ---------------------------------------------------------------------------
 
 
-class TestListPackagesNoAvailabilityGate:
-    """list_packages must delegate to packages() even when is_available() returns False.
-
-    Lets the plugin's own fallbacks work.
-    """
+class TestListPackagesAvailabilityGate:
+    """list_packages returns [] for unavailable/unsupported plugins without calling packages()."""
 
     @staticmethod
-    async def test_unavailable_plugin_delegates_to_packages() -> None:
-        """packages() is called regardless of is_available()."""
+    async def test_unavailable_plugin_returns_empty() -> None:
+        """An unavailable plugin gets [] without packages() being invoked."""
         mock_env = MagicMock(spec=Environment)
-        mock_env.is_available = classmethod(lambda cls: False)
-
-        expected = [Package(name='foo', version='1.0.0')]
-        mock_env.packages = AsyncMock(return_value=expected)
+        type(mock_env).is_supported = MagicMock(return_value=True)
+        mock_env.is_available = MagicMock(return_value=False)
+        mock_env.packages = AsyncMock(return_value=[Package(name='foo', version='1.0.0')])
 
         with patch.object(PluginCommands, '_discover_environments', return_value={'mock-env': mock_env}):
             result = await PluginCommands.list_packages('mock-env')
 
-        assert result == expected
-        mock_env.packages.assert_called_once()
+        assert result == []
+        mock_env.packages.assert_not_called()

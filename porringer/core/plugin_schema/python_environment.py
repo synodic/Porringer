@@ -129,7 +129,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
                 check=False,
             )
             return result.returncode == 0
-        except (OSError, subprocess.SubprocessError):
+        except OSError, subprocess.SubprocessError:
             return False
 
     def python_command(self, runtime_context: RuntimeContext | None = None) -> str:

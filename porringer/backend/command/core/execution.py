@@ -1373,7 +1373,10 @@ def resolve_deferred_actions(
 
     # Pass runtime_context so that RuntimeConsumer plugins can be
     # probed against the target interpreter, not just the host PATH.
-    resolver = BackendResolver(plugins.all_plugins, preferences, runtime_context=runtime_context)
+    needed_pairs = {(a.kind, a.ecosystem) for a in deferred if a.kind is not None and a.ecosystem is not None}
+    resolver = BackendResolver(
+        plugins.all_plugins, preferences, runtime_context=runtime_context, needed_pairs=needed_pairs
+    )
     verb = STRATEGY_VERB[strategy]
 
     for action in deferred:

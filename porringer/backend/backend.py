@@ -40,6 +40,7 @@ class BackendResolver:
         plugins: Mapping[str, BackendPlugin],
         preferences: Mapping[Ecosystem, str] | None = None,
         runtime_context: RuntimeContext | None = None,
+        needed_pairs: set[tuple[PluginKind, Ecosystem]] | None = None,
     ) -> None:
         """Initialize the backend resolver with available plugins and preferences.
 
@@ -50,6 +51,11 @@ class BackendResolver:
                 ``RuntimeConsumer`` plugins are probed via
                 ``is_available_for(runtime_context)`` instead of the
                 class-level ``is_available()``.
+            needed_pairs: When provided, only these ``(kind, ecosystem)``
+                pairs are eagerly resolved.  Pairs not in the set are
+                still indexed (available to ``is_registered`` /
+                ``registered_names``) but not resolved, suppressing
+                log messages for irrelevant ecosystems.
         """
         self._all_plugins: dict[str, BackendPlugin] = dict(plugins)
         self._preferences = preferences or {}
@@ -62,10 +68,19 @@ class BackendResolver:
             if ecosystem is not None:
                 self._backend_plugins[(type(plugin).plugin_kind(), ecosystem)].append(name)
 
+        # Resolve only the pairs the caller actually needs.  When
+        # *needed_pairs* is ``None`` every registered pair is resolved
+        # (existing behaviour).  Passing an explicit set avoids
+        # spurious "No available plugin" log messages for ecosystems
+        # that are registered via entry-points but irrelevant to the
+        # current manifest.
+        resolve_keys = needed_pairs if needed_pairs is not None else set(self._backend_plugins)
+
         # Resolve once and cache
         self._resolved: dict[tuple[PluginKind, Ecosystem], str | None] = {}
-        for key in self._backend_plugins:
-            self._resolved[key] = self._resolve(key)
+        for key in resolve_keys:
+            if key in self._backend_plugins:
+                self._resolved[key] = self._resolve(key)
 
         logger.debug(
             'Backend resolution map: %s',
@@ -151,7 +166,7 @@ class BackendResolver:
         # 2. Alphabetical among supported & available candidates
         suitable = sorted(name for name in candidates if self._is_suitable(name))
         if not suitable:
-            logger.warning("No available plugin for (%s, '%s')", kind.value, ecosystem)
+            logger.debug("No available plugin for (%s, '%s')", kind.value, ecosystem)
             return None
 
         if len(suitable) > 1:
@@ -183,7 +198,8 @@ class BackendResolver:
                 return False
             # Runtime-aware probe when a runtime context is available
             if self._runtime_context is not None and isinstance(plugin, RuntimeConsumer):
-                return plugin_type.is_available_for(self._runtime_context)
+                consumer_type: type[RuntimeConsumer] = type(plugin)
+                return consumer_type.is_available_for(self._runtime_context)
             return plugin.is_available()
         except Exception:
             logger.warning("Suitability check failed for plugin '%s'", plugin_name, exc_info=True)

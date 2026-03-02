@@ -49,6 +49,12 @@ async def _check_plugin_updates(
         if params.plugins and plugin_name not in params.plugins:
             continue
 
+        # Skip plugins that are unsupported on this platform or unavailable
+        plugin_type = type(env)
+        if not plugin_type.is_supported() or not env.is_available():
+            logger.debug('Skipping unavailable plugin %s for update check', plugin_name)
+            continue
+
         try:
             check_params = CheckUpdatesParameters(
                 packages=[],  # Check all packages
