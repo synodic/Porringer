@@ -143,10 +143,16 @@ class PythonEnvironment(Environment, RuntimeConsumer):
             runtime_context: Resolved runtime paths for this execution
                 run.  ``None`` means use the current process interpreter.
         """
+        _logger = logging.getLogger('porringer.python_environment')
+        kind = self.consumed_runtime_kind()
         if runtime_context is not None:
-            exe = runtime_context.get(self.consumed_runtime_kind())
+            exe = runtime_context.get(kind)
             if exe is not None:
+                _logger.debug('python_command: using runtime override %s for kind=%s', exe, kind)
                 return str(exe)
+            _logger.debug('python_command: runtime_context present but no entry for kind=%s', kind)
+        else:
+            _logger.debug('python_command: no runtime_context supplied, falling back to sys.executable')
         return sys.executable
 
     @staticmethod

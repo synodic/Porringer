@@ -29,19 +29,20 @@ class DirectoryCache(BaseModel):
 
 @dataclass(slots=True)
 class DirectoryValidationResult:
-    """Result of validating a single cached directory entry.
+    """Result of listing/validating a single cached directory entry.
 
-    Returned by ``DirectoryCacheManager.validate_directories()`` for
-    **every** registered directory, not just invalid ones.
+    Returned by ``DirectoryCacheManager.list_directories()`` for
+    **every** registered directory.
 
     Args:
         directory: The cached directory entry.
-        exists: Whether the path exists on disk.
+        exists: Whether the path exists on disk.  ``None`` when
+            validation was not requested.
         has_manifest: Whether a valid manifest was found at the path.
-            ``None`` when ``exists`` is ``False`` or when manifest
-            checking was not requested.
+            ``None`` when ``exists`` is ``False``, validation was not
+            requested, or manifest checking was not requested.
     """
 
     directory: ManifestDirectory
-    exists: bool
+    exists: bool | None = None
     has_manifest: bool | None = None

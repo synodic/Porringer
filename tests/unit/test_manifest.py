@@ -1274,11 +1274,11 @@ class TestHasManifest:
 
 
 class TestDirectoryValidationResult:
-    """Tests for the enriched validate_directories()."""
+    """Tests for the enriched list_directories(validate=True)."""
 
     @staticmethod
-    def test_validate_directories_returns_all(cache_manager, temp_cache_dir) -> None:
-        """validate_directories returns a result for every registered directory"""
+    def test_list_directories_validate_returns_all(cache_manager, temp_cache_dir) -> None:
+        """list_directories(validate=True) returns a result for every registered directory"""
         tmp_path, _ = temp_cache_dir
         d1 = tmp_path / 'existing'
         d1.mkdir()
@@ -1288,14 +1288,14 @@ class TestDirectoryValidationResult:
         cache_manager.add_directory(d1)
         cache_manager.add_directory(d2)
 
-        results = cache_manager.validate_directories()
+        results = cache_manager.list_directories(validate=True)
         expected_directory_count = 2
         assert len(results) == expected_directory_count
         assert all(r.exists for r in results)
 
     @staticmethod
-    def test_validate_directories_check_manifest(cache_manager, temp_cache_dir) -> None:
-        """validate_directories with check_manifest=True populates has_manifest"""
+    def test_list_directories_check_manifest(cache_manager, temp_cache_dir) -> None:
+        """list_directories with check_manifest=True populates has_manifest"""
         tmp_path, _ = temp_cache_dir
         with_manifest = tmp_path / 'with_manifest'
         with_manifest.mkdir()
@@ -1309,7 +1309,7 @@ class TestDirectoryValidationResult:
         cache_manager.add_directory(with_manifest)
         cache_manager.add_directory(without_manifest)
 
-        results = cache_manager.validate_directories(check_manifest=True)
+        results = cache_manager.list_directories(check_manifest=True)
         expected_directory_count = 2
         assert len(results) == expected_directory_count
 
@@ -1322,29 +1322,29 @@ class TestDirectoryValidationResult:
         assert result_without.has_manifest is False
 
     @staticmethod
-    def test_validate_directories_missing_path(cache_manager, temp_cache_dir) -> None:
-        """validate_directories returns has_manifest=None for non-existent paths"""
+    def test_list_directories_validate_missing_path(cache_manager, temp_cache_dir) -> None:
+        """list_directories returns has_manifest=None for non-existent paths"""
         tmp_path, _ = temp_cache_dir
         to_delete = tmp_path / 'to_delete'
         to_delete.mkdir()
         cache_manager.add_directory(to_delete)
         to_delete.rmdir()
 
-        results = cache_manager.validate_directories(check_manifest=True)
+        results = cache_manager.list_directories(validate=True, check_manifest=True)
         assert len(results) == 1
         assert results[0].exists is False
         assert results[0].has_manifest is None
 
     @staticmethod
-    def test_validate_directories_default_no_manifest_check(cache_manager, temp_cache_dir) -> None:
-        """validate_directories without check_manifest leaves has_manifest as None"""
+    def test_list_directories_validate_no_manifest_check(cache_manager, temp_cache_dir) -> None:
+        """list_directories(validate=True) without check_manifest leaves has_manifest as None"""
         tmp_path, _ = temp_cache_dir
         d = tmp_path / 'project'
         d.mkdir()
         (d / 'porringer.json').write_text(json.dumps({'version': '1'}))
         cache_manager.add_directory(d)
 
-        results = cache_manager.validate_directories()
+        results = cache_manager.list_directories(validate=True)
         assert len(results) == 1
         assert results[0].exists is True
         assert results[0].has_manifest is None

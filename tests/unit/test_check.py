@@ -6,6 +6,9 @@ from pathlib import Path
 import pytest
 from packaging.version import Version
 
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters
+from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.schema import PackageRef
 from porringer.schema import (
     CheckResult,
     DownloadParameters,
@@ -13,6 +16,35 @@ from porringer.schema import (
     PackageUpdateInfo,
 )
 from porringer.utility.download import compute_file_hash, parse_hash_string
+
+
+class TestCheckUpdatesParametersRuntimeContext:
+    """Verify CheckUpdatesParameters carries runtime_context."""
+
+    @staticmethod
+    def test_defaults_to_none() -> None:
+        """runtime_context defaults to None."""
+        params = CheckUpdatesParameters(packages=[])
+        assert params.runtime_context is None
+
+    @staticmethod
+    def test_accepts_runtime_context() -> None:
+        """runtime_context can be passed and retrieved."""
+        ctx = RuntimeContext()
+        ctx.executables['python'] = Path('/usr/bin/python3')
+        params = CheckUpdatesParameters(packages=[], runtime_context=ctx)
+        assert params.runtime_context is ctx
+
+    @staticmethod
+    def test_excluded_from_serialization() -> None:
+        """runtime_context is excluded from dict serialization."""
+        ctx = RuntimeContext()
+        params = CheckUpdatesParameters(
+            packages=[PackageRef.model_validate('ruff')],
+            runtime_context=ctx,
+        )
+        d = params.model_dump()
+        assert 'runtime_context' not in d
 
 
 class TestCheckResult:

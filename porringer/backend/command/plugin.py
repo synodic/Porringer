@@ -10,6 +10,7 @@ from pathlib import Path
 from packaging.utils import canonicalize_name
 
 from porringer.backend.builder import Builder
+from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.resolver import build_plugin_info
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
@@ -46,6 +47,7 @@ class PluginCommands:
     async def list(
         *,
         kinds: builtins.list[PluginKind] | None = None,
+        plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
     ) -> builtins.list[PluginInfo]:
         """Lists all registered plugins across every plugin group.
@@ -54,14 +56,15 @@ class PluginCommands:
         `project_environment` (project sync), and `scm` (source control)
         plugins.  Results can be filtered by `kinds`.
 
-        When *runtime_context* is ``None`` (the default), the method
-        auto-resolves a context from available ``RuntimeProvider``
-        plugins so that ``RuntimeConsumer`` plugins (e.g. pip) are
-        correctly reported as installed even when their tool is not
-        on PATH.
+        When *plugins* is provided, its environments, project
+        environments, and SCM plugins are used directly — no
+        entry-point scanning is performed.  ``runtime_context`` is
+        extracted from ``plugins.runtime_context`` unless an explicit
+        value is supplied.
 
         Args:
             kinds: Only include plugins matching these kinds. `None` returns all.
+            plugins: Pre-discovered plugins from :meth:`API.discover_plugins`.
             runtime_context: Pre-resolved runtime context.  When
                 ``None``, a context is resolved automatically from
                 available runtime providers.
@@ -71,21 +74,28 @@ class PluginCommands:
         """
         logger.debug('Listing plugins')
 
-        environments = PluginCommands._discover_environments()
+        if plugins is not None:
+            environments = plugins.environments
+            projects = plugins.project_environments
+            scm_plugins = plugins.scm_environments
+            if runtime_context is None:
+                runtime_context = plugins.runtime_context
+        else:
+            environments = PluginCommands._discover_environments()
+
+            # Project-environment plugins (project sync)
+            project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
+            project_instances = Builder.build_plugins(project_types)
+            projects = {info.name: inst for info, inst in zip(project_types, project_instances, strict=True)}
+
+            # SCM plugins (source control)
+            scm_types = Builder.find_plugins('scm', ScmEnvironment)
+            scm_instances = Builder.build_plugins(scm_types)
+            scm_plugins = {info.name: inst for info, inst in zip(scm_types, scm_instances, strict=True)}
 
         # Auto-resolve runtime context when the caller did not supply one.
         if runtime_context is None:
             runtime_context = await Builder.resolve_runtime_context(environments)
-
-        # Project-environment plugins (project sync)
-        project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
-        project_instances = Builder.build_plugins(project_types)
-        projects = {info.name: inst for info, inst in zip(project_types, project_instances, strict=True)}
-
-        # SCM plugins (source control)
-        scm_types = Builder.find_plugins('scm', ScmEnvironment)
-        scm_instances = Builder.build_plugins(scm_types)
-        scm_plugins = {info.name: inst for info, inst in zip(scm_types, scm_instances, strict=True)}
 
         all_plugins: dict[str, Plugin] = {**environments, **projects, **scm_plugins}
 
@@ -96,6 +106,7 @@ class PluginCommands:
         plugin_name: str,
         project_path: Path | None = None,
         *,
+        plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
     ) -> builtins.list[Package]:
         """List packages installed in a plugin's environment.
@@ -103,21 +114,22 @@ class PluginCommands:
         Discovers the named plugin among `environment` plugins,
         initialises it, and returns the packages it reports as installed.
 
+        When *plugins* is provided, the named environment is looked up
+        directly from ``plugins.environments`` — no entry-point
+        scanning is performed.  ``runtime_context`` is extracted from
+        ``plugins.runtime_context`` unless an explicit value is supplied.
+
         When *project_path* is a directory, it is forwarded to the
         plugin's `packages()` method so that venv-scoped plugins
         (pip, uv) can discover the project's virtual environment and
         list packages from that interpreter.  Globally-scoped plugins
         (pipx, apt, brew) ignore the parameter.
 
-        When *runtime_context* is ``None`` (the default), the method
-        auto-resolves a context from available ``RuntimeProvider``
-        plugins so that ``RuntimeConsumer`` plugins (e.g. pip) can be
-        queried even when their tool is not on PATH.
-
         Args:
             plugin_name: The canonical plugin name to query.
             project_path: Path to the project directory.  `None` queries
                 the global / default environment.
+            plugins: Pre-discovered plugins from :meth:`API.discover_plugins`.
             runtime_context: Pre-resolved runtime context.  When
                 ``None``, a context is resolved automatically from
                 available runtime providers.
@@ -130,7 +142,12 @@ class PluginCommands:
         """
         logger.debug('Listing packages for plugin: %s', plugin_name)
 
-        environments = PluginCommands._discover_environments()
+        if plugins is not None:
+            environments = plugins.environments
+            if runtime_context is None:
+                runtime_context = plugins.runtime_context
+        else:
+            environments = PluginCommands._discover_environments()
 
         # Auto-resolve runtime context when the caller did not supply one.
         if runtime_context is None:

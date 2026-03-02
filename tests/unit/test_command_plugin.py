@@ -423,7 +423,9 @@ class TestListRuntimeConsumerVisibility:
         # Mock environment that is a RuntimeConsumer: unavailable on PATH,
         # but available when a runtime context with 'python' is present.
         mock_env = MagicMock(spec=Environment)
-        mock_env.query_availability = MagicMock(side_effect=lambda rc=None: rc is not None and 'python' in rc.executables)
+        mock_env.query_availability = MagicMock(
+            side_effect=lambda rc=None: rc is not None and 'python' in rc.executables
+        )
         type(mock_env).plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
         type(mock_env).distribution = MagicMock(return_value=Distribution(version=Version('1.0.0')))
 
@@ -445,7 +447,9 @@ class TestListRuntimeConsumerVisibility:
         ctx = RuntimeContext()  # No executables
 
         mock_env = MagicMock(spec=Environment)
-        mock_env.query_availability = MagicMock(side_effect=lambda rc=None: rc is not None and 'python' in rc.executables)
+        mock_env.query_availability = MagicMock(
+            side_effect=lambda rc=None: rc is not None and 'python' in rc.executables
+        )
         type(mock_env).plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
         type(mock_env).distribution = MagicMock(return_value=Distribution(version=Version('1.0.0')))
 

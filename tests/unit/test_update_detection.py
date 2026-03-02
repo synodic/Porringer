@@ -5,6 +5,7 @@ on ``SetupActionResult``, and the ``detect_updates`` flag on
 ``SetupParameters``.
 """
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,6 +19,7 @@ from porringer.backend.command.core.resolution import (
     is_package_installed,
 )
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
 from porringer.schema import (
     SetupAction,
@@ -170,6 +172,31 @@ class TestCheckForNewerVersion:
             env, PackageRef.model_validate('foo'), '0.9.0', include_prereleases=False
         )
         assert result is None
+
+    @staticmethod
+    async def test_forwards_runtime_context() -> None:
+        """The runtime_context kwarg is forwarded inside CheckUpdatesParameters."""
+        ctx = RuntimeContext()
+        ctx.executables['python'] = Path('/custom/python')
+        env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
+        await check_for_newer_version(
+            env,
+            PackageRef.model_validate('ruff'),
+            '0.8.0',
+            runtime_context=ctx,
+        )
+        call_args = env.check_updates.call_args
+        params: CheckUpdatesParameters = call_args[0][0]
+        assert params.runtime_context is ctx
+
+    @staticmethod
+    async def test_none_runtime_context_by_default() -> None:
+        """When runtime_context is omitted, params.runtime_context is None."""
+        env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
+        await check_for_newer_version(env, PackageRef.model_validate('ruff'), '0.8.0')
+        call_args = env.check_updates.call_args
+        params: CheckUpdatesParameters = call_args[0][0]
+        assert params.runtime_context is None
 
 
 # ---------------------------------------------------------------------------

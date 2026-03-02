@@ -30,7 +30,7 @@ class TestDirectoryCacheManager:
         assert cache_manager.cache_path.exists()
         directories = cache_manager.list_directories()
         assert len(directories) == 1
-        assert directories[0].path == target_dir.resolve()
+        assert directories[0].directory.path == target_dir.resolve()
 
     @staticmethod
     def test_add_duplicate_directory_fails(cache_manager, temp_cache_dir) -> None:
@@ -118,7 +118,7 @@ class TestDirectoryCachePersistence:
         directories = manager2.list_directories()
 
         assert len(directories) == 1
-        assert directories[0].name == 'Test'
+        assert directories[0].directory.name == 'Test'
 
     @staticmethod
     def test_clear_removes_all_data(cache_manager, temp_cache_dir) -> None:
@@ -138,7 +138,7 @@ class TestDirectoryCacheValidation:
     """Tests for directory validation"""
 
     @staticmethod
-    def test_validate_directories(cache_manager, temp_cache_dir) -> None:
+    def test_list_directories_validate(cache_manager, temp_cache_dir) -> None:
         """Test validation returns all directories with correct status"""
         tmp_path, _ = temp_cache_dir
         existing_dir = tmp_path / 'existing'
@@ -155,7 +155,7 @@ class TestDirectoryCacheValidation:
         to_delete.rmdir()
 
         # Validate — returns ALL directories, not just invalid ones
-        results = cache_manager.validate_directories()
+        results = cache_manager.list_directories(validate=True)
 
         expected_directory_count = 2
         assert len(results) == expected_directory_count
