@@ -1,9 +1,13 @@
 """Resolves"""
 
+import logging
+
 from porringer.backend.schema import GlobalConfiguration, ResolvedDirectories
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Plugin, PluginKind
 from porringer.schema import LocalConfiguration, PluginInfo
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_configuration(
@@ -81,5 +85,11 @@ def build_plugin_info(
                 tool_version=tool_version,
             )
         )
+
+    logger.debug(
+        'Built plugin info for %d plugins (%d installed)',
+        len(results),
+        sum(1 for r in results if r.installed),
+    )
 
     return results

@@ -219,6 +219,7 @@ class TestPipProgressLineParsing:
         assert progresses == sorted(progresses)  # monotonically increasing
 
 
+@pytest.mark.mock_packages
 class TestExecuteStream:
     """Tests for execute_stream async generator."""
 

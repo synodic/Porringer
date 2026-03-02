@@ -22,20 +22,14 @@ from porringer.plugin.pip.plugin import PIPEnvironment
 from porringer.plugin.pipx.plugin import PIPXEnvironment
 from porringer.plugin.pyenv.plugin import PyenvEnvironment
 from porringer.plugin.winget.plugin import WingetEnvironment
+from porringer.test.mock.subprocess import fake_proc as _fake_proc
+from tests.fixtures.http import setup_async_client as _setup_async_client
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-
-
-def _fake_proc(returncode: int = 0, stdout: str = '', stderr: str = '') -> AsyncMock:
-    """Create a mock asyncio subprocess process."""
-    proc = AsyncMock()
-    proc.returncode = returncode
-    proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
-    return proc
 
 
 def _make_params(
@@ -48,13 +42,6 @@ def _make_params(
         packages=[PackageRef.model_validate(p) for p in packages],
         include_prereleases=include_prereleases,
     )
-
-
-def _setup_async_client(mock_client: MagicMock, response: MagicMock) -> None:
-    """Wire up an ``httpx.AsyncClient`` mock for async context manager usage."""
-    instance = MagicMock(get=AsyncMock(return_value=response))
-    mock_client.return_value.__aenter__ = AsyncMock(return_value=instance)
-    mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 
 
 # =========================================================================

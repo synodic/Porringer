@@ -725,15 +725,13 @@ class TestPluginSpec:
     @staticmethod
     def test_package_spec_plugins_accepts_mixed() -> None:
         """PackageSpec.plugins accepts a mix of strings and objects."""
-        spec = PackageSpec.model_validate(
-            {
-                'name': 'pdm',
-                'plugins': [
-                    'cppython',
-                    {'name': 'another-plugin', 'include_prereleases': True},
-                ],
-            }
-        )
+        spec = PackageSpec.model_validate({
+            'name': 'pdm',
+            'plugins': [
+                'cppython',
+                {'name': 'another-plugin', 'include_prereleases': True},
+            ],
+        })
         expected_plugin_count = 2
         assert len(spec.plugins) == expected_plugin_count
         assert spec.plugins[0].name.name == 'cppython'
@@ -744,13 +742,11 @@ class TestPluginSpec:
     @staticmethod
     def test_plugin_prereleases_independent_of_parent() -> None:
         """Plugin include_prereleases does not inherit from the parent PackageSpec."""
-        spec = PackageSpec.model_validate(
-            {
-                'name': 'pdm',
-                'include_prereleases': True,
-                'plugins': ['cppython'],
-            }
-        )
+        spec = PackageSpec.model_validate({
+            'name': 'pdm',
+            'include_prereleases': True,
+            'plugins': ['cppython'],
+        })
         # Parent has include_prereleases=True, but the plugin string shorthand defaults to False
         assert spec.include_prereleases is True
         assert spec.plugins[0].include_prereleases is False

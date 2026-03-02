@@ -227,7 +227,7 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
     """
     infos = _scan_plugins(group, base_class, **kwargs)
     result = _build_instances(infos)
-    logger.info('Discovered %d %s plugin(s): %s', len(result), group, sorted(result))
+    logger.debug('Discovered %d %s plugin(s): %s', len(result), group, sorted(result))
     return result
 
 
@@ -266,7 +266,13 @@ def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
 
     result = _build_from_infos(env_infos, proj_infos, scm_infos)
     logger.info(
-        'Plugin discovery complete — environments: %s, project: %s, scm: %s',
+        'Plugin discovery: %d environments, %d project, %d scm',
+        len(result.environments),
+        len(result.project_environments),
+        len(result.scm_environments),
+    )
+    logger.debug(
+        'Discovered plugins — environments: %s, project: %s, scm: %s',
         sorted(result.environments),
         sorted(result.project_environments),
         sorted(result.scm_environments),

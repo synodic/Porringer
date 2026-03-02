@@ -69,6 +69,10 @@ porringer = "porringer.console.entry:app"
 asyncio_mode = "auto"
 log_cli = true
 testpaths = ["tests"]
+markers = [
+  "fresh_plugins: invalidate the plugin discovery cache before this test",
+  "mock_packages: use a cached package list instead of real subprocess calls",
+]
 
 [tool.ruff]
 line-length = 120

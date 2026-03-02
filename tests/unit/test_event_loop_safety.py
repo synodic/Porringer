@@ -9,6 +9,8 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from porringer.backend.command.sync import SyncCommands
 from porringer.schema import (
     ProgressEvent,
@@ -25,6 +27,7 @@ def _write_manifest(tmpdir: str, packages: dict[str, list[str]] | None = None) -
     return Path(tmpdir)
 
 
+@pytest.mark.mock_packages
 class TestEventLoopSafety:
     """Verify execute_stream never calls asyncio.run() internally."""
 

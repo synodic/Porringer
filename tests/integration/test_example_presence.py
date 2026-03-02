@@ -7,6 +7,8 @@ already installed when dry-running inside the development environment.
 
 from pathlib import Path
 
+import pytest
+
 from porringer.api import API
 from porringer.core.schema import PluginKind
 from porringer.schema import SetupParameters
@@ -19,6 +21,7 @@ _EXAMPLE_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'python-dev'
 _EXPECTED_PRESENT = {'pytest', 'pytest-cov', 'pytest-mock', 'pytest-asyncio', 'ruff', 'pyrefly'}
 
 
+@pytest.mark.fresh_plugins
 async def test_dev_deps_detected_as_present(test_api: API) -> None:
     """Dry-run the python-dev manifest and verify every dev dep is skipped as already installed."""
     results = await test_api.sync.run(SetupParameters(paths=_EXAMPLE_DIR, dry_run=True))

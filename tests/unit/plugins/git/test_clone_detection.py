@@ -10,16 +10,9 @@ from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Distribution, PluginParameters
 from porringer.plugin.git.plugin import GitScm
 from porringer.schema.execution import CloneStatusKind
+from porringer.test.mock.subprocess import fake_proc as _fake_proc
 
 _PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-
-
-def _fake_proc(returncode: int = 0, stdout: str = '', stderr: str = '') -> AsyncMock:
-    """Create a mock asyncio subprocess process with given results."""
-    proc = AsyncMock()
-    proc.returncode = returncode
-    proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
-    return proc
 
 
 # -- urls_match tests -------------------------------------------------

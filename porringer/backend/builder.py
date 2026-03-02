@@ -14,7 +14,6 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from porringer.core.schema import Distribution, Plugin, PluginDependency, PluginParameters
-from porringer.utility.exception import PluginDependencyError
 
 logger = logging.getLogger(__name__)
 
@@ -65,21 +64,19 @@ class Builder:
             try:
                 loaded_type = entry_point.load()
             except Exception as e:
-                logger.warning(f"Plugin '{entry_point.name}' could not be loaded: {e}. Skipping")
+                logger.warning("Plugin '%s' could not be loaded: %s. Skipping", entry_point.name, e)
                 continue
 
             plugin_name = str(canonicalize_name(entry_point.name))
 
             if entry_point.dist is None:
-                logger.error(f"Plugin '{plugin_name}' is not installed. Skipping")
+                logger.warning("Plugin '%s' is not installed. Skipping", plugin_name)
                 continue
 
             if not issubclass(loaded_type, base_class):
-                logger.warning(
-                    f"Found incompatible plugin. The '{plugin_name}' plugin must be an instance of '{group}'"
-                )
+                logger.warning("Incompatible plugin '%s' — expected a '%s' subclass", plugin_name, group)
             else:
-                logger.debug(f'{group} plugin found: {plugin_name}')
+                logger.debug('%s plugin found: %s', group, plugin_name)
                 plugin_types.append(PluginInformation(loaded_type, entry_point.dist, plugin_name))
 
         if check_dependencies:
@@ -124,14 +121,16 @@ class Builder:
     ) -> list[PluginInformation[T]]:
         """Resolves plugin dependencies, filtering out plugins with unmet dependencies.
 
+        Plugins whose required dependencies are not satisfied are
+        silently excluded from the returned list.  Optional
+        dependencies that are missing produce a warning but do not
+        prevent the plugin from being included.
+
         Args:
             plugins: List of discovered plugins
 
         Returns:
             Filtered list of plugins with satisfied dependencies
-
-        Raises:
-            PluginDependencyError: If a required dependency is missing
         """
         # Build a set of available plugin names (PEP 503 normalised)
         available_plugins = {info.name for info in plugins}
@@ -141,28 +140,38 @@ class Builder:
         for plugin_info in plugins:
             plugin_name = plugin_info.name
             dependencies = plugin_info.type.dependencies()
+            has_unmet_required = False
 
             for dep in dependencies:
                 # Skip dependencies that don't apply to the current platform
                 if not dep.is_applicable():
                     logger.debug(
-                        f"Plugin '{plugin_name}' dependency on '{dep.plugin}' "
-                        f'skipped (not applicable to current platform)'
+                        "Plugin '%s' dependency on '%s' skipped (not applicable to current platform)",
+                        plugin_name,
+                        dep.plugin,
                     )
                     continue
 
                 if str(canonicalize_name(dep.plugin)) not in available_plugins:
                     if dep.required:
-                        logger.error(f"Plugin '{plugin_name}' requires '{dep.plugin}' but it is not available")
-                        raise PluginDependencyError(plugin_name, dep.plugin)
+                        logger.warning(
+                            "Plugin '%s' requires '%s' but it is not available — skipping",
+                            plugin_name,
+                            dep.plugin,
+                        )
+                        has_unmet_required = True
+                        break
                     else:
                         logger.warning(
-                            f"Plugin '{plugin_name}' has optional dependency on '{dep.plugin}' which is not available"
+                            "Plugin '%s' has optional dependency on '%s' which is not available",
+                            plugin_name,
+                            dep.plugin,
                         )
                 else:
-                    logger.debug(f"Plugin '{plugin_name}' dependency on '{dep.plugin}' satisfied")
+                    logger.debug("Plugin '%s' dependency on '%s' satisfied", plugin_name, dep.plugin)
 
-            resolved_plugins.append(plugin_info)
+            if not has_unmet_required:
+                resolved_plugins.append(plugin_info)
 
         return resolved_plugins
 

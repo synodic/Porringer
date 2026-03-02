@@ -26,7 +26,17 @@ class TestCommandSelf:
         config = LocalConfiguration()
         api = API(config)
 
-        result = await api.check_self_updates()
+        mock_response = Mock()
+        mock_response.json.return_value = {'info': {'version': '0.0.1'}}
+        mock_response.raise_for_status = Mock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+
+        with patch('porringer.backend.command.self.httpx.AsyncClient', return_value=mock_client):
+            result = await api.check_self_updates()
 
         assert isinstance(result, PackageUpdateInfo)
         assert result.name == PACKAGE_NAME

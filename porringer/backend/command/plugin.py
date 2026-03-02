@@ -55,7 +55,7 @@ class PluginCommands:
         Returns:
             A list of registered plugins, optionally filtered by kind.
         """
-        logger.info('Listing plugins')
+        logger.debug('Listing plugins')
 
         environments = PluginCommands._discover_environments()
 
@@ -95,17 +95,15 @@ class PluginCommands:
             The packages managed by the named plugin.
 
         Raises:
-            PluginError: If the plugin is not found or not available.
+            PluginError: If the plugin is not found.
         """
-        logger.info(f'Listing packages for plugin: {plugin_name}')
+        logger.debug('Listing packages for plugin: %s', plugin_name)
 
         environments = PluginCommands._discover_environments()
         normalized = str(canonicalize_name(plugin_name))
 
         for name, env in environments.items():
             if str(canonicalize_name(name)) == normalized:
-                if not type(env).is_available():
-                    raise PluginError(f"Plugin '{plugin_name}' is not available on this system")
                 return await env.packages(project_path=project_path)
 
         available = sorted(environments.keys())
@@ -181,7 +179,7 @@ class PluginCommands:
 
         if dry_run:
             cmd_str = ' '.join(args)
-            logger.info(f'Dry run: would execute: {cmd_str}')
+            logger.info('Dry run: would execute: %s', cmd_str)
             return PluginOperationResult(
                 plugin_name=name,
                 success=True,
@@ -191,27 +189,27 @@ class PluginCommands:
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=timeout)
             if result.returncode != 0:
-                logger.error(f'{verb.capitalize()} failed for {name}: {result.stderr}')
+                logger.error('%s failed for %s: %s', verb.capitalize(), name, result.stderr)
                 return PluginOperationResult(
                     plugin_name=name,
                     success=False,
                     message=f'{verb.capitalize()} failed: {result.stderr.strip()}',
                 )
-            logger.info(f'Successfully {past} plugin: {name}')
+            logger.info('Successfully %s plugin: %s', past, name)
             return PluginOperationResult(
                 plugin_name=name,
                 success=True,
                 message=f"Successfully {past} plugin '{name}'",
             )
         except FileNotFoundError as e:
-            logger.error(f'Command not found: {e}')
+            logger.error('Command not found: %s', e)
             return PluginOperationResult(
                 plugin_name=name,
                 success=False,
                 message=f'Command not found: {e}',
             )
         except subprocess.SubprocessError as e:
-            logger.error(f'Subprocess error: {e}')
+            logger.error('Subprocess error: %s', e)
             return PluginOperationResult(
                 plugin_name=name,
                 success=False,
@@ -236,7 +234,7 @@ class PluginCommands:
         Raises:
             PluginError: If installation fails or package is not a valid plugin.
         """
-        logger.info(f'Installing plugin: {name}')
+        logger.info('Installing plugin: %s', name)
 
         # Get plugins before installation for comparison
         plugins_before = PluginCommands._get_existing_plugin_packages()
@@ -255,7 +253,7 @@ class PluginCommands:
         new_plugins = plugins_after - plugins_before
 
         if not new_plugins:
-            logger.warning(f"Package '{name}' does not provide a porringer plugin entry point. Uninstalling.")
+            logger.warning("Package '%s' does not provide a porringer plugin entry point. Uninstalling.", name)
             PluginCommands._uninstall_package(name)
             groups = ', '.join(PluginCommands._PLUGIN_GROUPS)
             raise PluginError(f"Package '{name}' is not a valid Porringer plugin (no entry point in {groups})")
@@ -289,7 +287,7 @@ class PluginCommands:
         results: list[PluginOperationResult] = []
 
         for name in names:
-            logger.info(f'Uninstalling plugin: {name}')
+            logger.info('Uninstalling plugin: %s', name)
             args = PluginCommands._build_uninstall_args(name)
             results.append(
                 PluginCommands._run_plugin_operation(name, args, verb='uninstall', dry_run=dry_run, timeout=60)
@@ -311,7 +309,7 @@ class PluginCommands:
         results: list[PluginOperationResult] = []
 
         for name in names:
-            logger.info(f'Updating plugin: {name}')
+            logger.info('Updating plugin: %s', name)
             args = PluginCommands._build_update_args(name)
             results.append(
                 PluginCommands._run_plugin_operation(name, args, verb='update', dry_run=dry_run, timeout=120)

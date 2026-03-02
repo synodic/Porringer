@@ -2,15 +2,18 @@
 
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from rich.console import Console
 
 from porringer.api import API
 from porringer.backend.cache import DirectoryCacheManager
+from porringer.backend.command.core import discovery as _discovery
 from porringer.backend.command.core.discovery import invalidate_plugin_cache
 from porringer.backend.schema import GlobalConfiguration
 from porringer.console.schema import ConsoleConfiguration
+from porringer.core.schema import Package
 from porringer.schema import (
     BatchSetupResults,
     LocalConfiguration,
@@ -19,6 +22,83 @@ from porringer.schema import (
     SetupParameters,
     SetupResults,
 )
+
+# Register shared fixture modules so all tests can use them without imports.
+pytest_plugins = [
+    'tests.fixtures.manifests',
+    'tests.fixtures.api',
+    'tests.fixtures.packages',
+]
+
+# Extend the plugin-scan cache TTL so that it never expires mid-suite.
+# Tests that genuinely need a fresh scan use the ``@pytest.mark.fresh_plugins``
+# marker which calls ``invalidate_plugin_cache()`` explicitly.
+_discovery.CACHE_TTL = 600.0
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers."""
+    config.addinivalue_line(
+        'markers',
+        'fresh_plugins: invalidate the plugin discovery cache before this test',
+    )
+    config.addinivalue_line(
+        'markers',
+        'mock_packages: use a cached package list instead of real subprocess calls',
+    )
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Invalidate the plugin cache only for tests marked ``@pytest.mark.fresh_plugins``."""
+    if item.get_closest_marker('fresh_plugins'):
+        invalidate_plugin_cache()
+
+
+@pytest.fixture(autouse=True)
+def _apply_mock_packages(
+    request: pytest.FixtureRequest,
+    _cached_pip_packages: list[Package],
+    _session_plugins,
+):
+    """Patch ``Environment.packages()``, ``check_updates()``, and ``discover_all_plugins()``.
+
+    Applied when the test is decorated with ``@pytest.mark.mock_packages``.
+    The replacement coroutines return the session-cached pip package list (for
+    ``packages()``) and an empty list (for ``check_updates()``).
+    ``discover_all_plugins`` returns a shallow copy of the session-cached
+    plugin set, avoiding repeated entry-point scanning and plugin
+    instantiation.
+    """
+    if not request.node.get_closest_marker('mock_packages'):
+        yield
+        return
+
+    cached = _cached_pip_packages
+    session_plugins = _session_plugins
+
+    async def _fast_packages(self, *, project_path=None, runtime_context=None):  # noqa: ARG001
+        return cached
+
+    async def _noop_check_updates(self, params):  # noqa: ARG001
+        return []
+
+    def _fast_discover(*, use_cache=False):  # noqa: ARG001
+        return session_plugins.copy()
+
+    with (
+        patch('porringer.plugin.pip.plugin.PIPEnvironment.packages', _fast_packages),
+        patch('porringer.plugin.pip.plugin.PIPEnvironment.check_updates', _noop_check_updates),
+        patch('porringer.plugin.uv.plugin.UvEnvironment.packages', _fast_packages),
+        patch('porringer.plugin.uv.plugin.UvEnvironment.check_updates', _noop_check_updates),
+        # Patch discover_all_plugins at every import site
+        patch('porringer.backend.command.core.discovery.discover_all_plugins', _fast_discover),
+        patch('porringer.backend.command.core.action_builder.discover_all_plugins', _fast_discover),
+        patch('porringer.backend.command.core.execution.discover_all_plugins', _fast_discover),
+        patch('porringer.backend.command.sync.discover_all_plugins', _fast_discover),
+        patch('porringer.backend.command.manifest.discover_all_plugins', _fast_discover),
+        patch('porringer.api.discover_all_plugins', _fast_discover),
+    ):
+        yield
 
 
 async def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
@@ -53,13 +133,13 @@ async def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupRes
     return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
 
 
-@pytest.fixture(autouse=True)
-def _invalidate_plugin_cache() -> None:
-    """Clear the module-level plugin cache before every test.
+@pytest.fixture
+def fresh_plugin_cache() -> None:
+    """Manually invalidate the plugin discovery cache.
 
-    The discovery cache (30 s TTL) holds live plugin instances.
-    Clearing it ensures each test starts with freshly-discovered
-    plugins and avoids any stale state leaking across test boundaries.
+    Use this fixture (or the ``@pytest.mark.fresh_plugins`` marker)
+    in tests that need a guaranteed-fresh plugin scan.  Most unit
+    tests mock plugin discovery and do not need this.
     """
     invalidate_plugin_cache()
 

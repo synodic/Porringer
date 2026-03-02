@@ -24,9 +24,13 @@ class TestBootstrapPreview:
     """Preview the bootstrap manifest and verify its action plan."""
 
     @staticmethod
-    @pytest.fixture
+    @pytest.fixture(scope='class')
     def preview() -> SetupResults:
-        """Parse the bootstrap manifest."""
+        """Parse the bootstrap manifest.
+
+        Class-scoped: the manifest is parsed once and shared across
+        every test in this class (all tests are read-only).
+        """
         return SyncCommands.parse_manifest(_BOOTSTRAP_DIR)
 
     @staticmethod

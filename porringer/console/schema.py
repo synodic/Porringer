@@ -9,6 +9,7 @@ from rich.console import Console
 from porringer.schema import LocalConfiguration
 
 MAX_VERBOSITY_LEVEL = 3
+VERBOSITY_DEBUG_THRESHOLD = 2
 
 
 @dataclass(slots=True)
