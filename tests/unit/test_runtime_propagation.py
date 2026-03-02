@@ -72,6 +72,10 @@ class _MockRuntimeProvider(Environment):
         """Resolve a tagged runtime to a mock path."""
         return self._resolved
 
+    async def available_tags(self) -> list[str]:
+        """Return a canned tag list for structural-subtyping compliance."""
+        return ['3.14'] if self._resolved is not None else []
+
     @override
     def install_command(
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None

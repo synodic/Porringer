@@ -200,13 +200,21 @@ class Builder:
 
         Scans *environments* for :class:`RuntimeProvider` instances that
         are supported and available on the current system, queries each
-        for installed runtimes, picks the highest version per runtime
-        *kind*, and resolves its executable path.
+        for available runtime tags via
+        :meth:`~RuntimeProvider.available_tags`, picks the highest
+        version per runtime *kind*, and resolves its executable path.
 
-        This mirrors what the sync pipeline does in
-        ``_propagate_runtime()`` but is decoupled from ``SetupAction``
-        objects so it can be used by the query path
-        (``list_packages``, ``build_plugin_info``, etc.).
+        Unlike the sync pipeline's ``_propagate_runtime()`` (which
+        operates on ``SetupAction`` objects), this method is decoupled
+        from the action graph so it can be used by the query path
+        (``list_packages``, ``build_plugin_info``, ``uninstall``,
+        etc.).
+
+        ``available_tags()`` deliberately includes runtimes that were
+        not installed by the provider itself (e.g. python.org or
+        Microsoft Store installs visible to the ``py`` launcher) so
+        that downstream ``RuntimeConsumer`` plugins can still target
+        the correct interpreter.
 
         Args:
             environments: Name-keyed dict of plugin instances
@@ -231,30 +239,30 @@ class Builder:
                 continue
 
             try:
-                installed = await env.packages()
+                tags = await env.available_tags()
             except Exception:
-                logger.debug("Failed to list runtimes for provider '%s'", name, exc_info=True)
+                logger.debug("Failed to list available tags for provider '%s'", name, exc_info=True)
                 continue
 
-            if not installed:
-                logger.debug("RuntimeProvider '%s' reports no installed runtimes", name)
+            if not tags:
+                logger.debug("RuntimeProvider '%s' reports no available tags", name)
                 continue
 
-            # Sort by Version descending to resolve the highest installed runtime
-            sorted_runtimes = sorted(
-                installed,
-                key=lambda pkg: Version(pkg.version) if pkg.version else Version('0'),
+            # Sort by Version descending to resolve the highest available runtime
+            sorted_tags = sorted(
+                tags,
+                key=lambda tag: Version(tag) if tag else Version('0'),
                 reverse=True,
             )
 
-            for runtime_pkg in sorted_runtimes:
+            for tag in sorted_tags:
                 try:
-                    executable = await env.resolve_executable(runtime_pkg.name)
+                    executable = await env.resolve_executable(tag)
                 except Exception:
                     logger.debug(
                         "resolve_executable failed for '%s' tag '%s'",
                         name,
-                        runtime_pkg.name,
+                        tag,
                         exc_info=True,
                     )
                     continue
@@ -264,7 +272,7 @@ class Builder:
                         "Resolved runtime '%s' via provider '%s': tag=%s path=%s",
                         kind,
                         name,
-                        runtime_pkg.name,
+                        tag,
                         executable,
                     )
                     break  # One executable per kind is sufficient
