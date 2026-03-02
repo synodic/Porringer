@@ -53,12 +53,16 @@ class PIPEnvironment(PythonEnvironment):
     @classmethod
     @override
     def is_available(cls) -> bool:
-        """Checks if pip is usable.
+        """Check if pip is on PATH as a standalone executable.
 
-        Requires the ``pip`` executable to be on PATH.  Environments
-        that only have ``python`` (e.g. uv-created virtual
-        environments without pip) should use the ``uv`` plugin
-        instead.
+        This is the **initial discovery** check used before any runtime
+        has been resolved.  It only looks for a ``pip`` executable on
+        PATH.
+
+        Runtime-aware availability (e.g. ``python -m pip`` via a
+        resolved interpreter) is handled by
+        :meth:`~PythonEnvironment.is_available_for`, which is called
+        during deferred resolution after the RUNTIME phase.
 
         Returns:
             True if ``pip`` is found on PATH, False otherwise.

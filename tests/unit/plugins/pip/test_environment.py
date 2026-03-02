@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import json
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -31,6 +32,94 @@ class TestEnvironment(EnvironmentUnitTests[PIPEnvironment]):
             The type of the Environment
         """
         return PIPEnvironment
+
+
+# ---------------------------------------------------------------------------
+# is_available_for() tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsAvailableFor:
+    """Runtime-aware availability checks for the pip plugin."""
+
+    @staticmethod
+    def test_returns_true_when_module_importable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """is_available_for() returns True when the target interpreter has pip."""
+        python = tmp_path / 'python.exe'
+        python.touch()
+        ctx = RuntimeContext(executables={'python': python})
+
+        # Simulate a successful `python -c "import pip"` subprocess
+        monkeypatch.setattr(
+            subprocess,
+            'run',
+            lambda *a, **kw: subprocess.CompletedProcess(a[0], returncode=0),
+        )
+        assert PIPEnvironment.is_available_for(ctx) is True
+
+    @staticmethod
+    def test_returns_false_when_module_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """is_available_for() returns False when the target interpreter lacks pip."""
+        python = tmp_path / 'python.exe'
+        python.touch()
+        ctx = RuntimeContext(executables={'python': python})
+
+        # Simulate a failed `python -c "import pip"` subprocess
+        monkeypatch.setattr(
+            subprocess,
+            'run',
+            lambda *a, **kw: subprocess.CompletedProcess(a[0], returncode=1),
+        )
+        assert PIPEnvironment.is_available_for(ctx) is False
+
+    @staticmethod
+    def test_returns_false_on_subprocess_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """is_available_for() returns False when the subprocess fails to start."""
+        python = tmp_path / 'python.exe'
+        python.touch()
+        ctx = RuntimeContext(executables={'python': python})
+
+        def _raise(*a: Any, **kw: Any) -> None:
+            raise OSError('not found')
+
+        monkeypatch.setattr(subprocess, 'run', _raise)
+        assert PIPEnvironment.is_available_for(ctx) is False
+
+    @staticmethod
+    def test_probes_runtime_interpreter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """is_available_for() probes the runtime context interpreter, not sys.executable."""
+        python = tmp_path / 'special-python'
+        python.touch()
+        ctx = RuntimeContext(executables={'python': python})
+
+        captured_args: list[Any] = []
+
+        def _capture_run(args: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
+            captured_args.append(args)
+            return subprocess.CompletedProcess(args, returncode=0)
+
+        monkeypatch.setattr(subprocess, 'run', _capture_run)
+        PIPEnvironment.is_available_for(ctx)
+
+        assert len(captured_args) == 1
+        assert captured_args[0][0] == str(python)
+
+    @staticmethod
+    def test_falls_back_to_sys_executable(monkeypatch: pytest.MonkeyPatch) -> None:
+        """is_available_for() uses sys.executable when runtime_context has no Python."""
+        ctx = RuntimeContext()  # empty — no resolved runtime
+
+        captured_args: list[Any] = []
+
+        def _capture_run(args: Any, **kw: Any) -> subprocess.CompletedProcess[str]:
+            captured_args.append(args)
+            return subprocess.CompletedProcess(args, returncode=0)
+
+        monkeypatch.setattr(subprocess, 'run', _capture_run)
+        PIPEnvironment.is_available_for(ctx)
+
+        assert len(captured_args) == 1
+        assert captured_args[0][0] == sys.executable
 
 
 # ---------------------------------------------------------------------------

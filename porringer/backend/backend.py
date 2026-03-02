@@ -10,6 +10,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Mapping
 
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Ecosystem, Plugin, PluginKind
 
 logger = logging.getLogger(__name__)
@@ -38,15 +39,21 @@ class BackendResolver:
         self,
         plugins: Mapping[str, BackendPlugin],
         preferences: Mapping[Ecosystem, str] | None = None,
+        runtime_context: RuntimeContext | None = None,
     ) -> None:
         """Initialize the backend resolver with available plugins and preferences.
 
         Args:
             plugins: All instantiated plugins keyed by canonical name.
             preferences: Optional ecosystem → plugin-name preference mapping.
+            runtime_context: Resolved runtime executables.  When provided,
+                ``RuntimeConsumer`` plugins are probed via
+                ``is_available_for(runtime_context)`` instead of the
+                class-level ``is_available()``.
         """
         self._all_plugins: dict[str, BackendPlugin] = dict(plugins)
         self._preferences = preferences or {}
+        self._runtime_context = runtime_context
 
         # Index: (kind, ecosystem) -> [plugin_name, ...]
         self._backend_plugins: dict[tuple[PluginKind, Ecosystem], list[str]] = defaultdict(list)
@@ -159,7 +166,14 @@ class BackendResolver:
         return suitable[0]
 
     def _is_suitable(self, plugin_name: str) -> bool:
-        """Check if *plugin_name* is both supported and available."""
+        """Check if *plugin_name* is both supported and available.
+
+        When a ``runtime_context`` was provided at construction time
+        and the plugin implements ``RuntimeConsumer``, the runtime-aware
+        ``is_available_for(runtime_context)`` is used instead of the
+        plain ``is_available()`` so that module-only tools (e.g.
+        ``python -m pip``) can be detected in the target interpreter.
+        """
         plugin = self._all_plugins.get(plugin_name)
         if plugin is None:
             return False
@@ -167,6 +181,9 @@ class BackendResolver:
             plugin_type = type(plugin)
             if not plugin_type.is_supported():
                 return False
+            # Runtime-aware probe when a runtime context is available
+            if self._runtime_context is not None and isinstance(plugin, RuntimeConsumer):
+                return plugin_type.is_available_for(self._runtime_context)
             return plugin.is_available()
         except Exception:
             logger.warning("Suitability check failed for plugin '%s'", plugin_name, exc_info=True)

@@ -99,6 +99,17 @@ class PIPXEnvironment(PythonEnvironment):
         """Pipx wraps the `pipx` CLI."""
         return 'pipx'
 
+    @classmethod
+    @override
+    def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
+        """Pipx is a standalone binary — availability is PATH-based only.
+
+        Unlike ``pip`` (which runs as ``python -m pip``), pipx is
+        always invoked directly.  A resolved Python runtime does not
+        affect whether pipx itself is installed.
+        """
+        return cls.is_available()
+
     @override
     def install_command(
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
