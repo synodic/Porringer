@@ -1,7 +1,7 @@
 """Unit tests for the PyenvEnvironment plugin."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from packaging.version import Version
@@ -9,17 +9,10 @@ from packaging.version import Version
 from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Distribution, PackageRef, PluginParameters
 from porringer.plugin.pyenv.plugin import PyenvEnvironment
+from porringer.test.mock.subprocess import fake_proc as _fake_proc
 from porringer.test.pytest.tests import EnvironmentUnitTests
 
 _PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.1')))
-
-
-def _fake_proc(returncode: int = 0, stdout: str = '', stderr: str = '') -> AsyncMock:
-    """Create a mock asyncio subprocess process."""
-    proc = AsyncMock()
-    proc.returncode = returncode
-    proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
-    return proc
 
 
 @pytest.fixture

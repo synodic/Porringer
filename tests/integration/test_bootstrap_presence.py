@@ -22,15 +22,20 @@ from porringer.schema import SetupActionResult, SetupParameters, SkipReason
 _BOOTSTRAP_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'python-bootstrap'
 
 
+@pytest.mark.fresh_plugins
 class TestBootstrapPresence:
     """Dry-run the python-bootstrap example and verify presence detection."""
 
     @staticmethod
-    @pytest.fixture
-    async def dry_run_results(test_api: API) -> list[SetupActionResult]:
-        """Dry-run the bootstrap manifest and return all action results."""
+    @pytest.fixture(scope='class')
+    async def dry_run_results(session_api: API) -> list[SetupActionResult]:
+        """Dry-run the bootstrap manifest and return all action results.
+
+        Class-scoped: the dry-run is executed once and shared across
+        every test in this class (all tests are read-only).
+        """
         setup_params = SetupParameters(paths=_BOOTSTRAP_DIR, dry_run=True)
-        results = await test_api.sync.run(setup_params)
+        results = await session_api.sync.run(setup_params)
 
         assert len(results.manifest_results) == 1
         return results.manifest_results[0].results

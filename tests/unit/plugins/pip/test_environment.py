@@ -15,6 +15,7 @@ from packaging.version import Version
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Distribution, Package, PluginParameters
 from porringer.plugin.pip.plugin import PIPEnvironment
+from porringer.test.mock.subprocess import fake_proc as _fake_proc
 from porringer.test.pytest.tests import EnvironmentUnitTests
 
 
@@ -48,14 +49,6 @@ def _make_env() -> PIPEnvironment:
     """Create a fresh PIPEnvironment for testing (no cached packages)."""
     params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
     return PIPEnvironment(params)
-
-
-def _fake_proc(returncode: int = 0, stdout: str = '', stderr: str = '') -> AsyncMock:
-    """Create a mock asyncio subprocess process."""
-    proc = AsyncMock()
-    proc.returncode = returncode
-    proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
-    return proc
 
 
 def _mock_subprocess(
@@ -98,13 +91,11 @@ class TestVenvWithPip:
     @staticmethod
     async def test_skips_entries_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
         """Entries missing a `name` key are silently dropped."""
-        pip_json = json.dumps(
-            [
-                {'name': 'ruff', 'version': '0.15.0'},
-                {'version': '1.0.0'},
-                {'name': None, 'version': '2.0.0'},
-            ]
-        )
+        pip_json = json.dumps([
+            {'name': 'ruff', 'version': '0.15.0'},
+            {'version': '1.0.0'},
+            {'name': None, 'version': '2.0.0'},
+        ])
         _mock_subprocess(monkeypatch, lambda *a, **kw: _fake_proc(stdout=pip_json))
 
         result = await _make_env().packages()
@@ -134,14 +125,14 @@ class TestVenvWithoutPip:
     """
 
     @staticmethod
-    async def test_pip_failure_falls_back_to_importlib(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_pip_failure_falls_back_to_importlib(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Pip list fails → importlib.metadata fallback used."""
-        importlib_json = json.dumps(
-            [
-                {'name': 'packaging', 'version': '24.0'},
-                {'name': 'pytest', 'version': '9.0.2'},
-            ]
-        )
+        importlib_json = json.dumps([
+            {'name': 'packaging', 'version': '24.0'},
+            {'name': 'pytest', 'version': '9.0.2'},
+        ])
         call_count = 0
 
         async def run(*args: Any, **kw: Any) -> AsyncMock:
@@ -228,7 +219,9 @@ class TestCaching:
     """
 
     @staticmethod
-    async def test_each_call_queries_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_each_call_queries_subprocess(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Each packages() call invokes the subprocess (no internal memoisation)."""
         call_count = 0
 
@@ -248,7 +241,9 @@ class TestCaching:
         assert call_count == _expected_subprocess_calls
 
     @staticmethod
-    async def test_separate_instances_independent(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_separate_instances_independent(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Each PIPEnvironment instance queries independently."""
         call_count = 0
 

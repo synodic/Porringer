@@ -2,15 +2,15 @@
 
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from packaging.version import Version
 
 from porringer.api import API
-from porringer.backend.builder import Builder
+from porringer.backend.builder import Builder, PluginInformation
 from porringer.backend.command.plugin import PluginCommands
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.schema import Distribution, Ecosystem, Package, PluginDependency, PluginKind, PluginParameters
 from porringer.schema import LocalConfiguration
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import is_pipx_installation
@@ -22,6 +22,13 @@ NUM_PLUGINS_PARTIAL = 2
 
 class TestCommandPlugin:
     """Test the command 'plugin'"""
+
+    @pytest.fixture(autouse=True)
+    @staticmethod
+    def _skip_tool_version():
+        """Bypass ``tool_version()`` subprocess calls — this test only verifies listing."""
+        with patch('porringer.backend.resolver.ToolBasedPlugin.tool_version', return_value=None):
+            yield
 
     @staticmethod
     def test_plugin_list() -> None:
@@ -35,11 +42,8 @@ class TestCommandPlugin:
         # Each result should have an installed status based on is_available()
         for result in results:
             assert isinstance(result.installed, bool)
-            # tool_version should be a Version when installed, None otherwise
-            if result.installed:
-                assert result.tool_version is None or isinstance(result.tool_version, Version)
-            else:
-                assert result.tool_version is None
+            # tool_version is None because we patched it above
+            assert result.tool_version is None
 
     @staticmethod
     def test_plugin_list_with_missing_module() -> None:
@@ -316,3 +320,101 @@ class TestPipxDetection:
         venv_path = os.sep.join(['', 'home', 'user', 'projects', 'porringer', '.venv'])
         with patch.object(sys, 'prefix', venv_path):
             assert not is_pipx_installation()
+
+
+# ---------------------------------------------------------------------------
+# Regression: _resolve_dependencies must filter, not crash
+# ---------------------------------------------------------------------------
+
+
+def _make_dep_stub(
+    name: str,
+    *,
+    deps: list[PluginDependency] | None = None,
+) -> PluginInformation:
+    """Build a ``PluginInformation`` wrapping a dynamic stub class."""
+    dep_list = deps if deps is not None else []
+
+    class _Dynamic:
+        _distribution: Distribution
+
+        def __init__(self, parameters: PluginParameters) -> None:
+            self._distribution = parameters.distribution
+
+        @staticmethod
+        def ecosystem() -> Ecosystem | None:
+            return Ecosystem('test')
+
+        @staticmethod
+        def plugin_kind() -> PluginKind:
+            return PluginKind.PACKAGE
+
+        @staticmethod
+        def is_supported() -> bool:
+            return True
+
+        @classmethod
+        def is_available(cls) -> bool:
+            return True
+
+        @staticmethod
+        def package_name_validator() -> str | None:
+            return None
+
+        @staticmethod
+        def dependencies() -> list[PluginDependency]:
+            return dep_list
+
+        @property
+        def distribution(self) -> Distribution:
+            return self._distribution
+
+    _Dynamic.__qualname__ = name
+
+    mock_dist = MagicMock()
+    mock_dist.version = '0.0.0'
+    return PluginInformation(type=_Dynamic, distribution=mock_dist, name=name)
+
+
+class TestResolveDependenciesFilter:
+    """_resolve_dependencies must filter plugins with unmet required deps.
+
+    Filters instead of raising and crashing all discovery.
+    """
+
+    @staticmethod
+    def test_unmet_required_dep_is_filtered() -> None:
+        """A plugin with an unmet required dependency is excluded."""
+        dep = PluginDependency(plugin='nonexistent', required=True)
+        result = Builder._resolve_dependencies([_make_dep_stub('needs-dep', deps=[dep]), _make_dep_stub('no-dep')])
+
+        names = [info.name for info in result]
+        assert 'no-dep' in names
+        assert 'needs-dep' not in names
+
+
+# ---------------------------------------------------------------------------
+# Regression: list_packages must not gate on is_available()
+# ---------------------------------------------------------------------------
+
+
+class TestListPackagesNoAvailabilityGate:
+    """list_packages must delegate to packages() even when is_available() returns False.
+
+    Lets the plugin's own fallbacks work.
+    """
+
+    @staticmethod
+    async def test_unavailable_plugin_delegates_to_packages() -> None:
+        """packages() is called regardless of is_available()."""
+        mock_env = MagicMock(spec=Environment)
+        mock_env.is_available = classmethod(lambda cls: False)
+
+        expected = [Package(name='foo', version='1.0.0')]
+        mock_env.packages = AsyncMock(return_value=expected)
+
+        with patch.object(PluginCommands, '_discover_environments', return_value={'mock-env': mock_env}):
+            result = await PluginCommands.list_packages('mock-env')
+
+        assert result == expected
+        mock_env.packages.assert_called_once()

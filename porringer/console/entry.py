@@ -13,7 +13,7 @@ from porringer.console.command.download import app as download_app
 from porringer.console.command.plugin import app as plugin_app
 from porringer.console.command.self import app as self_app
 from porringer.console.command.sync import app as sync_app
-from porringer.console.schema import LOG_LEVELS, MAX_VERBOSITY_LEVEL, ConsoleConfiguration
+from porringer.console.schema import LOG_LEVELS, MAX_VERBOSITY_LEVEL, VERBOSITY_DEBUG_THRESHOLD, ConsoleConfiguration
 
 __version__ = version('porringer')
 
@@ -81,3 +81,19 @@ def application(
 
     handler = TyperHandler(configuration.console)
     logger.addHandler(handler)
+
+    # The porringer logger has its own handler; disable propagation so
+    # records are not also handled by the root logger.  This avoids
+    # duplicate output and, under test runners that temporarily swap
+    # sys.stdout / sys.stderr (e.g. pytest log_cli + CliRunner),
+    # prevents stream wrappers from being garbage-collected during
+    # capture suspension (Python 3.14 raises on BytesIO.getvalue()
+    # after close).
+    logger.propagate = False
+
+    if debug or verbose >= VERBOSITY_DEBUG_THRESHOLD:
+        logger.setLevel(logging.DEBUG)
+    elif verbose >= 1:
+        logger.setLevel(logging.INFO)
+    else:
+        logger.setLevel(logging.WARNING)
