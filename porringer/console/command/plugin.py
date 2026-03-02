@@ -25,7 +25,7 @@ def plugin_list(
     """
     configuration = context.ensure_object(ConsoleConfiguration)
 
-    results = PluginCommands.list()
+    results = asyncio.run(PluginCommands.list())
 
     if not results:
         configuration.console.print('[yellow]No plugins found[/yellow]')

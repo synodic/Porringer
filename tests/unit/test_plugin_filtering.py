@@ -3,12 +3,14 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from porringer.api import API
+from porringer.backend.builder import Builder
 from porringer.backend.command.sync import SyncCommands
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import PluginKind
 from porringer.schema import (
     SetupParameters,
@@ -157,34 +159,37 @@ class TestListPluginsKinds:
     @staticmethod
     def _skip_tool_version():
         """Bypass ``tool_version()`` subprocess calls — these tests only verify kind filtering."""
-        with patch('porringer.backend.resolver.ToolBasedPlugin.tool_version', return_value=None):
+        with (
+            patch('porringer.backend.resolver.ToolBasedPlugin.tool_version', return_value=None),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
+        ):
             yield
 
     @staticmethod
-    def test_kinds_none_returns_all(session_api: API) -> None:
+    async def test_kinds_none_returns_all(session_api: API) -> None:
         """When kinds is None, all plugins should be returned."""
-        results = session_api.plugin.list()
+        results = await session_api.plugin.list()
         assert len(results) > 0
 
     @staticmethod
     @pytest.mark.parametrize('kind', [PluginKind.PACKAGE, PluginKind.TOOL, PluginKind.PROJECT])
-    def test_kinds_filter_single(session_api: API, kind: PluginKind) -> None:
+    async def test_kinds_filter_single(session_api: API, kind: PluginKind) -> None:
         """Filtering by a single kind should only return plugins of that kind."""
-        results = session_api.plugin.list(kinds=[kind])
+        results = await session_api.plugin.list(kinds=[kind])
         for result in results:
             assert result.kind == kind
 
     @staticmethod
-    def test_kinds_filter_multiple(session_api: API) -> None:
+    async def test_kinds_filter_multiple(session_api: API) -> None:
         """Filtering by multiple kinds should return plugins of all requested kinds."""
-        results = session_api.plugin.list(kinds=[PluginKind.PACKAGE, PluginKind.TOOL])
+        results = await session_api.plugin.list(kinds=[PluginKind.PACKAGE, PluginKind.TOOL])
         for result in results:
             assert result.kind in {PluginKind.PACKAGE, PluginKind.TOOL}
 
     @staticmethod
-    def test_list_results_include_kind(session_api: API) -> None:
+    async def test_list_results_include_kind(session_api: API) -> None:
         """Every result should have a kind field populated."""
-        results = session_api.plugin.list()
+        results = await session_api.plugin.list()
         for result in results:
             assert isinstance(result.kind, PluginKind)
 

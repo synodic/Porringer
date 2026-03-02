@@ -43,15 +43,28 @@ class PluginCommands:
         return {info.name: inst for info, inst in zip(environment_types, instances, strict=True)}
 
     @staticmethod
-    def list(*, kinds: builtins.list[PluginKind] | None = None) -> builtins.list[PluginInfo]:
+    async def list(
+        *,
+        kinds: builtins.list[PluginKind] | None = None,
+        runtime_context: RuntimeContext | None = None,
+    ) -> builtins.list[PluginInfo]:
         """Lists all registered plugins across every plugin group.
 
         Discovers `environment` (package / tool / runtime),
         `project_environment` (project sync), and `scm` (source control)
         plugins.  Results can be filtered by `kinds`.
 
+        When *runtime_context* is ``None`` (the default), the method
+        auto-resolves a context from available ``RuntimeProvider``
+        plugins so that ``RuntimeConsumer`` plugins (e.g. pip) are
+        correctly reported as installed even when their tool is not
+        on PATH.
+
         Args:
             kinds: Only include plugins matching these kinds. `None` returns all.
+            runtime_context: Pre-resolved runtime context.  When
+                ``None``, a context is resolved automatically from
+                available runtime providers.
 
         Returns:
             A list of registered plugins, optionally filtered by kind.
@@ -59,6 +72,10 @@ class PluginCommands:
         logger.debug('Listing plugins')
 
         environments = PluginCommands._discover_environments()
+
+        # Auto-resolve runtime context when the caller did not supply one.
+        if runtime_context is None:
+            runtime_context = await Builder.resolve_runtime_context(environments)
 
         # Project-environment plugins (project sync)
         project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
@@ -72,7 +89,7 @@ class PluginCommands:
 
         all_plugins: dict[str, Plugin] = {**environments, **projects, **scm_plugins}
 
-        return build_plugin_info(all_plugins, kinds=kinds)
+        return build_plugin_info(all_plugins, kinds=kinds, runtime_context=runtime_context)
 
     @staticmethod
     async def list_packages(

@@ -32,16 +32,19 @@ class TestCommandPlugin:
     @staticmethod
     def _skip_tool_version():
         """Bypass ``tool_version()`` subprocess calls — this test only verifies listing."""
-        with patch('porringer.backend.resolver.ToolBasedPlugin.tool_version', return_value=None):
+        with (
+            patch('porringer.backend.resolver.ToolBasedPlugin.tool_version', return_value=None),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
+        ):
             yield
 
     @staticmethod
-    def test_plugin_list() -> None:
+    async def test_plugin_list() -> None:
         """Test the plugin list"""
         config = LocalConfiguration()
         api = API(config)
 
-        results = api.plugin.list()
+        results = await api.plugin.list()
 
         assert results
         # Each result should have an installed status based on is_available()
@@ -396,6 +399,87 @@ class TestResolveDependenciesFilter:
         names = [info.name for info in result]
         assert 'no-dep' in names
         assert 'needs-dep' not in names
+
+
+# ---------------------------------------------------------------------------
+# list (async) — RuntimeConsumer visibility with auto-resolved context
+# ---------------------------------------------------------------------------
+
+
+class TestListRuntimeConsumerVisibility:
+    """PluginCommands.list() reports RuntimeConsumer plugins correctly.
+
+    When a RuntimeConsumer plugin (e.g. pip) is not on PATH
+    (``is_available()`` returns False), ``list()`` should still report
+    it as installed when ``is_available_for()`` returns True with the
+    auto-resolved ``RuntimeContext``.
+    """
+
+    @staticmethod
+    async def test_runtime_consumer_installed_via_context() -> None:
+        """A RuntimeConsumer unavailable on PATH shows installed=True via runtime context."""
+        ctx = RuntimeContext(executables={'python': Path('/fake/python')})
+
+        # Mock environment that is a RuntimeConsumer: unavailable on PATH,
+        # but available when a runtime context with 'python' is present.
+        mock_env = MagicMock(spec=Environment)
+        mock_env.query_availability = MagicMock(side_effect=lambda rc=None: rc is not None and 'python' in rc.executables)
+        type(mock_env).plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
+        type(mock_env).distribution = MagicMock(return_value=Distribution(version=Version('1.0.0')))
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
+            patch.object(Builder, 'find_plugins', return_value=[]),
+            patch.object(Builder, 'build_plugins', return_value=[]),
+        ):
+            results = await PluginCommands.list(kinds=[PluginKind.PACKAGE])
+
+        pip_results = [r for r in results if r.name == 'pip']
+        assert len(pip_results) == 1
+        assert pip_results[0].installed is True
+
+    @staticmethod
+    async def test_runtime_consumer_not_installed_without_context() -> None:
+        """A RuntimeConsumer unavailable on PATH shows installed=False with empty context."""
+        ctx = RuntimeContext()  # No executables
+
+        mock_env = MagicMock(spec=Environment)
+        mock_env.query_availability = MagicMock(side_effect=lambda rc=None: rc is not None and 'python' in rc.executables)
+        type(mock_env).plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
+        type(mock_env).distribution = MagicMock(return_value=Distribution(version=Version('1.0.0')))
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
+            patch.object(Builder, 'find_plugins', return_value=[]),
+            patch.object(Builder, 'build_plugins', return_value=[]),
+        ):
+            results = await PluginCommands.list(kinds=[PluginKind.PACKAGE])
+
+        pip_results = [r for r in results if r.name == 'pip']
+        assert len(pip_results) == 1
+        assert pip_results[0].installed is False
+
+    @staticmethod
+    async def test_explicit_runtime_context_skips_auto_resolve() -> None:
+        """Passing runtime_context= bypasses Builder.resolve_runtime_context."""
+        ctx = RuntimeContext(executables={'python': Path('/explicit/python')})
+
+        mock_env = MagicMock(spec=Environment)
+        mock_env.query_availability = MagicMock(return_value=True)
+        type(mock_env).plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
+        type(mock_env).distribution = MagicMock(return_value=Distribution(version=Version('1.0.0')))
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock) as mock_resolve,
+            patch.object(Builder, 'find_plugins', return_value=[]),
+            patch.object(Builder, 'build_plugins', return_value=[]),
+        ):
+            await PluginCommands.list(runtime_context=ctx)
+
+        mock_resolve.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
