@@ -5,6 +5,7 @@ resolved plugins.  Also contains the preview/parse entry point that
 loads a manifest and returns a `SetupResults` without executing.
 """
 
+import asyncio
 import logging
 import shlex
 from pathlib import Path
@@ -369,6 +370,7 @@ def _build_preview(
     *,
     use_cache: bool,
     log_label: str,
+    plugins: DiscoveredPlugins | None = None,
 ) -> SetupResults:
     """Shared implementation for :func:`parse_manifest` and :func:`load_manifest`.
 
@@ -379,8 +381,11 @@ def _build_preview(
     Args:
         path: Path to manifest file or directory containing one.
         strategy: The sync strategy.
-        use_cache: Forwarded to :func:`discover_all_plugins`.
+        use_cache: Forwarded to :func:`discover_all_plugins` when
+            *plugins* is ``None``.
         log_label: Human-readable label for the log message.
+        plugins: Pre-discovered plugins.  When provided, plugin
+            discovery is skipped entirely.
 
     Returns:
         SetupResults containing the action plan.
@@ -391,10 +396,10 @@ def _build_preview(
     logger.info(f'{log_label} from: {path}')
 
     result = find_manifest(path)
-    plugins = discover_all_plugins(use_cache=use_cache)
+    resolved_plugins = plugins if plugins is not None else discover_all_plugins(use_cache=use_cache)
     actions = build_actions(
         result.manifest,
-        plugins,
+        resolved_plugins,
         strategy,
     )
     metadata = ManifestMetadata(
@@ -410,6 +415,63 @@ def _build_preview(
         root_directory=result.root_directory,
         metadata=metadata,
         preferences=dict(result.manifest.preferences),
+    )
+
+
+async def async_load_manifest(
+    path: Path,
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
+    *,
+    plugins: DiscoveredPlugins | None = None,
+) -> SetupResults:
+    """Async version of :func:`load_manifest`.
+
+    Offloads blocking manifest I/O and plugin discovery to a thread.
+    When *plugins* is provided, discovery is skipped and only the
+    manifest file read is threaded.
+
+    This is the preferred entry-point for async callers (GUI, API).
+
+    Args:
+        path: Path to manifest file or directory containing one.
+        strategy: The sync strategy.
+        plugins: Pre-discovered plugins.  ``None`` triggers cached
+            discovery internally.
+
+    Returns:
+        SetupResults containing the action plan.
+
+    Raises:
+        ManifestError: If the manifest cannot be found or parsed.
+    """
+    return await asyncio.to_thread(
+        _build_preview, path, strategy, use_cache=True, log_label='Loading manifest (fast)', plugins=plugins
+    )
+
+
+async def async_parse_manifest(
+    path: Path,
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
+    *,
+    plugins: DiscoveredPlugins | None = None,
+) -> SetupResults:
+    """Async version of :func:`parse_manifest`.
+
+    Offloads blocking manifest I/O and plugin discovery to a thread.
+
+    Args:
+        path: Path to manifest file or directory containing one.
+        strategy: The sync strategy.
+        plugins: Pre-discovered plugins.
+
+    Returns:
+        SetupResults containing the list of actions that would be performed.
+
+    Raises:
+        ManifestError: If the manifest cannot be found or parsed.
+    """
+    return await asyncio.to_thread(
+        _build_preview, path, strategy, use_cache=True, log_label='Parsing manifest', plugins=plugins
     )
 
 

@@ -164,14 +164,42 @@ class DirectoryCacheManager:
 
         return False
 
-    def list_directories(self) -> list[ManifestDirectory]:
-        """List all registered directories.
+    def list_directories(
+        self,
+        *,
+        validate: bool = False,
+        check_manifest: bool = False,
+    ) -> list[DirectoryValidationResult]:
+        """List all registered directories with optional validation.
+
+        Always returns :class:`DirectoryValidationResult` so that
+        callers don't need a second method for validation.
+
+        Args:
+            validate: When ``True``, check whether each path exists on
+                disk and populate :attr:`exists`.  When ``False``
+                (the default), ``exists`` is ``None``.
+            check_manifest: When ``True`` (implies *validate*), also
+                probe for a valid manifest file at the path.  When
+                ``False``, ``has_manifest`` is ``None``.
 
         Returns:
-            List of registered directories.
+            One result per registered directory.
         """
         cache = self._load()
-        return list(cache.directories)
+        if check_manifest:
+            validate = True
+
+        results: list[DirectoryValidationResult] = []
+        for directory in cache.directories:
+            exists: bool | None = None
+            manifest_present: bool | None = None
+            if validate:
+                exists = directory.path.exists()
+                if exists and check_manifest:
+                    manifest_present = has_manifest(directory.path)
+            results.append(DirectoryValidationResult(directory=directory, exists=exists, has_manifest=manifest_present))
+        return results
 
     def get_paths(self) -> list[Path]:
         """Get all registered paths.
@@ -179,7 +207,7 @@ class DirectoryCacheManager:
         Returns:
             List of paths.
         """
-        return [d.path for d in self.list_directories()]
+        return [r.directory.path for r in self.list_directories()]
 
     def update_directory(self, path: Path, name: str | None = None) -> ManifestDirectory | None:
         """Update a directory's metadata.
@@ -204,31 +232,6 @@ class DirectoryCacheManager:
         return None
 
     # --- Validation ---
-
-    def validate_directories(self, check_manifest: bool = False) -> list[DirectoryValidationResult]:
-        """Validate all directory entries.
-
-        Returns a result for **every** registered directory, not just
-        invalid ones.
-
-        Args:
-            check_manifest: When ``True`` and the path exists, also
-                check whether a valid manifest can be found at the path
-                using ``has_manifest()``.
-
-        Returns:
-            List of ``DirectoryValidationResult`` for each registered entry.
-        """
-        results: list[DirectoryValidationResult] = []
-        for directory in self.list_directories():
-            exists = directory.path.exists()
-            manifest_present: bool | None = None
-            if exists and check_manifest:
-                manifest_present = has_manifest(directory.path)
-            elif not exists:
-                manifest_present = None
-            results.append(DirectoryValidationResult(directory=directory, exists=exists, has_manifest=manifest_present))
-        return results
 
     def clear(self) -> None:
         """Clear all directories from the cache."""

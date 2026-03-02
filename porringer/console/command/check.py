@@ -1,107 +1,35 @@
 """Porringer CLI check command module for checking package updates via plugins."""
 
 import asyncio
-import logging
 from typing import Annotated
 
 import typer
-from packaging.version import Version
 from rich.panel import Panel
 from rich.table import Table
 
-from porringer.backend.builder import Builder
+from porringer.backend.command.sync import SyncCommands
 from porringer.console.schema import ConsoleConfiguration
-from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.schema import (
     CheckParameters,
     CheckResult,
-    PackageUpdateInfo,
 )
-from porringer.utility.exception import PluginError, UpdateError
 
 app = typer.Typer()
 
 
-async def _check_plugin_updates(
-    configuration: ConsoleConfiguration,
-    params: CheckParameters,
-) -> list[CheckResult]:
+async def _check_plugin_updates(params: CheckParameters) -> list[CheckResult]:
     """Check for updates across all plugins (async).
 
+    Delegates to :meth:`SyncCommands.check_updates` so that the
+    update-checking logic lives in a single place (the API layer).
+
     Args:
-        configuration: CLI configuration.
         params: Check parameters.
 
     Returns:
         List of check results per plugin.
     """
-    logger = logging.getLogger('porringer')
-
-    environment_types = Builder.find_plugins('environment', Environment, check_dependencies=True)
-    environments = Builder.build_plugins(environment_types)
-
-    # Resolve runtime context once upfront so that every plugin
-    # targets the correct interpreter rather than sys.executable.
-    environments_dict = {type(e).__name__: e for e in environments}
-    runtime_context = await Builder.resolve_runtime_context(environments_dict)
-
-    results: list[CheckResult] = []
-
-    for env in environments:
-        plugin_name = type(env).__name__
-
-        # Skip if specific plugins requested and this isn't one
-        if params.plugins and plugin_name not in params.plugins:
-            continue
-
-        # Skip plugins that are unsupported on this platform or unavailable
-        plugin_type = type(env)
-        if not plugin_type.is_supported() or not env.query_availability(runtime_context):
-            logger.debug('Skipping unavailable plugin %s for update check', plugin_name)
-            continue
-
-        try:
-            check_params = CheckUpdatesParameters(
-                packages=[],  # Check all packages
-                include_prereleases=params.include_prereleases,
-                runtime_context=runtime_context,
-            )
-
-            # Get currently installed packages
-            installed = await env.packages(runtime_context=runtime_context)
-            installed_map = {str(p.name): p for p in installed}
-
-            # Check for updates
-            updates = await env.check_updates(check_params)
-
-            # Build package update info
-            package_infos: list[PackageUpdateInfo] = []
-            for update_pkg in updates:
-                current = installed_map.get(str(update_pkg.name))
-                current_version = Version(current.version) if current and current.version else None
-                latest_version = Version(update_pkg.version) if update_pkg.version else None
-                package_infos.append(
-                    PackageUpdateInfo(
-                        name=str(update_pkg.name),
-                        current_version=current_version,
-                        latest_version=latest_version,
-                        update_available=True,
-                    )
-                )
-
-            results.append(CheckResult(plugin=plugin_name, packages=package_infos))
-
-        except PluginError as e:
-            logger.error(f'Plugin error checking updates for {plugin_name}: {e}')
-            results.append(CheckResult(plugin=plugin_name, error=str(e)))
-        except UpdateError as e:
-            logger.error(f'Update check error for {plugin_name}: {e}')
-            results.append(CheckResult(plugin=plugin_name, error=str(e)))
-        except Exception as e:
-            logger.warning(f'Failed to check updates for {plugin_name}: {e}')
-            results.append(CheckResult(plugin=plugin_name, error=str(e)))
-
-    return results
+    return await SyncCommands.check_updates(params)
 
 
 def _display_results(configuration: ConsoleConfiguration, results: list[CheckResult]) -> None:
@@ -172,5 +100,5 @@ def check_default(
         include_prereleases=include_prereleases,
     )
 
-    results = asyncio.run(_check_plugin_updates(configuration, params))
+    results = asyncio.run(_check_plugin_updates(params))
     _display_results(configuration, results)

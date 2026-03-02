@@ -2,10 +2,11 @@
 
 import asyncio
 import logging
+import warnings
 
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
-from porringer.backend.command.core.discovery import discover_all_plugins
+from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins
 from porringer.backend.command.core.execution import execute_uninstall
 from porringer.backend.command.core.resolution import ResolutionContext, resolve_uninstall_operation, resolved_to_result
 from porringer.backend.command.plugin import PluginCommands
@@ -32,7 +33,18 @@ logger = logging.getLogger(__name__)
 
 
 class API:
-    """API for programmatic access to Porringer's functionality."""
+    """API for programmatic access to Porringer's functionality.
+
+    Provides namespace sub-APIs:
+
+    * ``api.plugin`` — plugin listing, package queries, install/uninstall.
+    * ``api.sync``   — manifest loading, streaming execution, update checks.
+    * ``api.cache``  — directory registration and validation.
+
+    Cross-cutting helpers live directly on the ``API`` class:
+    :meth:`discover_plugins`, :meth:`uninstall`, :meth:`download`,
+    :meth:`check_self_updates`.
+    """
 
     def __init__(
         self,
@@ -56,6 +68,77 @@ class API:
         self.plugin = PluginCommands()
         self.sync = SyncCommands(self.cache)
 
+    # --- Discovery & runtime resolution ---
+
+    @staticmethod
+    async def discover_plugins(
+        *,
+        use_cache: bool = True,
+        resolve_runtime: bool = True,
+    ) -> DiscoveredPlugins:
+        """Discover all plugins and optionally resolve runtime context.
+
+        This is the recommended entry-point for GUI callers.  It
+        returns a :class:`DiscoveredPlugins` object that can be
+        forwarded to every subsequent operation (``execute_stream``,
+        ``load_manifest``, ``list``, ``list_packages``, ``uninstall``,
+        etc.) so that plugin discovery and runtime resolution happen
+        exactly once.
+
+        Args:
+            use_cache: Reuse cached entry-point scan metadata when
+                ``True`` (the default).  Pass ``False`` to force a
+                fresh scan after installing/removing plugin packages.
+            resolve_runtime: When ``True`` (the default), resolve a
+                :class:`RuntimeContext` from available
+                ``RuntimeProvider`` plugins and attach it to the
+                returned object as ``plugins.runtime_context``.
+
+        Returns:
+            A :class:`DiscoveredPlugins` carrying environment,
+            project-environment, and SCM plugins, plus an optional
+            :class:`RuntimeContext`.
+        """
+        plugins = await asyncio.to_thread(discover_all_plugins, use_cache=use_cache)
+        if resolve_runtime:
+            plugins.runtime_context = await Builder.resolve_runtime_context(plugins.environments)
+            logger.debug(
+                'discover_plugins: runtime_context=%s',
+                {k: str(v) for k, v in plugins.runtime_context.executables.items()}
+                if plugins.runtime_context.executables
+                else '<empty>',
+            )
+        return plugins
+
+    @staticmethod
+    async def resolve_runtime_context(
+        environments: dict[str, Environment] | None = None,
+    ) -> RuntimeContext:
+        """Resolve a :class:`RuntimeContext` from available RuntimeProviders.
+
+        .. deprecated::
+            Use :meth:`discover_plugins` instead — it resolves the
+            runtime context as part of plugin discovery and attaches
+            it to the returned ``DiscoveredPlugins.runtime_context``.
+
+        Args:
+            environments: Optional pre-built environment dict.
+
+        Returns:
+            A :class:`RuntimeContext` with resolved interpreter paths
+            (may be empty when no RuntimeProvider is available).
+        """
+        warnings.warn(
+            'API.resolve_runtime_context() is deprecated. '
+            'Use API.discover_plugins() and access plugins.runtime_context instead.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if environments is None:
+            plugins = await API.discover_plugins(resolve_runtime=True)
+            return plugins.runtime_context  # type: ignore[return-value]
+        return await Builder.resolve_runtime_context(environments)
+
     @staticmethod
     async def check_self_updates() -> PackageUpdateInfo:
         """Check for updates to the Porringer package by querying PyPI.
@@ -64,34 +147,6 @@ class API:
             PackageUpdateInfo with current version, latest version, and update status.
         """
         return await check_self_updates()
-
-    @staticmethod
-    async def resolve_runtime_context(
-        environments: dict[str, Environment] | None = None,
-    ) -> RuntimeContext:
-        """Resolve a :class:`RuntimeContext` from available RuntimeProviders.
-
-        This is the recommended entry-point for GUI callers that need
-        a ``RuntimeContext`` before issuing ``list``, ``uninstall``,
-        or ``check_updates`` calls.  Resolving once and reusing the
-        result avoids redundant work.
-
-        When *environments* is ``None`` the current set of discovered
-        environment plugins is used automatically.
-
-        Args:
-            environments: Optional pre-built environment dict.  Pass
-                this when you already have a plugin map to avoid a
-                second discovery round.
-
-        Returns:
-            A :class:`RuntimeContext` with resolved interpreter paths
-            (may be empty when no RuntimeProvider is available).
-        """
-        if environments is None:
-            plugins = discover_all_plugins(use_cache=True)
-            environments = plugins.environments
-        return await Builder.resolve_runtime_context(environments)
 
     @staticmethod
     async def download(
@@ -119,6 +174,7 @@ class API:
         plugin_name: str,
         package: PackageRef,
         *,
+        plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
         dry_run: bool = False,
     ) -> SetupActionResult:
@@ -137,9 +193,15 @@ class API:
             plugin_name: The installer plugin name (e.g. ``"pipx"``,
                 ``"uv"``, ``"npm"``).
             package: The package to uninstall (only ``name`` is used).
+            plugins: Pre-discovered plugins from :meth:`discover_plugins`.
+                When provided, plugin discovery is skipped and
+                ``runtime_context`` is extracted from
+                ``plugins.runtime_context`` if not explicitly supplied.
             runtime_context: Optional resolved runtime paths.  When
                 provided, Python-ecosystem plugins use this to target
                 the correct interpreter instead of ``sys.executable``.
+                Overrides ``plugins.runtime_context`` when both are
+                given.
             dry_run: When ``True``, resolve presence but do not execute.
 
         Returns:
@@ -147,18 +209,21 @@ class API:
         """
         logger.debug('uninstall requested: plugin=%s package=%s dry_run=%s', plugin_name, package.name, dry_run)
 
-        plugins = discover_all_plugins(use_cache=True)
-        environments = plugins.environments
-        # Cached *scan metadata* is reused; plugin instances are fresh
-        # (constructed by the factory inside discover_all_plugins).
+        if plugins is None:
+            plugins = await API.discover_plugins(use_cache=True, resolve_runtime=(runtime_context is None))
 
-        # Auto-resolve runtime context when the caller did not supply one,
-        # matching the pattern used by PluginCommands.list_packages().
+        environments = plugins.environments
+
+        # Resolve runtime context: explicit > plugins.runtime_context > auto-resolve
+        if runtime_context is None:
+            runtime_context = plugins.runtime_context
         if runtime_context is None:
             runtime_context = await Builder.resolve_runtime_context(environments)
             logger.debug(
                 'uninstall: auto-resolved runtime_context: %s',
-                {k: str(v) for k, v in runtime_context.executables.items()} if runtime_context.executables else '<empty>',
+                {k: str(v) for k, v in runtime_context.executables.items()}
+                if runtime_context.executables
+                else '<empty>',
             )
 
         if plugin_name not in environments:

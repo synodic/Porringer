@@ -14,6 +14,7 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from packaging.version import Version
 
 from porringer.api import API
@@ -433,7 +434,7 @@ class TestUninstallAutoResolveRuntimeContext:
 
 
 class TestAPIResolveRuntimeContext:
-    """Verify the public API.resolve_runtime_context() helper."""
+    """Verify the deprecated API.resolve_runtime_context() helper."""
 
     @staticmethod
     async def test_auto_discovers_when_no_environments() -> None:
@@ -450,6 +451,7 @@ class TestAPIResolveRuntimeContext:
         with (
             patch('porringer.api.discover_all_plugins', return_value=plugins) as mock_discover,
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
+            pytest.warns(DeprecationWarning, match='resolve_runtime_context.*deprecated'),
         ):
             result = await API.resolve_runtime_context()
 
@@ -466,6 +468,7 @@ class TestAPIResolveRuntimeContext:
         with (
             patch('porringer.api.discover_all_plugins') as mock_discover,
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
+            pytest.warns(DeprecationWarning, match='resolve_runtime_context.*deprecated'),
         ):
             result = await API.resolve_runtime_context(environments=env_dict)
 

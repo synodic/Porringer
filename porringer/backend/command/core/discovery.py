@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from porringer.backend.builder import Builder, PluginInformation
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin
 
@@ -52,6 +53,14 @@ class DiscoveredPlugins:
     _proj_infos: list[PluginInformation[ProjectEnvironment]] | None = field(default=None, repr=False)
     _scm_infos: list[PluginInformation[ScmEnvironment]] | None = field(default=None, repr=False)
 
+    runtime_context: RuntimeContext | None = field(default=None, repr=False)
+    """Resolved interpreter paths for RuntimeConsumer plugins.
+
+    Populated by :meth:`API.discover_plugins` so that callers can
+    forward a single ``DiscoveredPlugins`` object to every operation
+    without separately managing a ``RuntimeContext``.
+    """
+
     @property
     def all_plugins(self) -> dict[str, Environment | ProjectEnvironment | ScmEnvironment]:
         """Merged view of every discovered plugin keyed by canonical name."""
@@ -71,11 +80,14 @@ class DiscoveredPlugins:
         instances are shared — identical to the pre-factory behaviour.
         """
         if self._env_infos is not None and self._proj_infos is not None and self._scm_infos is not None:
-            return _build_from_infos(self._env_infos, self._proj_infos, self._scm_infos)
+            result = _build_from_infos(self._env_infos, self._proj_infos, self._scm_infos)
+            result.runtime_context = self.runtime_context
+            return result
         return DiscoveredPlugins(
             environments=dict(self.environments),
             project_environments=dict(self.project_environments),
             scm_environments=dict(self.scm_environments),
+            runtime_context=self.runtime_context,
         )
 
 

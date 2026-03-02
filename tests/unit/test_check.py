@@ -31,7 +31,7 @@ class TestCheckUpdatesParametersRuntimeContext:
     def test_accepts_runtime_context() -> None:
         """runtime_context can be passed and retrieved."""
         ctx = RuntimeContext()
-        ctx.executables['python'] = '/usr/bin/python3'
+        ctx.executables['python'] = Path('/usr/bin/python3')
         params = CheckUpdatesParameters(packages=[], runtime_context=ctx)
         assert params.runtime_context is ctx
 

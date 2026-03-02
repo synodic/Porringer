@@ -17,10 +17,18 @@ import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from packaging.version import Version
+
+from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
+from porringer.backend.command.core.discovery import DiscoveredPlugins
+from porringer.core.plugin_schema.environment import CheckUpdatesParameters
 from porringer.schema import (
     BatchSetupResults,
+    CheckParameters,
+    CheckResult,
     ManifestValidationResult,
+    PackageUpdateInfo,
     ProgressEvent,
     ProgressEventKind,
     SetupActionResult,
@@ -28,9 +36,14 @@ from porringer.schema import (
     SetupResults,
     SyncStrategy,
 )
-from porringer.utility.exception import ManifestError
+from porringer.utility.exception import ManifestError, PluginError, UpdateError
 
-from .core.action_builder import load_manifest, parse_manifest
+from .core.action_builder import (
+    async_load_manifest,
+    async_parse_manifest,
+    load_manifest,
+    parse_manifest,
+)
 from .core.discovery import discover_all_plugins, invalidate_plugin_cache
 from .core.execution import _plugins_discovered_event, execute_single
 from .manifest import has_manifest as _has_manifest
@@ -105,6 +118,9 @@ class SyncCommands:
         """Parse a manifest and build the action plan without executing.
 
         Delegates to `action_builder.parse_manifest`.
+
+        .. note::
+            Prefer :meth:`async_parse_manifest` in async contexts.
         """
         return parse_manifest(path, strategy)
 
@@ -115,8 +131,149 @@ class SyncCommands:
         Delegates to `action_builder.load_manifest` — the fast path
         for GUI preview.  Actions whose installer cannot be resolved
         from cached plugins will have ``installer=None``.
+
+        .. note::
+            Prefer :meth:`async_load_manifest` in async contexts.
         """
         return load_manifest(path, strategy)
+
+    @staticmethod
+    async def async_parse_manifest(
+        path: Path,
+        strategy: SyncStrategy = SyncStrategy.MINIMAL,
+        *,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> SetupResults:
+        """Parse a manifest asynchronously.
+
+        Offloads blocking I/O to a thread.  When *plugins* is
+        provided, plugin discovery is skipped — use this with a
+        pre-discovered ``DiscoveredPlugins`` to avoid redundant
+        entry-point scanning.
+
+        Args:
+            path: Path to manifest file or directory containing one.
+            strategy: The sync strategy.
+            plugins: Pre-discovered plugins.
+
+        Returns:
+            SetupResults containing the list of actions.
+        """
+        return await async_parse_manifest(path, strategy, plugins=plugins)
+
+    @staticmethod
+    async def async_load_manifest(
+        path: Path,
+        strategy: SyncStrategy = SyncStrategy.MINIMAL,
+        *,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> SetupResults:
+        """Load a manifest asynchronously using cached plugin discovery.
+
+        This is the preferred entry-point for GUI / async callers.
+        Offloads blocking I/O to a thread and accepts pre-discovered
+        plugins to eliminate redundant discovery.
+
+        Args:
+            path: Path to manifest file or directory containing one.
+            strategy: The sync strategy.
+            plugins: Pre-discovered plugins.
+
+        Returns:
+            SetupResults containing the action plan.
+        """
+        return await async_load_manifest(path, strategy, plugins=plugins)
+
+    # --- Update checking ---
+
+    @staticmethod
+    async def check_updates(
+        params: CheckParameters | None = None,
+        *,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> list[CheckResult]:
+        """Check for package updates across all (or selected) plugins.
+
+        This is the API equivalent of ``porringer check``.  It iterates
+        over discovered ``Environment`` plugins, calls
+        ``env.check_updates()`` on each, and assembles the results
+        into a list of :class:`CheckResult` objects.
+
+        Accepts a pre-discovered :class:`DiscoveredPlugins` to skip
+        redundant entry-point scanning and runtime resolution.
+
+        Args:
+            params: Optional check parameters (plugin filter,
+                pre-release flag).  When ``None``, all plugins are
+                checked with default settings.
+            plugins: Pre-discovered plugins from
+                :meth:`API.discover_plugins`.
+
+        Returns:
+            One :class:`CheckResult` per queried plugin, carrying
+            per-package update info or an error string.
+        """
+        if params is None:
+            params = CheckParameters()
+
+        # Discover plugins if not pre-passed
+        if plugins is None:
+            plugins = await asyncio.to_thread(discover_all_plugins, use_cache=True)
+
+        # Resolve runtime context
+        runtime_context = plugins.runtime_context
+        if runtime_context is None:
+            runtime_context = await Builder.resolve_runtime_context(plugins.environments)
+
+        results: list[CheckResult] = []
+
+        for name, env in plugins.environments.items():
+            # Filter to requested plugins
+            if params.plugins and name not in params.plugins:
+                continue
+
+            # Skip unsupported or unavailable plugins
+            plugin_type = type(env)
+            if not plugin_type.is_supported() or not env.query_availability(runtime_context):
+                logger.debug('Skipping unavailable plugin %s for update check', name)
+                continue
+
+            try:
+                check_params = CheckUpdatesParameters(
+                    packages=[],
+                    include_prereleases=params.include_prereleases,
+                    runtime_context=runtime_context,
+                )
+
+                installed = await env.packages(runtime_context=runtime_context)
+                installed_map = {str(p.name): p for p in installed}
+
+                updates = await env.check_updates(check_params)
+
+                package_infos: list[PackageUpdateInfo] = []
+                for update_pkg in updates:
+                    current = installed_map.get(str(update_pkg.name))
+                    current_version = Version(current.version) if current and current.version else None
+                    latest_version = Version(update_pkg.version) if update_pkg.version else None
+                    package_infos.append(
+                        PackageUpdateInfo(
+                            name=str(update_pkg.name),
+                            current_version=current_version,
+                            latest_version=latest_version,
+                            update_available=True,
+                        )
+                    )
+
+                results.append(CheckResult(plugin=name, packages=package_infos))
+
+            except (PluginError, UpdateError) as e:
+                logger.error('Plugin error checking updates for %s: %s', name, e)
+                results.append(CheckResult(plugin=name, error=str(e)))
+            except Exception as e:
+                logger.warning('Failed to check updates for %s: %s', name, e)
+                results.append(CheckResult(plugin=name, error=str(e)))
+
+        return results
 
     # --- Path resolution ---
 
@@ -203,6 +360,8 @@ class SyncCommands:
     async def execute_stream(
         self,
         parameters: SetupParameters,
+        *,
+        plugins: DiscoveredPlugins | None = None,
     ) -> AsyncIterator[ProgressEvent]:
         """Stream progress events while executing setup actions.
 
@@ -225,6 +384,11 @@ class SyncCommands:
 
         Args:
             parameters: The setup parameters (paths, dry_run, strategy, etc.).
+            plugins: Pre-discovered plugins from
+                :meth:`API.discover_plugins`.  When provided, plugin
+                discovery is skipped and the ``PLUGINS_DISCOVERED``
+                event is **not** emitted (the caller already has the
+                availability map).
 
         Yields:
             ProgressEvent for each manifest load, action lifecycle transition,
@@ -254,17 +418,19 @@ class SyncCommands:
                         )
                     )
 
-                # Pre-discover plugins once for the entire batch.
-                # For real execution, invalidate first; for dry-run use
-                # the cache to avoid redundant entry-point scanning.
-                if not parameters.dry_run:
-                    invalidate_plugin_cache()
-                shared_plugins = await asyncio.to_thread(discover_all_plugins, use_cache=parameters.dry_run)
+                # Use pre-passed plugins when available; otherwise
+                # discover once for the entire batch.
+                shared_plugins = plugins
+                if shared_plugins is None:
+                    if not parameters.dry_run:
+                        invalidate_plugin_cache()
+                    shared_plugins = await asyncio.to_thread(discover_all_plugins, use_cache=parameters.dry_run)
 
-                # Emit PLUGINS_DISCOVERED once for the batch — before
-                # any per-manifest work so the GUI gets the availability
-                # map as early as possible.
-                queue.put_nowait(await asyncio.to_thread(_plugins_discovered_event, shared_plugins))
+                    # Emit PLUGINS_DISCOVERED once for the batch — before
+                    # any per-manifest work so the GUI gets the availability
+                    # map as early as possible.  Skipped when the caller
+                    # pre-passed plugins (they already have the map).
+                    queue.put_nowait(await asyncio.to_thread(_plugins_discovered_event, shared_plugins))
 
                 for preview in previews:
                     # Stage 2 + 3: execute_single populates CLI commands,
@@ -304,7 +470,7 @@ class SyncCommands:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-    async def run(self, parameters: SetupParameters) -> BatchSetupResults:
+    async def run(self, parameters: SetupParameters, *, plugins: DiscoveredPlugins | None = None) -> BatchSetupResults:
         """Execute setup and return collected results.
 
         Drains :meth:`execute_stream` internally so that there is exactly
@@ -313,6 +479,8 @@ class SyncCommands:
 
         Args:
             parameters: The setup parameters (paths, dry_run, strategy, etc.).
+            plugins: Pre-discovered plugins (forwarded to
+                :meth:`execute_stream`).
 
         Returns:
             BatchSetupResults from execution.
@@ -321,7 +489,7 @@ class SyncCommands:
         collected: list[SetupActionResult] = []
         failed_paths: list[tuple[Path, str]] = []
 
-        async for event in self.execute_stream(parameters):
+        async for event in self.execute_stream(parameters, plugins=plugins):
             if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
                 manifests.append(event.manifest)
             elif event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:

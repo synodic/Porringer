@@ -5,6 +5,7 @@ on ``SetupActionResult``, and the ``detect_updates`` flag on
 ``SetupParameters``.
 """
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,6 +19,7 @@ from porringer.backend.command.core.resolution import (
     is_package_installed,
 )
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
 from porringer.schema import (
     SetupAction,
@@ -174,10 +176,8 @@ class TestCheckForNewerVersion:
     @staticmethod
     async def test_forwards_runtime_context() -> None:
         """The runtime_context kwarg is forwarded inside CheckUpdatesParameters."""
-        from porringer.core.plugin_schema.runtime import RuntimeContext
-
         ctx = RuntimeContext()
-        ctx.executables['python'] = '/custom/python'
+        ctx.executables['python'] = Path('/custom/python')
         env = _make_env(updates=[Package(name='ruff', version='0.9.0')])
         await check_for_newer_version(
             env,
