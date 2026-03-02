@@ -10,7 +10,8 @@ import logging
 from collections import defaultdict
 from collections.abc import Mapping
 
-from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
+from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, Plugin, PluginKind
 
 logger = logging.getLogger(__name__)
@@ -183,24 +184,19 @@ class BackendResolver:
     def _is_suitable(self, plugin_name: str) -> bool:
         """Check if *plugin_name* is both supported and available.
 
-        When a ``runtime_context`` was provided at construction time
-        and the plugin implements ``RuntimeConsumer``, the runtime-aware
-        ``is_available_for(runtime_context)`` is used instead of the
-        plain ``is_available()`` so that module-only tools (e.g.
-        ``python -m pip``) can be detected in the target interpreter.
+        Delegates to :meth:`ToolBasedPlugin.query_availability` which
+        handles the ``is_supported`` / ``RuntimeConsumer`` /
+        ``is_available_for`` decision tree.  Falls back to
+        ``is_available()`` for bare ``Plugin`` instances that are not
+        ``ToolBasedPlugin`` subclasses.
         """
         plugin = self._all_plugins.get(plugin_name)
         if plugin is None:
             return False
+        if isinstance(plugin, ToolBasedPlugin):
+            return plugin.query_availability(self._runtime_context)
         try:
-            plugin_type = type(plugin)
-            if not plugin_type.is_supported():
-                return False
-            # Runtime-aware probe when a runtime context is available
-            if self._runtime_context is not None and isinstance(plugin, RuntimeConsumer):
-                consumer_type: type[RuntimeConsumer] = type(plugin)
-                return consumer_type.is_available_for(self._runtime_context)
-            return plugin.is_available()
+            return type(plugin).is_supported() and plugin.is_available()
         except Exception:
             logger.warning("Suitability check failed for plugin '%s'", plugin_name, exc_info=True)
             return False

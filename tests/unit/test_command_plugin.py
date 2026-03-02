@@ -2,14 +2,19 @@
 
 import os
 import sys
+from pathlib import Path
+from typing import override
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from packaging.version import Version
 
 from porringer.api import API
 from porringer.backend.builder import Builder, PluginInformation
 from porringer.backend.command.plugin import PluginCommands
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Distribution, Ecosystem, Package, PluginDependency, PluginKind, PluginParameters
 from porringer.schema import LocalConfiguration
 from porringer.utility.exception import PluginError
@@ -394,23 +399,299 @@ class TestResolveDependenciesFilter:
 
 
 # ---------------------------------------------------------------------------
-# list_packages gates on is_available / is_supported
+# list_packages — query_availability gating + runtime resolution
 # ---------------------------------------------------------------------------
 
 
 class TestListPackagesAvailabilityGate:
-    """list_packages returns [] for unavailable/unsupported plugins without calling packages()."""
+    """list_packages uses query_availability with auto-resolved RuntimeContext."""
 
     @staticmethod
     async def test_unavailable_plugin_returns_empty() -> None:
-        """An unavailable plugin gets [] without packages() being invoked."""
+        """A plugin unavailable via both PATH and runtime gets []."""
         mock_env = MagicMock(spec=Environment)
-        type(mock_env).is_supported = MagicMock(return_value=True)
-        mock_env.is_available = MagicMock(return_value=False)
+        mock_env.query_availability = MagicMock(return_value=False)
         mock_env.packages = AsyncMock(return_value=[Package(name='foo', version='1.0.0')])
 
-        with patch.object(PluginCommands, '_discover_environments', return_value={'mock-env': mock_env}):
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'mock-env': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
+        ):
             result = await PluginCommands.list_packages('mock-env')
 
         assert result == []
         mock_env.packages.assert_not_called()
+
+    @staticmethod
+    async def test_available_plugin_delegates_to_packages() -> None:
+        """An available plugin's packages() is called with the runtime context."""
+        expected = [Package(name='foo', version='1.0.0')]
+        ctx = RuntimeContext()
+
+        mock_env = MagicMock(spec=Environment)
+        mock_env.query_availability = MagicMock(return_value=True)
+        mock_env.packages = AsyncMock(return_value=expected)
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'mock-env': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
+        ):
+            result = await PluginCommands.list_packages('mock-env')
+
+        assert result == expected
+        mock_env.packages.assert_called_once_with(project_path=None, runtime_context=ctx)
+
+    @staticmethod
+    async def test_runtime_context_enables_consumer() -> None:
+        """A RuntimeConsumer unavailable on PATH becomes available via runtime context."""
+        ctx = RuntimeContext(executables={'python': Path('/fake/python')})
+        expected = [Package(name='pip', version='24.0')]
+
+        mock_env = MagicMock(spec=Environment)
+        # query_availability should return True when given ctx
+        mock_env.query_availability = MagicMock(side_effect=lambda rc: rc is ctx)
+        mock_env.packages = AsyncMock(return_value=expected)
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
+        ):
+            result = await PluginCommands.list_packages('pip')
+
+        assert result == expected
+        mock_env.query_availability.assert_called_once_with(ctx)
+
+    @staticmethod
+    async def test_explicit_runtime_context_skips_auto_resolve() -> None:
+        """Passing runtime_context= bypasses Builder.resolve_runtime_context."""
+        ctx = RuntimeContext(executables={'python': Path('/explicit/python')})
+        expected = [Package(name='pip', version='24.0')]
+
+        mock_env = MagicMock(spec=Environment)
+        mock_env.query_availability = MagicMock(return_value=True)
+        mock_env.packages = AsyncMock(return_value=expected)
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock) as mock_resolve,
+        ):
+            result = await PluginCommands.list_packages('pip', runtime_context=ctx)
+
+        mock_resolve.assert_not_called()
+        assert result == expected
+
+    @staticmethod
+    async def test_missing_plugin_raises() -> None:
+        """list_packages raises PluginError for a non-existent plugin name."""
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
+            pytest.raises(PluginError, match='not found'),
+        ):
+            await PluginCommands.list_packages('nonexistent')
+
+
+# ---------------------------------------------------------------------------
+# query_availability — unified availability method on ToolBasedPlugin
+# ---------------------------------------------------------------------------
+
+
+class TestQueryAvailability:
+    """ToolBasedPlugin.query_availability encapsulates the full decision tree."""
+
+    @staticmethod
+    def test_unsupported_returns_false() -> None:
+        """An unsupported plugin returns False regardless of is_available."""
+        mock = MagicMock(spec=ToolBasedPlugin)
+        type(mock).is_supported = MagicMock(return_value=False)
+        mock.is_available = MagicMock(return_value=True)
+
+        result = ToolBasedPlugin.query_availability(mock)
+
+        assert result is False
+
+    @staticmethod
+    def test_supported_available_returns_true() -> None:
+        """A supported and PATH-available plugin returns True without context."""
+        mock = MagicMock(spec=ToolBasedPlugin)
+        type(mock).is_supported = MagicMock(return_value=True)
+        mock.is_available = MagicMock(return_value=True)
+
+        result = ToolBasedPlugin.query_availability(mock)
+
+        assert result is True
+
+    @staticmethod
+    def test_supported_unavailable_returns_false() -> None:
+        """A supported but PATH-unavailable plugin returns False without context."""
+        mock = MagicMock(spec=ToolBasedPlugin)
+        type(mock).is_supported = MagicMock(return_value=True)
+        mock.is_available = MagicMock(return_value=False)
+
+        result = ToolBasedPlugin.query_availability(mock)
+
+        assert result is False
+
+    @staticmethod
+    def test_runtime_consumer_uses_is_available_for() -> None:
+        """When runtime_context is provided and plugin is a RuntimeConsumer,
+
+        is_available_for() is used instead of is_available().
+        """
+
+        class _Consumer(ToolBasedPlugin, RuntimeConsumer):
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem | None:
+                return Ecosystem('python')
+
+            @classmethod
+            def consumed_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return False  # Not on PATH
+
+            @classmethod
+            def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
+                return runtime_context.get('python') is not None
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        plugin = _Consumer(params)
+
+        # Without context — falls back to is_available() → False
+        assert plugin.query_availability() is False
+        assert plugin.query_availability(None) is False
+
+        # With context — delegates to is_available_for() → True
+        ctx = RuntimeContext(executables={'python': Path('/fake/python')})
+        assert plugin.query_availability(ctx) is True
+
+    @staticmethod
+    def test_non_consumer_ignores_runtime_context() -> None:
+        """A non-RuntimeConsumer plugin uses is_available() even with a context."""
+        mock = MagicMock(spec=ToolBasedPlugin)
+        type(mock).is_supported = MagicMock(return_value=True)
+        mock.is_available = MagicMock(return_value=True)
+
+        ctx = RuntimeContext(executables={'python': Path('/fake/python')})
+        result = ToolBasedPlugin.query_availability(mock, ctx)
+
+        assert result is True
+        mock.is_available.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Builder.resolve_runtime_context — runtime discovery for the query path
+# ---------------------------------------------------------------------------
+
+
+class TestResolveRuntimeContext:
+    """Builder.resolve_runtime_context discovers runtimes from providers."""
+
+    @staticmethod
+    async def test_no_providers_returns_empty_context() -> None:
+        """When no RuntimeProvider is present, an empty context is returned."""
+        mock_env = MagicMock(spec=Environment)
+        mock_env.is_available = MagicMock(return_value=True)
+        type(mock_env).is_supported = MagicMock(return_value=True)
+
+        ctx = await Builder.resolve_runtime_context({'pip': mock_env})
+
+        assert ctx.executables == {}
+
+    @staticmethod
+    async def test_provider_resolves_runtime() -> None:
+        """An available RuntimeProvider populates the context with its executable."""
+
+        class _FakeProvider(Environment, RuntimeProvider):
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem | None:
+                return Ecosystem('python')
+
+            @staticmethod
+            def plugin_kind() -> PluginKind:
+                return PluginKind.RUNTIME
+
+            @classmethod
+            def provided_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def tool_name(cls) -> str:
+                return 'py'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return True
+
+            @override
+            async def resolve_executable(self, tag: str) -> Path | None:
+                return Path(f'/python/{tag}/python')
+
+            @override
+            def install_command(self, package, **kw):
+                return []
+
+            @override
+            def upgrade_command(self, package, **kw):
+                return []
+
+            @override
+            def uninstall_command(self, package, **kw):
+                return []
+
+            @override
+            async def packages(self, **kw):
+                return [Package(name='3.14', version='3.14.0'), Package(name='3.12', version='3.12.0')]
+
+            @override
+            async def check_updates(self, params):
+                return []
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = _FakeProvider(params)
+
+        ctx = await Builder.resolve_runtime_context({'pim': provider})
+
+        assert 'python' in ctx.executables
+        # Should resolve the highest version (3.14) first
+        assert ctx.executables['python'] == Path('/python/3.14/python')
+
+    @staticmethod
+    async def test_provider_no_runtimes_returns_empty() -> None:
+        """A provider with no installed runtimes yields an empty context."""
+        # Use a non-RuntimeProvider environment — context stays empty
+        mock_env = MagicMock(spec=Environment)
+        mock_env.is_available = MagicMock(return_value=True)
+        type(mock_env).is_supported = MagicMock(return_value=True)
+
+        ctx = await Builder.resolve_runtime_context({'pip': mock_env})
+
+        assert ctx.executables == {}

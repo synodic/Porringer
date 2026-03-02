@@ -22,6 +22,7 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Plugin
 
 
@@ -60,6 +61,41 @@ class ToolBasedPlugin(Plugin):
         if name is None:
             return True
         return shutil.which(name) is not None
+
+    def query_availability(self, runtime_context: RuntimeContext | None = None) -> bool:
+        """Unified availability check respecting platform, PATH, and runtime context.
+
+        Encapsulates the full decision tree so that every call-site
+        (``list_packages``, ``build_plugin_info``, ``BackendResolver``,
+        ``_plugins_discovered_event``) shares one implementation:
+
+        1. ``is_supported()`` — reject unsupported platforms immediately.
+        2. When *runtime_context* is provided **and** the plugin is a
+           ``RuntimeConsumer``, delegate to
+           ``is_available_for(runtime_context)`` which can probe the
+           *target* interpreter (e.g. ``python -m pip`` via pim).
+        3. Otherwise fall back to the PATH-based ``is_available()``.
+
+        Args:
+            runtime_context: Resolved runtime paths for this execution
+                run.  ``None`` means use PATH-only detection.
+
+        Returns:
+            ``True`` if the plugin can operate in the current context.
+        """
+        try:
+            if not type(self).is_supported():
+                return False
+            if runtime_context is not None and isinstance(self, RuntimeConsumer):
+                return self.is_available_for(runtime_context)
+            return self.is_available()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Availability check failed for plugin '%s'",
+                type(self).__name__,
+                exc_info=True,
+            )
+            return False
 
     @classmethod
     def tool_version(cls) -> Version | None:

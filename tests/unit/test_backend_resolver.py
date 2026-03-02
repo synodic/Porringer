@@ -10,7 +10,8 @@ from pathlib import Path
 from packaging.version import Version
 
 from porringer.backend.backend import BackendResolver
-from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Distribution, Ecosystem, PluginKind, PluginParameters
 
 # ---------------------------------------------------------------------------
@@ -300,7 +301,7 @@ class TestResolverRegistration:
 # ---------------------------------------------------------------------------
 
 
-class _StubRuntimeConsumer(_StubPlugin):
+class _StubRuntimeConsumer(ToolBasedPlugin, RuntimeConsumer):
     """Plugin stub that also satisfies the ``RuntimeConsumer`` protocol.
 
     ``is_available()`` returns ``False`` (tool not on PATH) while
@@ -322,6 +323,18 @@ class _StubRuntimeConsumer(_StubPlugin):
     @classmethod
     def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
         return cls._available_for
+
+    @staticmethod
+    def ecosystem() -> Ecosystem | None:
+        return Ecosystem('test')
+
+    @staticmethod
+    def plugin_kind() -> PluginKind:
+        return PluginKind.PACKAGE
+
+    @staticmethod
+    def dependencies() -> list:
+        return []
 
 
 def _make_consumer(
