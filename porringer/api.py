@@ -214,17 +214,9 @@ class API:
 
         environments = plugins.environments
 
-        # Resolve runtime context: explicit > plugins.runtime_context > auto-resolve
+        # Resolve runtime context: explicit > plugins.runtime_context
         if runtime_context is None:
             runtime_context = plugins.runtime_context
-        if runtime_context is None:
-            runtime_context = await Builder.resolve_runtime_context(environments)
-            logger.debug(
-                'uninstall: auto-resolved runtime_context: %s',
-                {k: str(v) for k, v in runtime_context.executables.items()}
-                if runtime_context.executables
-                else '<empty>',
-            )
 
         if plugin_name not in environments:
             logger.warning("Plugin '%s' is not available for uninstall of '%s'", plugin_name, package.name)

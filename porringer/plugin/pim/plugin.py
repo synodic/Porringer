@@ -144,6 +144,24 @@ class PIMEnvironment(Environment, RuntimeProvider):
         return ['py', 'uninstall', '-y', package.name]
 
     @override
+    async def available_tags(self) -> list[str]:
+        """Return all Python tags the ``py`` launcher can resolve.
+
+        Runs ``py list -f json`` **without** ``--only-managed`` so that
+        runtimes installed via the official python.org installer,
+        Microsoft Store, or any other source are included — not just
+        those managed by pymanager.
+
+        Returns:
+            A list of version tag strings (e.g. ``["3.14", "3.12"]``).
+        """
+        data = await self._run_json_command(['py', 'list', '-f', 'json'])
+        if not isinstance(data, dict):
+            return []
+
+        return [runtime.get('tag', '') for runtime in data.get('versions', []) if runtime.get('tag')]
+
+    @override
     async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         """Checks for newer Python runtimes via ``py list --online``.
 

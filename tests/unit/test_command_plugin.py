@@ -736,6 +736,10 @@ class TestResolveRuntimeContext:
                 return Path(f'/python/{tag}/python')
 
             @override
+            async def available_tags(self) -> list[str]:
+                return ['3.14', '3.12']
+
+            @override
             def install_command(self, package, **kw):
                 return []
 

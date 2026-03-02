@@ -89,6 +89,30 @@ class RuntimeProvider(Protocol):
         """
         ...
 
+    @abstractmethod
+    async def available_tags(self) -> list[str]:
+        """Return version tags this provider can resolve.
+
+        Unlike the ``packages()`` query on
+        :class:`~porringer.core.plugin_schema.environment.Environment`
+        (which returns only actively managed installs), this method
+        probes the system for **all** tags the underlying tool can
+        dispatch to — including runtimes installed by other tools.
+
+        :meth:`Builder.resolve_runtime_context
+        <porringer.backend.builder.Builder.resolve_runtime_context>`
+        calls this instead of ``packages()`` so that interpreters
+        installed via the official installer, Microsoft Store, or
+        other sources are still discoverable for downstream
+        ``RuntimeConsumer`` plugins.
+
+        Returns:
+            A list of version tag strings (e.g.
+            ``["3.14", "3.12", "3.11"]``).  May be empty when no
+            runtime is available.
+        """
+        ...
+
 
 @runtime_checkable
 class RuntimeConsumer(Protocol):

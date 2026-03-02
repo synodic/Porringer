@@ -125,6 +125,23 @@ class PyenvEnvironment(Environment, RuntimeProvider):
             logger.debug('resolve_executable failed for tag %s: %s', tag, e)
         return None
 
+    @override
+    async def available_tags(self) -> list[str]:
+        """Return all pyenv-installed version tags.
+
+        Since pyenv only tracks its own installations there is no
+        distinction between "managed" and "available" — this is
+        equivalent to extracting names from ``packages()``.
+
+        Returns:
+            A list of version strings (e.g. ``["3.14.0", "3.12.4"]``).
+        """
+        output = await self._run_text_command(['pyenv', 'versions', '--bare'])
+        if output is None:
+            return []
+
+        return [version for line in output.splitlines() if (version := line.strip())]
+
     # ------------------------------------------------------------------
     # Environment
     # ------------------------------------------------------------------

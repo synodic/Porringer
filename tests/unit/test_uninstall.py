@@ -12,6 +12,7 @@ Covers:
 
 import asyncio
 from pathlib import Path
+from typing import override
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,7 +31,7 @@ from porringer.backend.command.core.resolution import (
 )
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
 from porringer.schema import LocalConfiguration, SetupAction, SkipReason
 from porringer.test.mock.environment import MockEnvironment
@@ -425,6 +426,120 @@ class TestUninstallAutoResolveRuntimeContext:
             )
 
         mock_resolve.assert_not_called()
+        assert result is not None
+
+    @staticmethod
+    async def test_empty_managed_but_resolvable_tags() -> None:
+        """Runtime resolves even when packages() is empty but available_tags() succeeds.
+
+        Reproduces the bug where PIM's packages() returns [] (no
+        pymanager-managed runtimes) but the ``py`` launcher can still
+        dispatch to a Python installed via python.org or the Microsoft
+        Store.  After the fix, Builder.resolve_runtime_context() uses
+        available_tags() instead of packages(), so the runtime is
+        resolved and the uninstall targets the correct interpreter.
+        """
+        resolved_python = Path('/python/3.14/python')
+
+        # Build a concrete RuntimeProvider where packages() is empty but
+        # available_tags() and resolve_executable() succeed — mimics a
+        # non-pymanager Python visible to the ``py`` launcher.
+        class _NonManagedProvider(Environment, RuntimeProvider):
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem:
+                return _PY
+
+            @staticmethod
+            def plugin_kind() -> PluginKind:
+                return PluginKind.RUNTIME
+
+            @classmethod
+            def provided_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def tool_name(cls) -> str:
+                return 'py'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return True
+
+            @override
+            async def resolve_executable(self, tag: str) -> Path | None:
+                if tag == '3.14':
+                    return resolved_python
+                return None
+
+            @override
+            async def available_tags(self) -> list[str]:
+                # Non-managed runtimes visible via ``py list``
+                return ['3.14']
+
+            @override
+            async def packages(self, **kw) -> list[Package]:
+                # ``py list --only-managed`` returns empty
+                return []
+
+            @override
+            async def check_updates(self, params):
+                return []
+
+            @override
+            def install_command(self, package, **kw):
+                return []
+
+            @override
+            def upgrade_command(self, package, **kw):
+                return []
+
+            @override
+            def uninstall_command(self, package, **kw):
+                return []
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        provider = _NonManagedProvider(_MOCK_PARAMS)
+        ctx = await Builder.resolve_runtime_context({'pim': provider})
+
+        assert ctx.executables.get('python') == resolved_python, (
+            'Builder.resolve_runtime_context should populate python from available_tags() even when packages() is empty'
+        )
+
+        # Now verify the uninstall flow uses this non-empty context
+        mock_env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
+        plugins = DiscoveredPlugins(
+            environments={'mock': mock_env},
+            project_environments={},
+            scm_environments={},
+            runtime_context=ctx,
+        )
+
+        with (
+            patch('porringer.api.discover_all_plugins', return_value=plugins),
+            patch.object(type(mock_env), 'ecosystem', return_value=_PY),
+            patch.object(type(mock_env), 'plugin_kind', return_value=PluginKind.PACKAGE),
+        ):
+            config = LocalConfiguration()
+            api = API(config)
+            result = await api.uninstall(
+                'mock',
+                PackageRef.model_validate('requests'),
+                plugins=plugins,
+                dry_run=True,
+            )
+
         assert result is not None
 
 
