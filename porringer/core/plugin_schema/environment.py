@@ -62,6 +62,15 @@ class CheckUpdatesParameters(PorringerModel):
             'short-lived client.'
         ),
     )
+    runtime_context: RuntimeContext | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            'Runtime context carrying resolved interpreter paths. '
+            'Forwarded to ``python_command()`` so that update checks '
+            'target the same interpreter as package queries.'
+        ),
+    )
 
 
 class Environment(ToolBasedPlugin):

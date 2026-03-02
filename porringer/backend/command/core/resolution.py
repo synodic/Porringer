@@ -311,6 +311,7 @@ async def _resolve_plugin_operation(
         detect_updates=ctx.detect_updates,
         plugin_manager=manager,
         http_client=ctx.http_client,
+        runtime_context=ctx.runtime_context,
     )
 
 
@@ -358,6 +359,7 @@ async def _resolve_package_operation(
         presence=presence,
         detect_updates=ctx.detect_updates,
         http_client=ctx.http_client,
+        runtime_context=ctx.runtime_context,
     )
 
 
@@ -380,6 +382,7 @@ async def _apply_strategy(
     detect_updates: bool,
     plugin_manager: PluginManager | None = None,
     http_client: httpx.AsyncClient | None = None,
+    runtime_context: RuntimeContext | None = None,
 ) -> ResolvedOperation:
     """Apply the sync strategy to determine the operation.
 
@@ -404,6 +407,7 @@ async def _apply_strategy(
                         installed_ver,
                         include_prereleases=action.include_prereleases,
                         http_client=http_client,
+                        runtime_context=runtime_context,
                     )
                 except UpdateCheckError:
                     newer = None
@@ -445,6 +449,7 @@ async def _apply_strategy(
                     installed_ver,
                     include_prereleases=action.include_prereleases,
                     http_client=http_client,
+                    runtime_context=runtime_context,
                 )
             except UpdateCheckError:
                 pass  # Fall through to unconditional upgrade
@@ -636,6 +641,7 @@ async def check_for_newer_version(
     *,
     include_prereleases: bool = False,
     http_client: httpx.AsyncClient | None = None,
+    runtime_context: RuntimeContext | None = None,
 ) -> str | None:
     """Query the plugin for a newer upstream version.
 
@@ -659,6 +665,7 @@ async def check_for_newer_version(
             packages=[package],
             include_prereleases=include_prereleases,
             http_client=http_client,
+            runtime_context=runtime_context,
         )
         updates = await env.check_updates(params)
     except Exception as e:

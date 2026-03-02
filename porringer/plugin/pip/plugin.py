@@ -348,7 +348,7 @@ class PIPEnvironment(PythonEnvironment):
         """
         logger = logging.getLogger('porringer.pip.check_updates')
 
-        cmd = [self.python_command(), '-m', 'pip', 'list', '--outdated', '--format=json']
+        cmd = [self.python_command(params.runtime_context), '-m', 'pip', 'list', '--outdated', '--format=json']
         if params.include_prereleases:
             cmd.append('--pre')
 

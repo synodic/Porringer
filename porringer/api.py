@@ -13,6 +13,7 @@ from porringer.backend.command.self import check_self_updates
 from porringer.backend.command.sync import SyncCommands
 from porringer.backend.resolver import resolve_configuration
 from porringer.backend.schema import GlobalConfiguration
+from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import PackageRef
 from porringer.schema import (
@@ -63,6 +64,34 @@ class API:
             PackageUpdateInfo with current version, latest version, and update status.
         """
         return await check_self_updates()
+
+    @staticmethod
+    async def resolve_runtime_context(
+        environments: dict[str, Environment] | None = None,
+    ) -> RuntimeContext:
+        """Resolve a :class:`RuntimeContext` from available RuntimeProviders.
+
+        This is the recommended entry-point for GUI callers that need
+        a ``RuntimeContext`` before issuing ``list``, ``uninstall``,
+        or ``check_updates`` calls.  Resolving once and reusing the
+        result avoids redundant work.
+
+        When *environments* is ``None`` the current set of discovered
+        environment plugins is used automatically.
+
+        Args:
+            environments: Optional pre-built environment dict.  Pass
+                this when you already have a plugin map to avoid a
+                second discovery round.
+
+        Returns:
+            A :class:`RuntimeContext` with resolved interpreter paths
+            (may be empty when no RuntimeProvider is available).
+        """
+        if environments is None:
+            plugins = discover_all_plugins(use_cache=True)
+            environments = plugins.environments
+        return await Builder.resolve_runtime_context(environments)
 
     @staticmethod
     async def download(
@@ -127,6 +156,10 @@ class API:
         # matching the pattern used by PluginCommands.list_packages().
         if runtime_context is None:
             runtime_context = await Builder.resolve_runtime_context(environments)
+            logger.debug(
+                'uninstall: auto-resolved runtime_context: %s',
+                {k: str(v) for k, v in runtime_context.executables.items()} if runtime_context.executables else '<empty>',
+            )
 
         if plugin_name not in environments:
             logger.warning("Plugin '%s' is not available for uninstall of '%s'", plugin_name, package.name)

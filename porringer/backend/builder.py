@@ -271,4 +271,8 @@ class Builder:
             else:
                 logger.debug("RuntimeProvider '%s' could not resolve any executable", name)
 
+        logger.debug(
+            'resolve_runtime_context complete: %s',
+            {k: str(v) for k, v in ctx.executables.items()} if ctx.executables else '<empty>',
+        )
         return ctx

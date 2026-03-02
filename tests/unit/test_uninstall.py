@@ -425,3 +425,50 @@ class TestUninstallAutoResolveRuntimeContext:
 
         mock_resolve.assert_not_called()
         assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# API.resolve_runtime_context
+# ---------------------------------------------------------------------------
+
+
+class TestAPIResolveRuntimeContext:
+    """Verify the public API.resolve_runtime_context() helper."""
+
+    @staticmethod
+    async def test_auto_discovers_when_no_environments() -> None:
+        """When environments=None, plugins are auto-discovered."""
+        ctx = RuntimeContext(executables={'python': Path('/resolved/python')})
+        mock_env = _make_mock_env()
+
+        plugins = DiscoveredPlugins(
+            environments={'mock': mock_env},
+            project_environments={},
+            scm_environments={},
+        )
+
+        with (
+            patch('porringer.api.discover_all_plugins', return_value=plugins) as mock_discover,
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
+        ):
+            result = await API.resolve_runtime_context()
+
+        mock_discover.assert_called_once_with(use_cache=True)
+        mock_resolve.assert_called_once_with({'mock': mock_env})
+        assert result is ctx
+
+    @staticmethod
+    async def test_uses_provided_environments() -> None:
+        """When environments dict is passed, discovery is skipped."""
+        ctx = RuntimeContext(executables={'python': Path('/resolved/python')})
+        env_dict: dict[str, Environment] = {'pip': MagicMock(spec=Environment)}
+
+        with (
+            patch('porringer.api.discover_all_plugins') as mock_discover,
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
+        ):
+            result = await API.resolve_runtime_context(environments=env_dict)
+
+        mock_discover.assert_not_called()
+        mock_resolve.assert_called_once_with(env_dict)
+        assert result is ctx
