@@ -1,16 +1,14 @@
 """Session-scoped cached package list and plugin discovery for the ``mock_packages`` marker.
 
-Runs ``pip list --format=json`` **once** at session start and pre-discovers
-all plugins once.  Tests decorated with ``@pytest.mark.mock_packages`` will
-have ``Environment.packages()`` and ``check_updates()`` patched to return
-the cached list, and ``discover_all_plugins`` patched to reuse session
-instances — eliminating per-test subprocess **and** plugin instantiation
-overhead.
+Queries installed packages via ``importlib.metadata`` **once** at session
+start and pre-discovers all plugins once.  Tests decorated with
+``@pytest.mark.mock_packages`` will have ``Environment.packages()`` and
+``check_updates()`` patched to return the cached list, and
+``discover_all_plugins`` patched to reuse session instances — eliminating
+per-test subprocess **and** plugin instantiation overhead.
 """
 
-import json
-import subprocess
-import sys
+from importlib.metadata import distributions
 
 import pytest
 
@@ -20,18 +18,24 @@ from porringer.core.schema import Package
 
 @pytest.fixture(scope='session')
 def _cached_pip_packages() -> list[Package]:
-    """Run ``pip list`` once for the entire session and cache as ``Package`` objects."""
-    result = subprocess.run(
-        [sys.executable, '-m', 'pip', 'list', '--format=json'],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if result.returncode != 0:
-        return []
-    entries: list[dict[str, str]] = json.loads(result.stdout)
-    return [Package(name=e['name'], version=e.get('version')) for e in entries]
+    """Query installed packages via ``importlib.metadata`` once for the entire session.
+
+    Uses the stdlib ``importlib.metadata`` API instead of shelling out
+    to ``pip list``.  This avoids failures in environments where ``pip``
+    itself is not installed (e.g. PDM-managed venvs on CI).
+
+    .. warning::
+        Do **not** replace this with ``subprocess`` + ``pip list``.
+        PDM-managed venvs on CI (Ubuntu) omit ``pip``, causing the
+        subprocess to fail and silently returning an empty list.
+        Tests that assert on installed packages (e.g. ``packaging``)
+        will then fail only on CI — not locally.
+    """
+    return [
+        Package(name=dist.metadata['Name'], version=dist.metadata['Version'])
+        for dist in distributions()
+        if dist.metadata['Name'] is not None
+    ]
 
 
 @pytest.fixture(scope='session')
