@@ -48,7 +48,7 @@ def _preserve_path() -> Iterator[None]:
         os.environ['PATH'] = original
 
 
-class _MockRuntimeProvider(Environment):
+class _MockRuntimeProvider(Environment, RuntimeProvider):
     """An environment that provides a Python runtime."""
 
     _resolved: Path | None = _MOCK_RUNTIME_EXE
@@ -64,16 +64,19 @@ class _MockRuntimeProvider(Environment):
         return 'mock-pim'
 
     @classmethod
+    @override
     def provided_runtime_kind(cls) -> str:
         """Return the kind of runtime this provider supplies."""
         return 'python'
 
+    @override
     async def resolve_executable(self, tag: str) -> Path | None:
         """Resolve a tagged runtime to a mock path."""
         return self._resolved
 
+    @override
     async def available_tags(self) -> list[str]:
-        """Return a canned tag list for structural-subtyping compliance."""
+        """Return a canned tag list."""
         return ['3.14'] if self._resolved is not None else []
 
     @override

@@ -18,6 +18,7 @@ from typing import cast
 import httpx
 
 from porringer.backend.backend import BackendResolver
+from porringer.core.path import ensure_system_path, reset_sync_state
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.plugin_manager import (
     PluginManager,
@@ -299,12 +300,16 @@ def _prepend_to_path(dirs: list[str], *, require_exists: bool = False) -> None:
 def refresh_path() -> None:
     """Prepend common script/binary directories to ``PATH``.
 
-    After packages are installed, executables such as ``pipx`` may
-    have been placed in directories not yet on the running process's
-    ``PATH`` (e.g. ``~/.local/bin`` on Unix, or ``Scripts/`` on
-    Windows).  This function detects those directories and prepends
-    them so that subsequent ``shutil.which()`` calls succeed.
+    First, re-synchronizes the process ``PATH`` with the operating
+    system (e.g. registry on Windows) so that tools installed during
+    the current session become visible.  Then prepends Python-specific
+    ``sysconfig`` script directories so that executables such as
+    ``pipx`` are discoverable after installation.
     """
+    # Allow re-reading the OS PATH (handles tools installed mid-session).
+    reset_sync_state()
+    ensure_system_path()
+
     dirs: list[str] = []
 
     scripts_dir = sysconfig.get_path('scripts')

@@ -152,8 +152,13 @@ class PIMEnvironment(Environment, RuntimeProvider):
         Microsoft Store, or any other source are included — not just
         those managed by pymanager.
 
+        The returned list may contain non-version strings (e.g.
+        ``"(venv)"``) emitted by the ``py`` launcher.
+        :meth:`~RuntimeProvider.sort_tags` is responsible for filtering
+        and ordering before the builder attempts resolution.
+
         Returns:
-            A list of version tag strings (e.g. ``["3.14", "3.12"]``).
+            A list of raw tag strings as reported by the launcher.
         """
         data = await self._run_json_command(['py', 'list', '-f', 'json'])
         if not isinstance(data, dict):
