@@ -11,6 +11,69 @@ from pydantic import BaseModel, Field
 from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.schema.manifest import ManifestMetadata
 
+# ---------------------------------------------------------------------------
+# Operation union — discriminated by type
+# ---------------------------------------------------------------------------
+
+
+class InstallReason(Enum):
+    """Why an install operation was resolved."""
+
+    NOT_INSTALLED = auto()
+    """Package is not present on the system."""
+
+    ENSURE_EXTRAS = auto()
+    """Package is already installed but extras/features need to be ensured."""
+
+
+@dataclass(frozen=True, slots=True)
+class Install:
+    """Resolved operation: install a package.
+
+    ``reason`` distinguishes a fresh install from an
+    extras-ensuring re-run of the same install command.
+    """
+
+    reason: InstallReason = InstallReason.NOT_INSTALLED
+
+
+@dataclass(frozen=True, slots=True)
+class Upgrade:
+    """Resolved operation: upgrade a package to a newer version."""
+
+
+@dataclass(frozen=True, slots=True)
+class Uninstall:
+    """Resolved operation: remove a package."""
+
+    installed_version: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Skip:
+    """Resolved operation: no action required.
+
+    ``reason`` and version metadata are propagated to the
+    ``SetupActionResult`` for display purposes.
+    """
+
+    reason: SkipReason | None = None
+    installed_version: str | None = None
+    available_version: str | None = None
+
+
+type Operation = Install | Upgrade | Uninstall | Skip
+"""Union of all resolved operation variants.
+
+Use ``match`` / ``isinstance`` to dispatch; each variant
+carries its own typed payload.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Clone status
+# ---------------------------------------------------------------------------
+
 
 class CloneStatusKind(Enum):
     """Discriminator for `CloneStatus`.

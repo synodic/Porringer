@@ -14,6 +14,7 @@ from porringer.schema import (
     SetupAction,
     SetupActionResult,
     SetupParameters,
+    Skip,
     SkipReason,
     SyncStrategy,
 )
@@ -203,7 +204,7 @@ async def _dry_run_package_action(
 
     resolved = await resolve_operation(action, environments, strategy, ctx)
 
-    if resolved.operation.name == 'SKIP':
+    if isinstance(resolved.operation, Skip):
         logger.info("Dry-run: skipping '%s': %s", action.package, resolved.message)
 
     return resolved_to_result(resolved)

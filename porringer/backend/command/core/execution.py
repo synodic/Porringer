@@ -32,16 +32,22 @@ from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, Package, PluginKind
 from porringer.schema import (
+    Install,
+    InstallReason,
     ManifestMetadata,
+    Operation,
     ProgressEvent,
     ProgressEventKind,
     SetupAction,
     SetupActionResult,
     SetupParameters,
     SetupResults,
+    Skip,
     SkipReason,
     SubActionProgress,
     SyncStrategy,
+    Uninstall,
+    Upgrade,
 )
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import StreamProgress, stream_command
@@ -60,7 +66,6 @@ from .discovery import (
 from .phase import run_phases
 from .presence import clone_status_to_result, dry_run_action
 from .resolution import (
-    OperationKind,
     PackageCache,
     ResolutionContext,
     resolve_operation,
@@ -467,7 +472,7 @@ async def execute_package(
     )
 
     # --- Skip -------------------------------------------------------------
-    if resolved.operation == OperationKind.SKIP:
+    if isinstance(resolved.operation, Skip):
         logger.info("Skipping '%s': %s", action.package, resolved.message)
         return resolved_to_result(resolved)
 
@@ -487,8 +492,16 @@ async def execute_package(
         return SetupActionResult(action=action, success=False, message=msg)
 
     environment = environments[action.installer]
-    effective = SyncStrategy.MINIMAL if resolved.operation == OperationKind.INSTALL else strategy
-    verb = 'Installing' if resolved.operation == OperationKind.INSTALL else 'Upgrading'
+    match resolved.operation:
+        case Install(reason=InstallReason.ENSURE_EXTRAS):
+            effective = SyncStrategy.MINIMAL
+            verb = 'Ensuring'
+        case Install():
+            effective = SyncStrategy.MINIMAL
+            verb = 'Installing'
+        case _:
+            effective = strategy
+            verb = 'Upgrading'
     logger.info(f"{verb} '{action.package}' via {action.installer}")
     return await _attempt_package_operation(
         action, environment, effective, event_queue, runtime_context=ctx.runtime_context
@@ -583,7 +596,7 @@ async def execute_uninstall(
     )
 
     # --- Skip (not installed) ---------------------------------------------
-    if resolved.operation == OperationKind.SKIP:
+    if isinstance(resolved.operation, Skip):
         logger.info("Skipping uninstall of '%s': %s", action.package, resolved.message)
         return resolved_to_result(resolved)
 
@@ -591,7 +604,7 @@ async def execute_uninstall(
     if action.plugin_target is not None:
         return await _attempt_plugin_operation(
             action,
-            operation=OperationKind.UNINSTALL,
+            operation=Uninstall(),
             event_queue=event_queue,
             plugin_manager=resolved.plugin_manager,
             project_environments=ctx.project_environments,
@@ -615,7 +628,7 @@ async def execute_uninstall(
 async def _attempt_plugin_operation(
     action: SetupAction,
     *,
-    operation: OperationKind,
+    operation: Operation,
     event_queue: asyncio.Queue[ProgressEvent | None],
     plugin_manager: PluginManager | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
@@ -627,8 +640,8 @@ async def _attempt_plugin_operation(
 
     Args:
         action: The plugin action (``plugin_target`` must be set).
-        operation: The resolved operation kind (INSTALL, UPGRADE, or
-            UNINSTALL).
+        operation: The resolved operation (Install, Upgrade, or
+            Uninstall).
         event_queue: Queue to emit sub-action events into.
         plugin_manager: Pre-resolved ``PluginManager`` from
             :func:`resolve_operation`, if available.
@@ -648,13 +661,13 @@ async def _attempt_plugin_operation(
         return SetupActionResult(action=action, success=False, message=msg)
 
     match operation:
-        case OperationKind.INSTALL:
+        case Install():
             execute = plugin_manager.plugin_add
             verb, verb_past, suffix = 'add plugin', 'Added', f' to {action.plugin_target.name} (native)'
-        case OperationKind.UPGRADE:
+        case Upgrade():
             execute = plugin_manager.plugin_update
             verb, verb_past, suffix = 'update plugin', 'Updated', f' to {action.plugin_target.name} (native)'
-        case OperationKind.UNINSTALL:
+        case Uninstall():
             execute = plugin_manager.plugin_remove
             verb, verb_past, suffix = 'remove plugin', 'Removed', f' from {action.plugin_target.name} (native)'
         case _:
