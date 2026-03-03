@@ -24,7 +24,6 @@ from porringer.backend.command.core.action_builder import get_uninstall_cli_comm
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.core.execution import execute_uninstall
 from porringer.backend.command.core.resolution import (
-    OperationKind,
     ResolutionContext,
     resolve_uninstall_operation,
     resolved_to_result,
@@ -33,7 +32,7 @@ from porringer.core.plugin_schema.environment import Environment, PackageParamet
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
-from porringer.schema import LocalConfiguration, SetupAction, SkipReason
+from porringer.schema import LocalConfiguration, SetupAction, Skip, SkipReason, Uninstall
 from porringer.test.mock.environment import MockEnvironment
 from porringer.test.mock.plugin_manager import MockPluginManager
 
@@ -128,8 +127,8 @@ class TestResolveUninstallOperation:
         envs: dict[str, Environment] = {'mock': env}
 
         resolved = await resolve_uninstall_operation(action, envs)
-        assert resolved.operation == OperationKind.UNINSTALL
-        assert resolved.installed_version == '2.31.0'
+        assert isinstance(resolved.operation, Uninstall)
+        assert resolved.operation.installed_version == '2.31.0'
 
     @staticmethod
     async def test_not_installed_package_returns_skip() -> None:
@@ -139,8 +138,8 @@ class TestResolveUninstallOperation:
         envs: dict[str, Environment] = {'mock': env}
 
         resolved = await resolve_uninstall_operation(action, envs)
-        assert resolved.operation == OperationKind.SKIP
-        assert resolved.skip_reason == SkipReason.NOT_INSTALLED
+        assert isinstance(resolved.operation, Skip)
+        assert resolved.operation.reason == SkipReason.NOT_INSTALLED
 
     @staticmethod
     async def test_missing_installer_returns_skip() -> None:
@@ -153,14 +152,14 @@ class TestResolveUninstallOperation:
             package=None,
         )
         resolved = await resolve_uninstall_operation(action, {})
-        assert resolved.operation == OperationKind.SKIP
+        assert isinstance(resolved.operation, Skip)
 
     @staticmethod
     async def test_unavailable_installer_returns_skip() -> None:
         """Installer not in environments dict → SKIP."""
         action = _make_action(installer='nonexistent')
         resolved = await resolve_uninstall_operation(action, {})
-        assert resolved.operation == OperationKind.SKIP
+        assert isinstance(resolved.operation, Skip)
 
     @staticmethod
     async def test_plugin_target_installed_returns_uninstall() -> None:
@@ -170,7 +169,7 @@ class TestResolveUninstallOperation:
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_uninstall_operation(action, {}, ResolutionContext(project_environments=proj_envs))
-        assert resolved.operation == OperationKind.UNINSTALL
+        assert isinstance(resolved.operation, Uninstall)
         assert resolved.plugin_manager is mock_pm
 
     @staticmethod
@@ -181,8 +180,8 @@ class TestResolveUninstallOperation:
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_uninstall_operation(action, {}, ResolutionContext(project_environments=proj_envs))
-        assert resolved.operation == OperationKind.SKIP
-        assert resolved.skip_reason == SkipReason.NOT_INSTALLED
+        assert isinstance(resolved.operation, Skip)
+        assert resolved.operation.reason == SkipReason.NOT_INSTALLED
 
     @staticmethod
     async def test_plugin_target_no_manager_returns_skip() -> None:
@@ -190,7 +189,7 @@ class TestResolveUninstallOperation:
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
 
         resolved = await resolve_uninstall_operation(action, {})
-        assert resolved.operation == OperationKind.SKIP
+        assert isinstance(resolved.operation, Skip)
 
     @staticmethod
     async def test_resolved_to_result_for_skip() -> None:

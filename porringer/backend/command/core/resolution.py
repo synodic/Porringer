@@ -12,7 +12,6 @@ helper used by resolution, dry-run, and execution paths.
 import asyncio
 import logging
 from dataclasses import dataclass
-from enum import Enum, auto
 from pathlib import Path
 
 import httpx
@@ -26,23 +25,20 @@ from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.schema import (
+    Install,
+    InstallReason,
+    Operation,
     SetupAction,
     SetupActionResult,
+    Skip,
     SkipReason,
     SyncStrategy,
+    Uninstall,
+    Upgrade,
 )
 from porringer.utility.exception import PluginError
 
 logger = logging.getLogger(__name__)
-
-
-class OperationKind(Enum):
-    """The resolved operation to perform on a package."""
-
-    INSTALL = auto()
-    UPGRADE = auto()
-    UNINSTALL = auto()
-    SKIP = auto()
 
 
 @dataclass(slots=True)
@@ -54,11 +50,8 @@ class ResolvedOperation:
     """
 
     action: SetupAction
-    operation: OperationKind
-    skip_reason: SkipReason | None = None
+    operation: Operation
     message: str | None = None
-    installed_version: str | None = None
-    available_version: str | None = None
     plugin_manager: PluginManager | None = None
     """The resolved ``PluginManager`` for plugin-target actions, or
     ``None`` for normal package actions.  Cached here so the caller
@@ -71,27 +64,28 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
     This is the single mapping used by both the dry-run and real
     execution paths so that the translation lives in one place.
 
-    For ``SKIP`` operations the result carries version metadata and
-    the skip reason.  For ``INSTALL`` and ``UPGRADE`` operations
-    the result reports success with an optional message.
+    For :class:`Skip` operations the result carries version metadata
+    and the skip reason.  For all other operations the result reports
+    success with an optional message.
     """
-    if resolved.operation == OperationKind.SKIP:
-        logger.debug('resolved to skip: reason=%s message=%s', resolved.skip_reason, resolved.message)
-        return SetupActionResult(
-            action=resolved.action,
-            success=True,
-            skipped=True,
-            skip_reason=resolved.skip_reason,
-            message=resolved.message,
-            installed_version=resolved.installed_version,
-            available_version=resolved.available_version,
-        )
-
-    return SetupActionResult(
-        action=resolved.action,
-        success=True,
-        message=resolved.message,
-    )
+    match resolved.operation:
+        case Skip(reason=reason, installed_version=iv, available_version=av):
+            logger.debug('resolved to skip: reason=%s message=%s', reason, resolved.message)
+            return SetupActionResult(
+                action=resolved.action,
+                success=True,
+                skipped=True,
+                skip_reason=reason,
+                message=resolved.message,
+                installed_version=iv,
+                available_version=av,
+            )
+        case _:
+            return SetupActionResult(
+                action=resolved.action,
+                success=True,
+                message=resolved.message,
+            )
 
 
 class PackageCache:
@@ -259,7 +253,7 @@ async def resolve_operation(
     if action.installer is None or action.package is None:
         return ResolvedOperation(
             action=action,
-            operation=OperationKind.SKIP,
+            operation=Skip(),
             message='Installer or package not specified',
         )
 
@@ -286,7 +280,7 @@ async def _resolve_plugin_operation(
         # No PluginManager found — cannot determine presence, assume install
         return ResolvedOperation(
             action=action,
-            operation=OperationKind.INSTALL,
+            operation=Install(),
             plugin_manager=None,
             message='PluginManager not available for query',
         )
@@ -328,7 +322,7 @@ async def _resolve_package_operation(
     if action.installer not in environments:
         return ResolvedOperation(
             action=action,
-            operation=OperationKind.INSTALL,
+            operation=Install(),
             message=f"Installer '{action.installer}' is not available",
         )
 
@@ -374,6 +368,70 @@ class _PresenceResult:
     """Environment plugin to use for upstream update checks."""
 
 
+async def _resolve_latest_installed(
+    *,
+    action: SetupAction,
+    presence: _PresenceResult,
+    installed_ver: str | None,
+    has_extras: bool,
+    plugin_manager: PluginManager | None,
+    http_client: httpx.AsyncClient | None,
+    runtime_context: RuntimeContext | None,
+) -> ResolvedOperation:
+    """Resolve a LATEST/EXACT operation for an already-installed package.
+
+    Queries for a newer version when possible.  Falls back to an
+    unconditional upgrade when no update-check environment is available.
+    """
+    if presence.env_for_updates is not None:
+        try:
+            newer = await check_for_newer_version(
+                presence.env_for_updates,
+                action.package,
+                installed_ver,
+                include_prereleases=action.include_prereleases,
+                http_client=http_client,
+                runtime_context=runtime_context,
+            )
+        except UpdateCheckError:
+            pass  # Fall through to unconditional upgrade
+        else:
+            if newer is not None:
+                pkg_name = action.package.name if action.package else ''
+                return ResolvedOperation(
+                    action=action,
+                    operation=Upgrade(),
+                    message=f'{pkg_name} {installed_ver} → {newer}',
+                    plugin_manager=plugin_manager,
+                )
+            # Version is latest but extras may have changed.
+            if has_extras:
+                return ResolvedOperation(
+                    action=action,
+                    operation=Install(reason=InstallReason.ENSURE_EXTRAS),
+                    message='ensuring extras',
+                    plugin_manager=plugin_manager,
+                )
+            return ResolvedOperation(
+                action=action,
+                operation=Skip(
+                    reason=SkipReason.ALREADY_LATEST,
+                    installed_version=installed_ver,
+                ),
+                message=presence.detail,
+                plugin_manager=plugin_manager,
+            )
+
+    # No environment for update checks, or check failed — upgrade
+    # unconditionally.
+    return ResolvedOperation(
+        action=action,
+        operation=Upgrade(),
+        message=presence.detail,
+        plugin_manager=plugin_manager,
+    )
+
+
 async def _apply_strategy(
     *,
     action: SetupAction,
@@ -391,9 +449,21 @@ async def _apply_strategy(
     share this logic.
     """
     installed_ver = presence.matched.version if presence.matched else None
+    has_extras = action.package is not None and bool(action.package.extras)
 
     if strategy == SyncStrategy.MINIMAL:
         if presence.is_installed:
+            # Extras cannot be introspected from installed state — always
+            # re-run the install command so the underlying tool ensures
+            # the requested extras/features are satisfied.
+            if has_extras:
+                return ResolvedOperation(
+                    action=action,
+                    operation=Install(reason=InstallReason.ENSURE_EXTRAS),
+                    message='ensuring extras',
+                    plugin_manager=plugin_manager,
+                )
+
             # Check for updates if requested (dry-run feature)
             skip_reason = SkipReason.ALREADY_INSTALLED
             available_ver: str | None = None
@@ -420,73 +490,37 @@ async def _apply_strategy(
 
             return ResolvedOperation(
                 action=action,
-                operation=OperationKind.SKIP,
-                skip_reason=skip_reason,
+                operation=Skip(
+                    reason=skip_reason,
+                    installed_version=installed_ver,
+                    available_version=available_ver,
+                ),
                 message=msg,
-                installed_version=installed_ver,
-                available_version=available_ver,
                 plugin_manager=plugin_manager,
             )
-        else:
-            # Not installed → install
-            return ResolvedOperation(
-                action=action,
-                operation=OperationKind.INSTALL,
-                plugin_manager=plugin_manager,
-            )
+        # Not installed → install
+        return ResolvedOperation(
+            action=action,
+            operation=Install(),
+            plugin_manager=plugin_manager,
+        )
 
     # LATEST or EXACT strategy
     if presence.is_installed:
-        # Check whether this package actually has a newer version
-        # available before attempting an upgrade.  When the plugin
-        # confirms the package is already at its latest version we
-        # can skip the no-op upgrade entirely.
-        if presence.env_for_updates is not None:
-            try:
-                newer = await check_for_newer_version(
-                    presence.env_for_updates,
-                    action.package,
-                    installed_ver,
-                    include_prereleases=action.include_prereleases,
-                    http_client=http_client,
-                    runtime_context=runtime_context,
-                )
-            except UpdateCheckError:
-                pass  # Fall through to unconditional upgrade
-            else:
-                if newer is not None:
-                    pkg_name = action.package.name if action.package else ''
-                    return ResolvedOperation(
-                        action=action,
-                        operation=OperationKind.UPGRADE,
-                        message=f'{pkg_name} {installed_ver} → {newer}',
-                        installed_version=installed_ver,
-                        available_version=newer,
-                        plugin_manager=plugin_manager,
-                    )
-                return ResolvedOperation(
-                    action=action,
-                    operation=OperationKind.SKIP,
-                    skip_reason=SkipReason.ALREADY_LATEST,
-                    message=presence.detail,
-                    installed_version=installed_ver,
-                    plugin_manager=plugin_manager,
-                )
-
-        # No environment for update checks, or check failed — upgrade
-        # unconditionally.
-        return ResolvedOperation(
+        return await _resolve_latest_installed(
             action=action,
-            operation=OperationKind.UPGRADE,
-            message=presence.detail,
-            installed_version=installed_ver,
+            presence=presence,
+            installed_ver=installed_ver,
+            has_extras=has_extras,
             plugin_manager=plugin_manager,
+            http_client=http_client,
+            runtime_context=runtime_context,
         )
 
     # Not installed under LATEST/EXACT → fall back to install
     return ResolvedOperation(
         action=action,
-        operation=OperationKind.INSTALL,
+        operation=Install(),
         message='not installed, will install instead',
         plugin_manager=plugin_manager,
     )
@@ -500,8 +534,8 @@ async def resolve_uninstall_operation(
     """Determine whether a package can be uninstalled.
 
     Checks the system for the package's presence and returns
-    ``UNINSTALL`` when found or ``SKIP`` with ``NOT_INSTALLED``
-    when the package is absent.
+    :class:`Uninstall` when found or :class:`Skip` with
+    ``NOT_INSTALLED`` when the package is absent.
 
     Unlike :func:`resolve_operation`, this function is not
     strategy-driven — uninstall is an imperative operation.
@@ -520,7 +554,7 @@ async def resolve_uninstall_operation(
     if action.installer is None or action.package is None:
         return ResolvedOperation(
             action=action,
-            operation=OperationKind.SKIP,
+            operation=Skip(),
             message='Installer or package not specified',
         )
 
@@ -532,7 +566,7 @@ async def resolve_uninstall_operation(
     if action.installer not in environments:
         return ResolvedOperation(
             action=action,
-            operation=OperationKind.SKIP,
+            operation=Skip(),
             message=f"Installer '{action.installer}' is not available",
         )
 
@@ -563,16 +597,14 @@ async def resolve_uninstall_operation(
     if not is_installed:
         return ResolvedOperation(
             action=action,
-            operation=OperationKind.SKIP,
-            skip_reason=SkipReason.NOT_INSTALLED,
+            operation=Skip(reason=SkipReason.NOT_INSTALLED),
             message=f"'{action.package.name}' is not installed",
         )
 
     return ResolvedOperation(
         action=action,
-        operation=OperationKind.UNINSTALL,
+        operation=Uninstall(installed_version=matched.version if matched else None),
         message=detail,
-        installed_version=matched.version if matched else None,
     )
 
 
@@ -596,7 +628,7 @@ async def _resolve_plugin_uninstall(
     if manager is None:
         return ResolvedOperation(
             action=action,
-            operation=OperationKind.SKIP,
+            operation=Skip(),
             message=f"No PluginManager found for '{action.plugin_target.name}'",
         )
 
@@ -605,22 +637,21 @@ async def _resolve_plugin_uninstall(
             installed = await ctx.package_cache.get_plugins(action.plugin_target.name, manager)
         else:
             installed = await manager.installed_plugins()
-        is_installed, detail, _ = is_package_installed(action.package, installed)
+        is_installed, detail, matched = is_package_installed(action.package, installed)
     except Exception as e:
         logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
-        is_installed, detail = False, None
+        is_installed, detail, matched = False, None, None
 
     if not is_installed:
         return ResolvedOperation(
             action=action,
-            operation=OperationKind.SKIP,
-            skip_reason=SkipReason.NOT_INSTALLED,
+            operation=Skip(reason=SkipReason.NOT_INSTALLED),
             message=f"Plugin '{action.package.name}' is not installed in '{action.plugin_target.name}'",
             plugin_manager=manager,
         )
     return ResolvedOperation(
         action=action,
-        operation=OperationKind.UNINSTALL,
+        operation=Uninstall(installed_version=matched.version if matched else None),
         message=detail,
         plugin_manager=manager,
     )
