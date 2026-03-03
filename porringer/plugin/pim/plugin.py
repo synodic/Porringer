@@ -2,13 +2,21 @@
 
 import asyncio
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import override
 
+from packaging.version import InvalidVersion, Version
+
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Ecosystem, Package, PackageRef, PluginDependency, PluginKind
+
+# Architecture suffix pattern: a trailing dash followed by digits (e.g. "-64", "-32").
+_ARCH_SUFFIX = re.compile(r'-\d+$')
+
+logger = logging.getLogger(__name__)
 
 
 class PIMEnvironment(Environment, RuntimeProvider):
@@ -142,6 +150,31 @@ class PIMEnvironment(Environment, RuntimeProvider):
     def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a Python runtime via pymanager."""
         return ['py', 'uninstall', '-y', package.name]
+
+    @override
+    def sort_tags(self, tags: list[str]) -> list[str]:
+        """Filter and sort PIM tags, handling architecture suffixes.
+
+        The ``py`` launcher emits tags like ``"3.14-64"`` or
+        ``"3.12-32"`` where the trailing ``-<arch>`` component is an
+        architecture discriminator, not part of the :pep:`440` version.
+        This override strips that suffix for version parsing while
+        preserving the **full** tag in the returned list so that
+        :meth:`resolve_executable` receives the architecture-qualified
+        string (e.g. ``py -3.14-64``).
+
+        Tags that remain unparseable after suffix stripping (e.g.
+        ``"(venv)"``) are silently dropped.
+        """
+        parsed: list[tuple[Version, str]] = []
+        for tag in tags:
+            version_part = _ARCH_SUFFIX.sub('', tag)
+            try:
+                parsed.append((Version(version_part), tag))
+            except InvalidVersion:
+                logger.debug('Dropping unparseable tag %r from %s', tag, type(self).__name__)
+        parsed.sort(key=lambda pair: pair[0], reverse=True)
+        return [tag for _, tag in parsed]
 
     @override
     async def available_tags(self) -> list[str]:
