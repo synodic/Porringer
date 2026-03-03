@@ -125,7 +125,7 @@ class TestPackageRefRoundTrip:
         """Model dumps and restores via dict."""
         ref = PackageRef(name='ruff', constraint='>=0.8.0')
         data = ref.model_dump()
-        assert data == {'name': 'ruff', 'constraint': '>=0.8.0'}
+        assert data == {'name': 'ruff', 'extras': (), 'constraint': '>=0.8.0'}
         restored = PackageRef.model_validate(data)
         assert restored.name == ref.name
         assert restored.constraint == ref.constraint
@@ -137,6 +137,7 @@ class TestPackageRefRoundTrip:
         json_str = ref.model_dump_json()
         restored = PackageRef.model_validate_json(json_str)
         assert restored.name == ref.name
+        assert restored.extras == ref.extras
         assert restored.constraint == ref.constraint
 
 
@@ -204,3 +205,97 @@ class TestPackageRefNpmStyle:
         ref = PackageRef.model_validate('!!!special!!!')
         assert ref.name == '!!!special!!!'
         assert ref.constraint is None
+
+
+class TestPackageRefExtras:
+    """Tests for PEP 508 extras bracket syntax."""
+
+    @staticmethod
+    def test_extras_from_string() -> None:
+        """Extras are captured from bracket syntax."""
+        ref = PackageRef.model_validate('cppython[cmake,conan,git]')
+        assert ref.name == 'cppython'
+        assert ref.extras == ('cmake', 'conan', 'git')
+        assert ref.constraint is None
+
+    @staticmethod
+    def test_extras_with_constraint() -> None:
+        """Extras and version constraint are both captured."""
+        ref = PackageRef.model_validate('cppython[cmake,conan]>=1.0')
+        assert ref.name == 'cppython'
+        assert ref.extras == ('cmake', 'conan')
+        assert ref.constraint == '>=1.0'
+
+    @staticmethod
+    def test_single_extra() -> None:
+        """Single extra is captured as a one-element tuple."""
+        ref = PackageRef.model_validate('pkg[one]')
+        assert ref.extras == ('one',)
+
+    @staticmethod
+    def test_no_extras_default() -> None:
+        """Bare name has empty extras tuple."""
+        ref = PackageRef(name='ruff')
+        assert ref.extras == ()
+
+    @staticmethod
+    def test_no_extras_from_string() -> None:
+        """String without brackets has empty extras tuple."""
+        ref = PackageRef.model_validate('ruff>=0.8.0')
+        assert ref.extras == ()
+
+    @staticmethod
+    def test_explicit_construction() -> None:
+        """Extras can be provided via explicit construction."""
+        ref = PackageRef(name='pkg', extras=('a', 'b'))
+        assert ref.extras == ('a', 'b')
+
+    @staticmethod
+    def test_specifier_with_extras() -> None:
+        """Specifier includes extras brackets."""
+        ref = PackageRef.model_validate('cppython[cmake,conan,git]')
+        assert ref.specifier == 'cppython[cmake,conan,git]'
+
+    @staticmethod
+    def test_specifier_extras_and_constraint() -> None:
+        """Specifier includes extras and constraint."""
+        ref = PackageRef.model_validate('cppython[cmake,conan]>=1.0')
+        assert ref.specifier == 'cppython[cmake,conan]>=1.0'
+
+    @staticmethod
+    def test_str_includes_extras() -> None:
+        """String conversion includes extras."""
+        ref = PackageRef.model_validate('cppython[cmake,conan,git]')
+        assert str(ref) == 'cppython[cmake,conan,git]'
+
+    @staticmethod
+    def test_extras_sorted_deterministically() -> None:
+        """Extras are sorted regardless of input order."""
+        ref_a = PackageRef.model_validate('pkg[b,a,c]')
+        ref_b = PackageRef.model_validate('pkg[c,a,b]')
+        assert ref_a.extras == ('a', 'b', 'c')
+        assert ref_a == ref_b
+
+    @staticmethod
+    def test_extras_dict_round_trip() -> None:
+        """Model with extras dumps and restores via dict."""
+        ref = PackageRef.model_validate('cppython[cmake,conan,git]')
+        data = ref.model_dump()
+        assert data == {'name': 'cppython', 'extras': ('cmake', 'conan', 'git'), 'constraint': None}
+        restored = PackageRef.model_validate(data)
+        assert restored == ref
+
+    @staticmethod
+    def test_extras_json_round_trip() -> None:
+        """Model with extras dumps and restores via JSON."""
+        ref = PackageRef.model_validate('cppython[cmake,conan,git]>=1.0')
+        json_str = ref.model_dump_json()
+        restored = PackageRef.model_validate_json(json_str)
+        assert restored == ref
+        assert restored.extras == ('cmake', 'conan', 'git')
+
+    @staticmethod
+    def test_npm_style_no_extras() -> None:
+        """npm-style specifiers produce empty extras (not a PEP 508 concept)."""
+        ref = PackageRef.model_validate('lodash@^4.0.0')
+        assert ref.extras == ()
