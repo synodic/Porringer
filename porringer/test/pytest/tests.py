@@ -8,6 +8,7 @@ from packaging.version import Version
 import pytest
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Distribution, PackageRef, PluginParameters
 from porringer.test.pytest.shared import (
@@ -15,6 +16,7 @@ from porringer.test.pytest.shared import (
     PluginIntegrationTests,
     PluginUnitTests,
     ProjectEnvironmentTests,
+    RuntimeProviderTests,
     ScmEnvironmentTests,
 )
 
@@ -135,3 +137,49 @@ class ScmEnvironmentUnitTests[T: ScmEnvironment](PluginUnitTests[T], ScmEnvironm
         eco = plugin_type.ecosystem()
         assert isinstance(eco, str)
         assert len(eco) > 0
+
+
+class RuntimeProviderUnitTests[T: Environment](EnvironmentUnitTests[T], RuntimeProviderTests[T], metaclass=ABCMeta):
+    """Unit tests for ``Environment`` plugins that also implement ``RuntimeProvider``.
+
+    These tests verify behavioural contracts that every ``RuntimeProvider``
+    implementation must satisfy, regardless of its versioning scheme.
+
+    Custom implementations should inherit from this class and provide a
+    ``fixture_plugin_type`` fixture returning the concrete plugin type.
+    """
+
+    @staticmethod
+    def test_sort_tags_empty_returns_empty(plugin_type: type[T]) -> None:
+        """sort_tags([]) must return an empty list."""
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = plugin_type(params)
+        assert isinstance(provider, RuntimeProvider)
+        assert provider.sort_tags([]) == []
+
+    @staticmethod
+    def test_sort_tags_result_is_subset_of_input(plugin_type: type[T]) -> None:
+        """Every tag in the result must appear in the original input."""
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = plugin_type(params)
+        assert isinstance(provider, RuntimeProvider)
+        tags = ['3.14', '3.12', '(venv)', 'nope', '', '3.11']
+        result = provider.sort_tags(tags)
+        assert set(result) <= set(tags)
+
+    @staticmethod
+    def test_sort_tags_does_not_crash_on_garbage(plugin_type: type[T]) -> None:
+        """sort_tags must never raise, even on completely unparseable input."""
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = plugin_type(params)
+        assert isinstance(provider, RuntimeProvider)
+        result = provider.sort_tags(['(venv)', 'latest', '', '!!!', 'not-a-version'])
+        assert isinstance(result, list)
+
+    @staticmethod
+    def test_provided_runtime_kind_is_nonempty(plugin_type: type[T]) -> None:
+        """provided_runtime_kind() must return a non-empty string."""
+        assert hasattr(plugin_type, 'provided_runtime_kind')
+        kind = plugin_type.provided_runtime_kind()  # type: ignore[attr-defined]
+        assert isinstance(kind, str)
+        assert len(kind) > 0

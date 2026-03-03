@@ -10,7 +10,7 @@ from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Distribution, PackageRef, PluginParameters
 from porringer.plugin.pyenv.plugin import PyenvEnvironment
 from porringer.test.mock.subprocess import fake_proc as _fake_proc
-from porringer.test.pytest.tests import EnvironmentUnitTests
+from porringer.test.pytest.tests import RuntimeProviderUnitTests
 
 _PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.1')))
 
@@ -98,8 +98,8 @@ class TestPackages:
             assert await environment.packages() == []
 
 
-class TestPyenvEnvironmentUnit(EnvironmentUnitTests[PyenvEnvironment]):
-    """Runs the standard environment unit test suite."""
+class TestPyenvEnvironmentUnit(RuntimeProviderUnitTests[PyenvEnvironment]):
+    """Runs the standard environment and runtime-provider unit test suite."""
 
     @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')

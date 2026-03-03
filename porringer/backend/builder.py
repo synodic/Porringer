@@ -244,8 +244,19 @@ class Builder:
                 logger.debug("Failed to list available tags for provider '%s'", name, exc_info=True)
                 continue
 
+            logger.debug("RuntimeProvider '%s' reported %d tag(s): %s", name, len(tags), tags)
+
             # Delegate filtering and sorting to the provider's ecosystem-aware logic
             sorted_tags = env.sort_tags(tags)
+
+            if len(sorted_tags) < len(tags):
+                logger.debug(
+                    "sort_tags filtered %d → %d for '%s' (dropped: %s)",
+                    len(tags),
+                    len(sorted_tags),
+                    name,
+                    sorted(set(tags) - set(sorted_tags)),
+                )
 
             for tag in sorted_tags:
                 try:

@@ -10,7 +10,7 @@ from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.schema import Distribution, PluginParameters
 from porringer.plugin.pim.plugin import PIMEnvironment
 from porringer.test.mock.subprocess import fake_proc as _fake_proc
-from porringer.test.pytest.tests import EnvironmentUnitTests
+from porringer.test.pytest.tests import RuntimeProviderUnitTests
 
 _PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.1')))
 
@@ -69,8 +69,8 @@ class TestResolveExecutable:
             assert result is None
 
 
-class TestPIMEnvironmentUnit(EnvironmentUnitTests[PIMEnvironment]):
-    """Runs the standard environment unit test suite."""
+class TestPIMEnvironmentUnit(RuntimeProviderUnitTests[PIMEnvironment]):
+    """Runs the standard environment and runtime-provider unit test suite."""
 
     @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')

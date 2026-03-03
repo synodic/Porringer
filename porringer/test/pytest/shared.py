@@ -128,3 +128,7 @@ class ScmEnvironmentTests[T: ScmEnvironment](PluginTests[T], metaclass=ABCMeta):
         scm_environment_type = cast(type[ScmEnvironment], request.param)
 
         return scm_environment_type
+
+
+class RuntimeProviderTests[T: Environment](PluginTests[T], metaclass=ABCMeta):
+    """Shared functionality for plugins implementing ``RuntimeProvider``."""

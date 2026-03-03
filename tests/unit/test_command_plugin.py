@@ -1,13 +1,14 @@
 """Test the command 'plugin'"""
 
 import os
+import re
 import sys
 from pathlib import Path
 from typing import override
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
 from porringer.api import API
 from porringer.backend.builder import Builder, PluginInformation
@@ -866,227 +867,115 @@ class TestResolveRuntimeContext:
 
 
 class TestSortTags:
-    """RuntimeProvider.sort_tags filters and orders tags by version."""
+    """RuntimeProvider.sort_tags default implementation (PEP 440).
+
+    Uses a minimal inline provider that inherits the default ``sort_tags``
+    from ``RuntimeProvider`` so these tests exercise the protocol's
+    concrete method, independent of any real plugin.
+    """
+
+    class _DefaultProvider(Environment, RuntimeProvider):
+        """Minimal provider that relies on the default ``sort_tags``."""
+
+        _distribution: Distribution
+
+        def __init__(self, parameters: PluginParameters) -> None:
+            self._distribution = parameters.distribution
+
+        @staticmethod
+        def ecosystem() -> Ecosystem | None:
+            return Ecosystem('python')
+
+        @staticmethod
+        def plugin_kind() -> PluginKind:
+            return PluginKind.RUNTIME
+
+        @classmethod
+        def provided_runtime_kind(cls) -> str:
+            return 'python'
+
+        @classmethod
+        def tool_name(cls) -> str:
+            return 'py'
+
+        @classmethod
+        def is_available(cls) -> bool:
+            return True
+
+        @override
+        async def resolve_executable(self, tag: str) -> Path | None:
+            return None
+
+        @override
+        async def available_tags(self) -> list[str]:
+            return []
+
+        @override
+        def install_command(self, package, **kw):  # type: ignore[override]
+            return []
+
+        @override
+        def upgrade_command(self, package, **kw):  # type: ignore[override]
+            return []
+
+        @override
+        def uninstall_command(self, package, **kw):  # type: ignore[override]
+            return []
+
+        @override
+        async def packages(self, **kw):  # type: ignore[override]
+            return []
+
+        @override
+        async def check_updates(self, params):  # type: ignore[override]
+            return []
+
+        @staticmethod
+        def dependencies() -> list:  # type: ignore[override]
+            return []
+
+        @property
+        def distribution(self) -> Distribution:
+            return self._distribution
+
+    @pytest.fixture
+    def provider(self) -> RuntimeProvider:
+        """Create a default-sort_tags provider."""
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        return self._DefaultProvider(params)
 
     @staticmethod
-    async def test_default_sort_tags_descending() -> None:
+    def test_default_sort_tags_descending(provider: RuntimeProvider) -> None:
         """Valid PEP 440 tags are returned highest-first."""
-
-        class _Provider(Environment, RuntimeProvider):
-            _distribution: Distribution
-
-            def __init__(self, parameters: PluginParameters) -> None:
-                self._distribution = parameters.distribution
-
-            @staticmethod
-            def ecosystem() -> Ecosystem | None:
-                return Ecosystem('python')
-
-            @staticmethod
-            def plugin_kind() -> PluginKind:
-                return PluginKind.RUNTIME
-
-            @classmethod
-            def provided_runtime_kind(cls) -> str:
-                return 'python'
-
-            @classmethod
-            def tool_name(cls) -> str:
-                return 'py'
-
-            @classmethod
-            def is_available(cls) -> bool:
-                return True
-
-            @override
-            async def resolve_executable(self, tag: str) -> Path | None:
-                return None
-
-            @override
-            async def available_tags(self) -> list[str]:
-                return []
-
-            @override
-            def install_command(self, package, **kw):
-                return []
-
-            @override
-            def upgrade_command(self, package, **kw):
-                return []
-
-            @override
-            def uninstall_command(self, package, **kw):
-                return []
-
-            @override
-            async def packages(self, **kw):
-                return []
-
-            @override
-            async def check_updates(self, params):
-                return []
-
-            @staticmethod
-            def dependencies() -> list:
-                return []
-
-            @property
-            def distribution(self) -> Distribution:
-                return self._distribution
-
-        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-        provider = _Provider(params)
-
         assert provider.sort_tags(['3.11', '3.14', '3.12']) == ['3.14', '3.12', '3.11']
 
     @staticmethod
-    async def test_sort_tags_drops_invalid() -> None:
+    def test_sort_tags_drops_invalid(provider: RuntimeProvider) -> None:
         """Non-PEP-440 strings are silently dropped."""
-
-        class _Provider(Environment, RuntimeProvider):
-            _distribution: Distribution
-
-            def __init__(self, parameters: PluginParameters) -> None:
-                self._distribution = parameters.distribution
-
-            @staticmethod
-            def ecosystem() -> Ecosystem | None:
-                return Ecosystem('python')
-
-            @staticmethod
-            def plugin_kind() -> PluginKind:
-                return PluginKind.RUNTIME
-
-            @classmethod
-            def provided_runtime_kind(cls) -> str:
-                return 'python'
-
-            @classmethod
-            def tool_name(cls) -> str:
-                return 'py'
-
-            @classmethod
-            def is_available(cls) -> bool:
-                return True
-
-            @override
-            async def resolve_executable(self, tag: str) -> Path | None:
-                return None
-
-            @override
-            async def available_tags(self) -> list[str]:
-                return []
-
-            @override
-            def install_command(self, package, **kw):
-                return []
-
-            @override
-            def upgrade_command(self, package, **kw):
-                return []
-
-            @override
-            def uninstall_command(self, package, **kw):
-                return []
-
-            @override
-            async def packages(self, **kw):
-                return []
-
-            @override
-            async def check_updates(self, params):
-                return []
-
-            @staticmethod
-            def dependencies() -> list:
-                return []
-
-            @property
-            def distribution(self) -> Distribution:
-                return self._distribution
-
-        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-        provider = _Provider(params)
-
         result = provider.sort_tags(['3.12', '(venv)', '3.14', 'latest', '', 'stable'])
         assert result == ['3.14', '3.12']
 
     @staticmethod
-    async def test_sort_tags_empty_input() -> None:
+    def test_sort_tags_empty_input(provider: RuntimeProvider) -> None:
         """An empty tag list returns an empty list."""
-
-        class _Provider(Environment, RuntimeProvider):
-            _distribution: Distribution
-
-            def __init__(self, parameters: PluginParameters) -> None:
-                self._distribution = parameters.distribution
-
-            @staticmethod
-            def ecosystem() -> Ecosystem | None:
-                return Ecosystem('python')
-
-            @staticmethod
-            def plugin_kind() -> PluginKind:
-                return PluginKind.RUNTIME
-
-            @classmethod
-            def provided_runtime_kind(cls) -> str:
-                return 'python'
-
-            @classmethod
-            def tool_name(cls) -> str:
-                return 'py'
-
-            @classmethod
-            def is_available(cls) -> bool:
-                return True
-
-            @override
-            async def resolve_executable(self, tag: str) -> Path | None:
-                return None
-
-            @override
-            async def available_tags(self) -> list[str]:
-                return []
-
-            @override
-            def install_command(self, package, **kw):
-                return []
-
-            @override
-            def upgrade_command(self, package, **kw):
-                return []
-
-            @override
-            def uninstall_command(self, package, **kw):
-                return []
-
-            @override
-            async def packages(self, **kw):
-                return []
-
-            @override
-            async def check_updates(self, params):
-                return []
-
-            @staticmethod
-            def dependencies() -> list:
-                return []
-
-            @property
-            def distribution(self) -> Distribution:
-                return self._distribution
-
-        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-        provider = _Provider(params)
-
         assert provider.sort_tags([]) == []
 
     @staticmethod
-    async def test_sort_tags_all_invalid() -> None:
+    def test_sort_tags_all_invalid(provider: RuntimeProvider) -> None:
         """When every tag is unparseable, an empty list is returned."""
+        assert provider.sort_tags(['(venv)', 'latest', 'nope']) == []
 
-        class _Provider(Environment, RuntimeProvider):
+
+class TestSortTagsOverride:
+    """Builder respects custom sort_tags overrides from providers."""
+
+    @staticmethod
+    async def test_arch_suffix_override_resolves_highest() -> None:
+        """A provider that strips architecture suffixes resolves the highest version."""
+
+        class _ArchProvider(Environment, RuntimeProvider):
+            """Strips trailing ``-<digits>`` for version parsing; returns full tags."""
+
             _distribution: Distribution
 
             def __init__(self, parameters: PluginParameters) -> None:
@@ -1114,11 +1003,24 @@ class TestSortTags:
 
             @override
             async def resolve_executable(self, tag: str) -> Path | None:
-                return None
+                return Path(f'/python/{tag}/python')
 
             @override
             async def available_tags(self) -> list[str]:
-                return []
+                return ['3.12-64', '(venv)', '3.14-64', '3.11-32']
+
+            @override
+            def sort_tags(self, tags: list[str]) -> list[str]:
+                """Strip -<arch> suffix for parsing, preserve full tags."""
+                arch = re.compile(r'-\d+$')
+                parsed: list[tuple[Version, str]] = []
+                for tag in tags:
+                    try:
+                        parsed.append((Version(arch.sub('', tag)), tag))
+                    except InvalidVersion:
+                        continue
+                parsed.sort(key=lambda p: p[0], reverse=True)
+                return [t for _, t in parsed]
 
             @override
             def install_command(self, package, **kw):
@@ -1149,6 +1051,103 @@ class TestSortTags:
                 return self._distribution
 
         params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-        provider = _Provider(params)
+        provider = _ArchProvider(params)
 
-        assert provider.sort_tags(['(venv)', 'latest', 'nope']) == []
+        # Unit: sort_tags strips suffixes, drops garbage, sorts descending
+        assert provider.sort_tags(['3.12-64', '(venv)', '3.14-64', '3.11-32']) == [
+            '3.14-64',
+            '3.12-64',
+            '3.11-32',
+        ]
+        assert provider.sort_tags(['3.14', '3.12-64', '3.11']) == ['3.14', '3.12-64', '3.11']
+        assert provider.sort_tags(['(venv)', 'latest']) == []
+        assert provider.sort_tags([]) == []
+
+        # End-to-end: builder uses the override to resolve the highest tag
+        ctx = await Builder.resolve_runtime_context({'pim': provider})
+
+        assert 'python' in ctx.executables
+        # Full tag with architecture suffix must reach resolve_executable
+        assert ctx.executables['python'] == Path('/python/3.14-64/python')
+
+    @staticmethod
+    async def test_custom_override_controls_resolution_order() -> None:
+        """A provider with a custom sort_tags determines which tag is resolved first."""
+
+        class _ReverseAlphaProvider(Environment, RuntimeProvider):
+            """Sorts tags in reverse alphabetical order (not version order)."""
+
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem | None:
+                return Ecosystem('python')
+
+            @staticmethod
+            def plugin_kind() -> PluginKind:
+                return PluginKind.RUNTIME
+
+            @classmethod
+            def provided_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def tool_name(cls) -> str:
+                return 'custom-tool'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return True
+
+            @override
+            async def resolve_executable(self, tag: str) -> Path | None:
+                return Path(f'/custom/{tag}/bin')
+
+            @override
+            async def available_tags(self) -> list[str]:
+                return ['beta', 'alpha', 'gamma']
+
+            @override
+            def sort_tags(self, tags: list[str]) -> list[str]:
+                """Reverse alphabetical — 'gamma' wins."""
+                return sorted(tags, reverse=True)
+
+            @override
+            def install_command(self, package, **kw):
+                return []
+
+            @override
+            def upgrade_command(self, package, **kw):
+                return []
+
+            @override
+            def uninstall_command(self, package, **kw):
+                return []
+
+            @override
+            async def packages(self, **kw):
+                return []
+
+            @override
+            async def check_updates(self, params):
+                return []
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = _ReverseAlphaProvider(params)
+
+        ctx = await Builder.resolve_runtime_context({'custom': provider})
+
+        assert 'python' in ctx.executables
+        # 'gamma' is first in reverse-alpha order, so it gets resolved
+        assert ctx.executables['python'] == Path('/custom/gamma/bin')
