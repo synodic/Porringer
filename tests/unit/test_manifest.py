@@ -937,6 +937,40 @@ class TestPackageSpecPlugins:
         assert '>=1.0' in spec.plugins[0].name.constraint
         assert '<2.0' in spec.plugins[0].name.constraint
 
+    @staticmethod
+    def test_plugin_spec_extras_preserved() -> None:
+        """PluginSpec preserves PEP 508 extras through to specifier."""
+        spec = PackageSpec.model_validate(
+            {
+                'name': 'pdm',
+                'plugins': [{'name': 'cppython[cmake,conan,git]', 'include_prereleases': True}],
+            }
+        )
+        plugin = spec.plugins[0]
+        assert plugin.name.name == 'cppython'
+        assert plugin.name.extras == ('cmake', 'conan', 'git')
+        assert plugin.name.specifier == 'cppython[cmake,conan,git]'
+        assert plugin.include_prereleases is True
+
+    @staticmethod
+    def test_plugin_spec_extras_with_constraint() -> None:
+        """PluginSpec preserves extras alongside version constraints."""
+        spec = PackageSpec.model_validate({'name': 'pdm', 'plugins': ['cppython[cmake,conan]>=0.5']})
+        plugin = spec.plugins[0]
+        assert plugin.name.name == 'cppython'
+        assert plugin.name.extras == ('cmake', 'conan')
+        assert plugin.name.constraint == '>=0.5'
+        assert plugin.name.specifier == 'cppython[cmake,conan]>=0.5'
+
+    @staticmethod
+    def test_package_spec_extras_preserved() -> None:
+        """PackageSpec preserves PEP 508 extras on the package itself."""
+        manifest = SetupManifest(packages={_PY: ['requests[security]']})
+        pkg = manifest.packages[_PY][0]
+        assert pkg.name.name == 'requests'
+        assert pkg.name.extras == ('security',)
+        assert pkg.name.specifier == 'requests[security]'
+
 
 class TestStrictFieldValidation:
     """Tests that unknown/misspelled fields are rejected by manifest models.
@@ -1132,10 +1166,12 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1150,9 +1186,11 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             deno_json = Path(tmpdir) / 'deno.json'
             deno_json.write_text(
-                json.dumps({
-                    'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
-                })
+                json.dumps(
+                    {
+                        'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1209,10 +1247,12 @@ class TestManifestDiscovery:
 
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'manifest': 'config/porringer.json'},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'manifest': 'config/porringer.json'},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))

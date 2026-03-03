@@ -108,6 +108,9 @@ class PackageRef(PorringerModel):
     model_config = {'frozen': True}
 
     name: str = Field(description='The bare, canonical package name')
+    extras: tuple[str, ...] = Field(
+        default=(), description='PEP 508 extras (e.g. ("cmake", "conan", "git") from "pkg[cmake,conan,git]")'
+    )
     constraint: str | None = Field(
         default=None, description='Version constraint string (PEP 440 or raw, e.g. ">=0.8.0", "^4.0.0")'
     )
@@ -121,8 +124,8 @@ class PackageRef(PorringerModel):
         return data
 
     @staticmethod
-    def _split_spec(spec: str) -> dict[str, str | None]:
-        """Decompose a specifier string into name and constraint components.
+    def _split_spec(spec: str) -> dict[str, Any]:
+        """Decompose a specifier string into name, extras, and constraint components.
 
         Tries PEP 440 parsing first (via `packaging.requirements.Requirement`).
         On failure, falls back to a lenient splitter that handles npm-style
@@ -140,8 +143,9 @@ class PackageRef(PorringerModel):
             # which will correctly split on the '@'.
             if req.url is not None:
                 raise InvalidRequirement('URL requirement')
+            extras = tuple(sorted(req.extras)) if req.extras else ()
             constraint = str(req.specifier) if req.specifier else None
-            return {'name': req.name, 'constraint': constraint}
+            return {'name': req.name, 'extras': extras, 'constraint': constraint}
         except InvalidRequirement:
             pass
 
@@ -149,7 +153,7 @@ class PackageRef(PorringerModel):
         return PackageRef._split_spec_lenient(spec)
 
     @staticmethod
-    def _split_spec_lenient(spec: str) -> dict[str, str | None]:
+    def _split_spec_lenient(spec: str) -> dict[str, Any]:
         """Lenient parser for non-PEP-440 package specifiers.
 
         Handles:
@@ -196,14 +200,15 @@ class PackageRef(PorringerModel):
 
     @property
     def specifier(self) -> str:
-        """The full specifier string (name + constraint) suitable for CLI commands.
+        """The full specifier string (name + extras + constraint) suitable for CLI commands.
 
         Examples:
-            `"ruff>=0.8.0"`, `"pytest"`
+            `"ruff>=0.8.0"`, `"pytest"`, `"cppython[cmake,conan,git]"`
         """
+        extras_str = f'[{",".join(self.extras)}]' if self.extras else ''
         if self.constraint:
-            return f'{self.name}{self.constraint}'
-        return self.name
+            return f'{self.name}{extras_str}{self.constraint}'
+        return f'{self.name}{extras_str}'
 
     def __str__(self) -> str:
         """Return the full specifier string."""
