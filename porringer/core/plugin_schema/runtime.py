@@ -15,10 +15,17 @@ plugin instances.  This keeps cached plugin objects stateless and
 prevents mutation from leaking across execution boundaries.
 """
 
+from __future__ import annotations
+
+import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+from packaging.version import InvalidVersion, Version
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Runtime context — externalised runtime state
@@ -112,6 +119,38 @@ class RuntimeProvider(Protocol):
             runtime is available.
         """
         ...
+
+    def sort_tags(self, tags: list[str]) -> list[str]:
+        """Filter and sort *tags* in descending order for this provider's ecosystem.
+
+        The default implementation parses each tag as a :pep:`440`
+        version.  Tags that cannot be parsed are silently dropped;
+        the remainder is returned sorted highest-first.
+
+        Providers whose ecosystem uses a different versioning scheme
+        (e.g. semver for Node.js) should override this method with
+        the appropriate parsing and ordering logic.
+
+        :meth:`Builder.resolve_runtime_context
+        <porringer.backend.builder.Builder.resolve_runtime_context>`
+        calls this after :meth:`available_tags` to obtain a
+        deterministic, version-ordered list before attempting
+        executable resolution.
+
+        Args:
+            tags: Raw version tag strings from :meth:`available_tags`.
+
+        Returns:
+            A filtered, descending-sorted list of valid tag strings.
+        """
+        parsed: list[tuple[Version, str]] = []
+        for tag in tags:
+            try:
+                parsed.append((Version(tag), tag))
+            except InvalidVersion:
+                logger.debug('Dropping unparseable tag %r from %s', tag, type(self).__name__)
+        parsed.sort(key=lambda pair: pair[0], reverse=True)
+        return [tag for _, tag in parsed]
 
 
 @runtime_checkable

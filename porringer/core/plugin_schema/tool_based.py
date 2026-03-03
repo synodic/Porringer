@@ -22,6 +22,7 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
+from porringer.core.path import ensure_system_path
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Plugin
 
@@ -52,11 +53,16 @@ class ToolBasedPlugin(Plugin):
     def is_available(cls) -> bool:
         """Check if the underlying tool is available on the system.
 
-        When `tool_name()` returns a string, `shutil.which` is
-        used to verify the executable exists on PATH.  When
-        `tool_name()` returns `None`, the plugin is always
-        considered available.
+        On the first call, synchronizes the process ``PATH`` with
+        the operating system's authoritative state (e.g. the Windows
+        registry) so that tools installed after process startup are
+        discoverable.  When ``tool_name()`` returns a string,
+        ``shutil.which`` is used to verify the executable exists on
+        PATH.  When ``tool_name()`` returns ``None``, the plugin is
+        always considered available.
         """
+        ensure_system_path()
+
         name = cls.tool_name()
         if name is None:
             return True

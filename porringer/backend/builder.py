@@ -244,16 +244,8 @@ class Builder:
                 logger.debug("Failed to list available tags for provider '%s'", name, exc_info=True)
                 continue
 
-            if not tags:
-                logger.debug("RuntimeProvider '%s' reports no available tags", name)
-                continue
-
-            # Sort by Version descending to resolve the highest available runtime
-            sorted_tags = sorted(
-                tags,
-                key=lambda tag: Version(tag) if tag else Version('0'),
-                reverse=True,
-            )
+            # Delegate filtering and sorting to the provider's ecosystem-aware logic
+            sorted_tags = env.sort_tags(tags)
 
             for tag in sorted_tags:
                 try:
