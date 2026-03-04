@@ -1,4 +1,5 @@
 {
+    "$schema": "https://synodic.github.io/porringer/schema.json",
     "version": "1",
     "name": "Node.js Development Environment",
     "description": "Common global tools and project setup for Node.js / Deno development",

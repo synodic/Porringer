@@ -1,4 +1,5 @@
 {
+    "$schema": "https://synodic.github.io/porringer/schema.json",
     "version": "1",
     "name": "Python Dev Environment",
     "description": "Linting, type-checking, and testing tools for Porringer development",
