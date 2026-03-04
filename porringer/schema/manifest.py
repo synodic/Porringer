@@ -174,6 +174,20 @@ class SetupManifest(PorringerModel):
     )
     post_sync: list[str] = Field(default_factory=list, description='Commands to run after state synchronisation')
 
+    @model_validator(mode='before')
+    @classmethod
+    def _strip_schema_key(cls, data: Any) -> Any:
+        """Strip ``$schema`` from input data so editors can include a schema URL.
+
+        The ``$schema`` key is a JSON Schema convention for pointing editors
+        at the schema that validates the file.  It is not part of the manifest
+        domain model, so we silently remove it before Pydantic validation
+        (which would otherwise reject it due to ``extra='forbid'``).
+        """
+        if isinstance(data, dict) and '$schema' in data:
+            return {k: v for k, v in data.items() if k != '$schema'}
+        return data
+
     def iter_sections(self) -> Iterator[tuple[PluginKind, Ecosystem, list[PackageSpec]]]:
         """Yield `(kind, ecosystem, packages)` for every non-empty section.
 

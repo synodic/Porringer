@@ -1,4 +1,5 @@
 {
+    "$schema": "https://synodic.github.io/porringer/schema.json",
     "version": "1",
     "name": "Python Bootstrap",
     "description": "Bootstrap a complete Python development environment from scratch",

@@ -601,7 +601,73 @@ def _validate_duplicate_packages(
 def manifest_schema() -> dict:
     """Export a JSON Schema representation of the manifest format.
 
+    Generates a standard JSON Schema from the ``SetupManifest`` Pydantic
+    model, then post-processes it so that:
+
+    * Root ``$schema`` and ``$id`` meta-fields are present.
+    * A ``$schema`` property is exposed so editors can auto-detect the schema.
+    * ``PackageRef``, ``PackageSpec``, and ``PluginSpec`` definitions accept
+      both the **string shorthand** and the full **object form** via ``anyOf``.
+
     Returns:
-        A dict containing the JSON Schema for `SetupManifest`.
+        A dict containing the JSON Schema for ``SetupManifest``.
     """
-    return SetupManifest.model_json_schema()
+    schema = SetupManifest.model_json_schema()
+
+    # --- Root meta-fields ---
+    schema['$schema'] = 'https://json-schema.org/draft/2020-12/schema'
+    schema['$id'] = 'https://synodic.github.io/porringer/schema.json'
+
+    # --- Expose $schema as an optional property ---
+    if 'properties' in schema:
+        schema['properties']['$schema'] = {
+            'type': 'string',
+            'format': 'uri',
+            'description': 'URL pointing to the JSON Schema for this manifest',
+        }
+
+    # --- String-shorthand support for models with _coerce_string ---
+    _patch_string_shorthand(schema)
+
+    return schema
+
+
+def _patch_string_shorthand(schema: dict) -> None:
+    """Wrap ``$defs`` entries that accept string shorthand in ``anyOf``.
+
+    Models like ``PackageRef``, ``PackageSpec``, and ``PluginSpec`` use a
+    Pydantic ``model_validator(mode='before')`` to coerce plain strings
+    into their object form at runtime.  JSON Schema has no way to express
+    that automatically, so we patch the generated ``$defs`` to use
+    ``anyOf: [{type: string}, {<original object schema>}]``.
+    """
+    defs = schema.get('$defs', {})
+
+    _targets = {
+        'PackageRef': 'Package specifier string (e.g. "requests", "ruff>=0.8.0", "@biomejs/biome@^1.0")',
+        'PackageSpec': 'Package specifier string (e.g. "pytest", "ruff>=0.8.0")',
+        'PluginSpec': 'Plugin specifier string (e.g. "cppython")',
+    }
+
+    for name, string_description in _targets.items():
+        if name not in defs:
+            continue
+
+        original = defs[name]
+
+        # Already patched (idempotent guard)
+        if 'anyOf' in original:
+            continue
+
+        # Pull out the object schema, preserving title/description at the top level
+        title = original.get('title', name)
+        description = original.get('description', '')
+
+        defs[name] = {
+            'title': title,
+            'description': description,
+            'anyOf': [
+                {'type': 'string', 'description': string_description},
+                {k: v for k, v in original.items() if k not in ('title', 'description')},
+            ],
+        }

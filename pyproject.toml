@@ -26,7 +26,7 @@ homepage = "https://github.com/synodic/porringer"
 repository = "https://github.com/synodic/porringer"
 
 [dependency-groups]
-lint = ["ruff>=0.15.4", "pyrefly>=0.54.0"]
+lint = ["ruff>=0.15.4", "pyrefly>=0.55.0"]
 test = [
   "pytest>=9.0.2",
   "pytest-cov>=7.0.0",
@@ -116,7 +116,7 @@ plugins = ["-e file:///${PROJECT_ROOT}"]
 source = "scm"
 
 [tool.pdm.scripts]
-analyze = "ruff check porringer tests"
+analyze = "ruff check"
 format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
 test = "pytest --cov=porringer --verbose tests"

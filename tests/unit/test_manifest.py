@@ -659,6 +659,88 @@ class TestManifestSchema:
         assert 'preferences' in props
         assert 'post_sync' in props
 
+    @staticmethod
+    def test_manifest_schema_has_root_meta_fields() -> None:
+        """Exported schema contains $schema and $id root meta-fields"""
+        schema = SyncCommands.manifest_schema()
+
+        assert schema['$schema'] == 'https://json-schema.org/draft/2020-12/schema'
+        assert schema['$id'] == 'https://synodic.github.io/porringer/schema.json'
+
+    @staticmethod
+    def test_manifest_schema_has_dollar_schema_property() -> None:
+        """Exported schema exposes $schema as an optional property for editor support"""
+        schema = SyncCommands.manifest_schema()
+        props = schema['properties']
+
+        assert '$schema' in props
+        assert props['$schema']['type'] == 'string'
+        assert props['$schema']['format'] == 'uri'
+
+    @staticmethod
+    def test_manifest_schema_package_spec_anyof() -> None:
+        """PackageSpec definition uses anyOf to allow string shorthand"""
+        schema = SyncCommands.manifest_schema()
+        defs = schema.get('$defs', {})
+
+        assert 'PackageSpec' in defs
+        package_spec = defs['PackageSpec']
+        assert 'anyOf' in package_spec
+
+        type_kinds = [alt.get('type') for alt in package_spec['anyOf']]
+        assert 'string' in type_kinds
+
+    @staticmethod
+    def test_manifest_schema_plugin_spec_anyof() -> None:
+        """PluginSpec definition uses anyOf to allow string shorthand"""
+        schema = SyncCommands.manifest_schema()
+        defs = schema.get('$defs', {})
+
+        assert 'PluginSpec' in defs
+        plugin_spec = defs['PluginSpec']
+        assert 'anyOf' in plugin_spec
+
+        type_kinds = [alt.get('type') for alt in plugin_spec['anyOf']]
+        assert 'string' in type_kinds
+
+    @staticmethod
+    def test_manifest_schema_package_ref_anyof() -> None:
+        """PackageRef definition uses anyOf to allow string shorthand"""
+        schema = SyncCommands.manifest_schema()
+        defs = schema.get('$defs', {})
+
+        assert 'PackageRef' in defs
+        package_ref = defs['PackageRef']
+        assert 'anyOf' in package_ref
+
+        type_kinds = [alt.get('type') for alt in package_ref['anyOf']]
+        assert 'string' in type_kinds
+
+    @staticmethod
+    def test_manifest_accepts_dollar_schema_field() -> None:
+        """SetupManifest accepts $schema in input without raising ValidationError"""
+        manifest = SetupManifest.model_validate(
+            {
+                '$schema': 'https://synodic.github.io/porringer/schema.json',
+                'version': '1',
+                'packages': {'python': ['pytest']},
+            }
+        )
+
+        assert manifest.version == '1'
+        assert len(manifest.packages) == 1
+
+    @staticmethod
+    def test_manifest_rejects_unknown_extra_fields() -> None:
+        """SetupManifest still rejects arbitrary unknown fields (extra='forbid')"""
+        with pytest.raises(ValidationError):
+            SetupManifest.model_validate(
+                {
+                    'version': '1',
+                    'not_a_real_field': 'should fail',
+                }
+            )
+
 
 @pytest.mark.mock_packages
 class TestDryRunStateAware:
@@ -940,10 +1022,12 @@ class TestPackageSpecPlugins:
     @staticmethod
     def test_plugin_spec_extras_preserved() -> None:
         """PluginSpec preserves PEP 508 extras through to specifier."""
-        spec = PackageSpec.model_validate({
-            'name': 'pdm',
-            'plugins': [{'name': 'cppython[cmake,conan,git]', 'include_prereleases': True}],
-        })
+        spec = PackageSpec.model_validate(
+            {
+                'name': 'pdm',
+                'plugins': [{'name': 'cppython[cmake,conan,git]', 'include_prereleases': True}],
+            }
+        )
         plugin = spec.plugins[0]
         assert plugin.name.name == 'cppython'
         assert plugin.name.extras == ('cmake', 'conan', 'git')
@@ -1058,6 +1142,7 @@ class TestStrictFieldValidation:
             with pytest.raises(ManifestError) as exc_info:
                 find_manifest(manifest_path)
 
+            assert isinstance(exc_info.value, ManifestError)
             assert exc_info.value.code == ManifestValidationCode.SCHEMA_INVALID
 
 
@@ -1164,10 +1249,12 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'version': '1', 'packages': {'node': ['lodash']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1182,9 +1269,11 @@ class TestManifestDiscovery:
         with tempfile.TemporaryDirectory() as tmpdir:
             deno_json = Path(tmpdir) / 'deno.json'
             deno_json.write_text(
-                json.dumps({
-                    'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
-                })
+                json.dumps(
+                    {
+                        'porringer': {'version': '1', 'packages': {'deno': ['oak']}},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
@@ -1241,10 +1330,12 @@ class TestManifestDiscovery:
 
             pkg_json = Path(tmpdir) / 'package.json'
             pkg_json.write_text(
-                json.dumps({
-                    'name': 'my-project',
-                    'porringer': {'manifest': 'config/porringer.json'},
-                })
+                json.dumps(
+                    {
+                        'name': 'my-project',
+                        'porringer': {'manifest': 'config/porringer.json'},
+                    }
+                )
             )
 
             result = find_manifest(Path(tmpdir))
