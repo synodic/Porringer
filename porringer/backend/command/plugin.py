@@ -210,16 +210,17 @@ class PluginCommands:
         environments = plugins.environments if plugins is not None else PluginCommands._discover_environments()
 
         # Look up the target environment
-        env = environments.get(str(canonicalize_name(plugin_name)))
-        if env is None:
+        key = str(canonicalize_name(plugin_name))
+        if key not in environments:
             available = sorted(environments.keys())
             raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(available)}")
+
+        env = environments[key]
 
         if not isinstance(env, RuntimeConsumer):
             raise PluginError(f"Plugin '{plugin_name}' is not a RuntimeConsumer and cannot be queried per-runtime")
 
-        consumer = env
-        consumed_kind = consumer.consumed_runtime_kind()
+        consumed_kind = env.consumed_runtime_kind()
 
         # Resolve every runtime tag across all providers
         all_runtimes = await Builder.resolve_all_runtime_executables(environments)
@@ -233,7 +234,7 @@ class PluginCommands:
         # Query availability + packages concurrently per runtime
         async def _query(rt) -> RuntimePackageResult | None:
             ctx = RuntimeContext(executables={rt.kind: rt.executable})
-            if not consumer.query_availability(ctx):
+            if not env.query_availability(ctx):
                 logger.debug(
                     "Plugin '%s' not available for runtime %s (tag=%s)",
                     plugin_name,
@@ -241,7 +242,7 @@ class PluginCommands:
                     rt.tag,
                 )
                 return None
-            pkgs = await consumer.packages(project_path=project_path, runtime_context=ctx)
+            pkgs = await env.packages(project_path=project_path, runtime_context=ctx)
             return RuntimePackageResult(
                 provider=rt.provider,
                 tag=rt.tag,

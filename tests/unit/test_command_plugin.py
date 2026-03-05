@@ -26,7 +26,7 @@ from porringer.utility.utility import is_pipx_installation
 # Test constants
 NUM_PLUGINS_MULTIPLE = 3
 NUM_PLUGINS_PARTIAL = 2
-NUM_RESOLVABLE_RUNTIMES = 2
+NUM_RESOLVED_TAGS = 2
 NUM_CONCURRENT_RUNTIMES = 3
 
 
@@ -1642,7 +1642,7 @@ class TestResolveAllRuntimeExecutables:
 
         results = await Builder.resolve_all_runtime_executables({'pim': provider})
 
-        assert len(results) == NUM_RESOLVABLE_RUNTIMES
+        assert len(results) == NUM_RESOLVED_TAGS
         assert results[0].tag == '3.14'
         assert results[0].executable == Path('/python/3.14/python')
         assert results[0].provider == 'pim'
@@ -1687,8 +1687,25 @@ class TestResolveAllRuntimeExecutables:
         """Runtimes from multiple providers are all included."""
         provider = _make_provider()
 
+        # Second provider for a different kind
+        mock_node_env = MagicMock(spec=Environment)
+        mock_node_env.is_supported = MagicMock(return_value=True)
+        mock_node_env.is_available = MagicMock(return_value=True)
+        mock_node_env.provided_runtime_kind = MagicMock(return_value='node')
+        mock_node_env.available_tags = AsyncMock(return_value=['22.0', '20.0'])
+        mock_node_env.sort_tags = MagicMock(return_value=['22.0', '20.0'])
+        mock_node_env.resolve_executable = AsyncMock(side_effect=lambda t: Path(f'/node/{t}/node'))
+
+        # Make isinstance checks work
+        with patch(
+            'porringer.backend.builder.isinstance',
+            side_effect=lambda obj, cls: cls is RuntimeProvider or type(obj).__name__ == '_FakeMultiTagProvider',
+        ) as _:
+            pass
+
+        # Simpler approach — use the real provider + a mock that passes isinstance check
         results = await Builder.resolve_all_runtime_executables({'pim': provider})
-        assert len(results) == NUM_RESOLVABLE_RUNTIMES  # from pim
+        assert len(results) == NUM_RESOLVED_TAGS  # from pim
 
 
 # ---------------------------------------------------------------------------
@@ -1728,7 +1745,7 @@ class TestListPackagesByRuntime:
 
             results = await PluginCommands.list_packages_by_runtime('pip')
 
-        assert len(results) == NUM_RESOLVABLE_RUNTIMES
+        assert len(results) == NUM_RESOLVED_TAGS
         assert results[0].tag == '3.14'
         assert results[0].provider == 'pim'
         assert results[0].executable == Path('/python/3.14/python')

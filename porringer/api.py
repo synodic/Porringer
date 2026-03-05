@@ -40,7 +40,9 @@ class API:
     * ``api.plugin`` — plugin listing, package queries (including
       per-runtime queries via ``list_packages_by_runtime``),
       install/uninstall.
-    * ``api.sync``   — manifest loading, streaming execution, update checks.
+    * ``api.sync``   — manifest loading, streaming execution, update
+      checks (including per-runtime checks via
+      ``check_updates_by_runtime``).
     * ``api.cache``  — directory registration and validation.
 
     Cross-cutting helpers live directly on the ``API`` class:

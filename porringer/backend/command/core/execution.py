@@ -419,6 +419,33 @@ async def execute_run_command(
 # ---------------------------------------------------------------------------
 
 
+async def resolve_runtime_tag_override(
+    tag: str,
+    ecosystem: str | None,
+    environments: dict[str, Environment],
+) -> RuntimeContext | None:
+    """Build a one-off :class:`RuntimeContext` for a specific *tag*.
+
+    Scans *environments* for a :class:`RuntimeProvider` whose
+    ``provided_runtime_kind()`` matches *ecosystem*, then resolves
+    *tag* to a concrete executable path.
+
+    Returns ``None`` when no matching provider exists or when the tag
+    cannot be resolved to an executable.
+    """
+    if ecosystem is None:
+        return None
+
+    for env in environments.values():
+        if isinstance(env, RuntimeProvider) and env.provided_runtime_kind() == ecosystem:
+            executable = await env.resolve_executable(tag)
+            if executable is not None:
+                return RuntimeContext(executables={ecosystem: executable})
+            return None
+
+    return None
+
+
 async def execute_package(
     action: SetupAction,
     environments: dict[str, Environment],
@@ -462,6 +489,24 @@ async def execute_package(
             http_client=ctx.http_client,
             package_cache=package_cache,
             runtime_context=ctx.runtime_context,
+        )
+
+    # --- Per-action runtime override --------------------------------------
+    if action.runtime_tag is not None:
+        override_ctx = await resolve_runtime_tag_override(action.runtime_tag, action.ecosystem, environments)
+        if override_ctx is None:
+            return SetupActionResult(
+                action=action,
+                success=False,
+                message=(f"Could not resolve runtime tag '{action.runtime_tag}' for ecosystem '{action.ecosystem}'"),
+            )
+        ctx = ResolutionContext(
+            project_path=ctx.project_path,
+            project_environments=ctx.project_environments,
+            detect_updates=ctx.detect_updates,
+            http_client=ctx.http_client,
+            package_cache=ctx.package_cache,
+            runtime_context=override_ctx,
         )
 
     resolved = await resolve_operation(

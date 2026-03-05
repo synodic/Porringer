@@ -31,6 +31,96 @@ class PluginInformation[P]:
     name: str
 
 
+async def _resolve_provider_executable(
+    name: str,
+    env: RuntimeProvider,
+    kind: str,
+) -> Path | None:
+    """Resolve a single executable from *env* trying default_tag then available_tags.
+
+    Returns the resolved :class:`~pathlib.Path` or ``None`` when no
+    executable could be obtained.
+    """
+    # --- Fast path: provider-reported default --------------------------
+    try:
+        default = await env.default_tag()
+    except Exception:
+        logger.debug("default_tag() failed for '%s'", name, exc_info=True)
+        default = None
+
+    if default is not None:
+        try:
+            executable = await env.resolve_executable(default)
+        except Exception:
+            logger.debug(
+                "resolve_executable failed for '%s' default tag '%s'",
+                name,
+                default,
+                exc_info=True,
+            )
+            executable = None
+
+        if executable is not None:
+            logger.debug(
+                "Resolved runtime '%s' via provider '%s' default_tag: tag=%s path=%s",
+                kind,
+                name,
+                default,
+                executable,
+            )
+            return executable
+
+        logger.debug(
+            "default_tag '%s' from '%s' could not be resolved; falling back to available_tags",
+            default,
+            name,
+        )
+
+    # --- Fallback: enumerate all tags ----------------------------------
+    try:
+        tags = await env.available_tags()
+    except Exception:
+        logger.debug("Failed to list available tags for provider '%s'", name, exc_info=True)
+        return None
+
+    logger.debug("RuntimeProvider '%s' reported %d tag(s): %s", name, len(tags), tags)
+
+    sorted_tags = env.sort_tags(tags)
+
+    if len(sorted_tags) < len(tags):
+        logger.debug(
+            "sort_tags filtered %d \u2192 %d for '%s' (dropped: %s)",
+            len(tags),
+            len(sorted_tags),
+            name,
+            sorted(set(tags) - set(sorted_tags)),
+        )
+
+    for tag in sorted_tags:
+        try:
+            executable = await env.resolve_executable(tag)
+        except Exception:
+            logger.debug(
+                "resolve_executable failed for '%s' tag '%s'",
+                name,
+                tag,
+                exc_info=True,
+            )
+            continue
+        if executable is not None:
+            logger.debug(
+                "Resolved runtime '%s' via provider '%s': tag=%s path=%s",
+                kind,
+                name,
+                tag,
+                executable,
+            )
+            return executable
+
+    logger.debug("RuntimeProvider '%s' could not resolve any executable", name)
+    return None
+
+
 class Builder:
     """Helper class for building Porringer projects"""
 
@@ -197,100 +287,6 @@ class Builder:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _resolve_for_provider(env: RuntimeProvider, name: str, kind: str) -> Path | None:
-        """Try to resolve a single executable for a provider.
-
-        Attempts the provider's ``default_tag()`` fast path first,
-        then falls back to enumerating ``available_tags()``.
-
-        Returns:
-            Resolved executable path, or ``None``.
-        """
-        # --- Fast path: provider-reported default -----------------
-        try:
-            default = await env.default_tag()
-        except Exception:
-            logger.debug("default_tag() failed for '%s'", name, exc_info=True)
-            default = None
-
-        if default is not None:
-            try:
-                executable = await env.resolve_executable(default)
-            except Exception:
-                logger.debug(
-                    "resolve_executable failed for '%s' default tag '%s'",
-                    name,
-                    default,
-                    exc_info=True,
-                )
-                executable = None
-
-            if executable is not None:
-                logger.debug(
-                    "Resolved runtime '%s' via provider '%s' default_tag: tag=%s path=%s",
-                    kind,
-                    name,
-                    default,
-                    executable,
-                )
-                return executable
-
-            logger.debug(
-                "default_tag '%s' from '%s' could not be resolved; falling back to available_tags",
-                default,
-                name,
-            )
-
-        # --- Fallback: enumerate all tags -------------------------
-        return await Builder._resolve_first_from_tags(env, name, kind)
-
-    @staticmethod
-    async def _resolve_first_from_tags(env: RuntimeProvider, name: str, kind: str) -> Path | None:
-        """Enumerate available tags and return the first resolvable executable."""
-        try:
-            tags = await env.available_tags()
-        except Exception:
-            logger.debug("Failed to list available tags for provider '%s'", name, exc_info=True)
-            return None
-
-        logger.debug("RuntimeProvider '%s' reported %d tag(s): %s", name, len(tags), tags)
-
-        sorted_tags = env.sort_tags(tags)
-
-        if len(sorted_tags) < len(tags):
-            logger.debug(
-                "sort_tags filtered %d → %d for '%s' (dropped: %s)",
-                len(tags),
-                len(sorted_tags),
-                name,
-                sorted(set(tags) - set(sorted_tags)),
-            )
-
-        for tag in sorted_tags:
-            try:
-                executable = await env.resolve_executable(tag)
-            except Exception:
-                logger.debug(
-                    "resolve_executable failed for '%s' tag '%s'",
-                    name,
-                    tag,
-                    exc_info=True,
-                )
-                continue
-            if executable is not None:
-                logger.debug(
-                    "Resolved runtime '%s' via provider '%s': tag=%s path=%s",
-                    kind,
-                    name,
-                    tag,
-                    executable,
-                )
-                return executable
-
-        logger.debug("RuntimeProvider '%s' could not resolve any executable", name)
-        return None
-
-    @staticmethod
     async def resolve_runtime_context(environments: dict[str, Environment]) -> RuntimeContext:
         """Build a :class:`RuntimeContext` from available runtime providers.
 
@@ -340,7 +336,7 @@ class Builder:
                 # Already resolved this kind from a previous provider
                 continue
 
-            executable = await Builder._resolve_for_provider(env, name, kind)
+            executable = await _resolve_provider_executable(name, env, kind)
             if executable is not None:
                 ctx.executables[kind] = executable
 
@@ -402,20 +398,26 @@ class Builder:
             )
 
             # Resolve all tags concurrently
-            async def _safe_resolve(tag: str, env=env, name=name, kind=kind) -> ResolvedRuntime | None:
+            async def _safe_resolve(
+                tag: str,
+                *,
+                _env: RuntimeProvider = env,
+                _name: str = name,
+                _kind: str = kind,
+            ) -> ResolvedRuntime | None:
                 try:
-                    executable = await env.resolve_executable(tag)
+                    executable = await _env.resolve_executable(tag)
                 except Exception:
                     logger.debug(
                         "resolve_executable failed for '%s' tag '%s'",
-                        name,
+                        _name,
                         tag,
                         exc_info=True,
                     )
                     return None
                 if executable is None:
                     return None
-                return ResolvedRuntime(provider=name, tag=tag, kind=kind, executable=executable)
+                return ResolvedRuntime(provider=_name, tag=tag, kind=_kind, executable=executable)
 
             resolved = await asyncio.gather(*[_safe_resolve(t) for t in sorted_tags])
 

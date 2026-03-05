@@ -170,6 +170,7 @@ class SetupAction:
     cli_command: list[str] | None = None
     package_description: str | None = None
     include_prereleases: bool = False
+    runtime_tag: str | None = None
 
 
 @dataclass(slots=True)
