@@ -15,7 +15,6 @@ from importlib import metadata
 from porringer.backend.builder import Builder
 from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_environments
 from porringer.backend.resolver import build_plugin_info
-from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.plugin_schema.scm import ScmEnvironment

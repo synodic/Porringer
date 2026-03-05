@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import override
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from packaging.version import Version
 
 from porringer.backend.builder import Builder
@@ -533,4 +532,3 @@ class TestUninstallAutoResolveRuntimeContext:
             )
 
         assert result is not None
-
