@@ -61,6 +61,27 @@ class DiscoveredPlugins:
     without separately managing a ``RuntimeContext``.
     """
 
+    def resolved_runtime(self, runtime_context: RuntimeContext | None = None) -> RuntimeContext | None:
+        """Return the effective runtime context.
+
+        Prefers an explicitly supplied *runtime_context* over the
+        instance's stored :attr:`runtime_context`.  This collapses
+        the ``if runtime_context is None: runtime_context =
+        plugins.runtime_context`` pattern that appears across many
+        call-sites.
+
+        Args:
+            runtime_context: Caller-supplied override.  When not
+                ``None``, returned as-is.
+
+        Returns:
+            The best available :class:`RuntimeContext`, or ``None``
+            when neither source provides one.
+        """
+        if runtime_context is not None:
+            return runtime_context
+        return self.runtime_context
+
     @property
     def all_plugins(self) -> dict[str, Environment | ProjectEnvironment | ScmEnvironment]:
         """Merged view of every discovered plugin keyed by canonical name."""

@@ -539,24 +539,21 @@ async def execute_package(
     environment = environments[action.installer]
     match resolved.operation:
         case Install(reason=InstallReason.ENSURE_EXTRAS):
-            effective = SyncStrategy.MINIMAL
             verb = 'Ensuring'
         case Install():
-            effective = SyncStrategy.MINIMAL
             verb = 'Installing'
         case _:
-            effective = strategy
             verb = 'Upgrading'
     logger.info(f"{verb} '{action.package}' via {action.installer}")
     return await _attempt_package_operation(
-        action, environment, effective, event_queue, runtime_context=ctx.runtime_context
+        action, environment, resolved.operation, event_queue, runtime_context=ctx.runtime_context
     )
 
 
 async def _attempt_package_operation(
     action: SetupAction,
     environment: Environment,
-    strategy: SyncStrategy,
+    operation: Operation,
     event_queue: asyncio.Queue[ProgressEvent | None],
     *,
     runtime_context: RuntimeContext | None = None,
@@ -566,15 +563,14 @@ async def _attempt_package_operation(
     Args:
         action: The package action.
         environment: The environment plugin to use.
-        strategy: Whether to install or upgrade.
+        operation: The resolved operation (Install or Upgrade).
         event_queue: Queue to emit sub-action events into.
         runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
         The result of the attempt.
     """
-    is_install = strategy == SyncStrategy.MINIMAL
-    if is_install:
+    if isinstance(operation, Install):
         execute: Callable[[PackageParameters], Awaitable[Package | None]] = environment.install
         verb, verb_past = 'install', 'Installed'
     else:

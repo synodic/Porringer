@@ -56,6 +56,37 @@ from .manifest import manifest_schema, validate_manifest
 logger = logging.getLogger(__name__)
 
 
+async def _build_update_infos(
+    env: Any,
+    check_params: CheckUpdatesParameters,
+    runtime_context: RuntimeContext,
+) -> list[PackageUpdateInfo]:
+    """Query an environment for package updates and return structured info.
+
+    Shared by :meth:`SyncCommands.check_updates` and
+    :meth:`SyncCommands.check_updates_by_runtime`.
+    """
+    installed = await env.packages(runtime_context=runtime_context)
+    installed_map = {str(p.name): p for p in installed}
+
+    updates = await env.check_updates(check_params)
+
+    infos: list[PackageUpdateInfo] = []
+    for update_pkg in updates:
+        current = installed_map.get(str(update_pkg.name))
+        current_version = Version(current.version) if current and current.version else None
+        latest_version = Version(update_pkg.version) if update_pkg.version else None
+        infos.append(
+            PackageUpdateInfo(
+                name=str(update_pkg.name),
+                current_version=current_version,
+                latest_version=latest_version,
+                update_available=True,
+            )
+        )
+    return infos
+
+
 class SyncCommands:
     """Update commands for downloading updates and setting up from manifests."""
 
@@ -224,7 +255,7 @@ class SyncCommands:
             plugins = await asyncio.to_thread(discover_all_plugins, use_cache=True)
 
         # Resolve runtime context
-        runtime_context = plugins.runtime_context
+        runtime_context = plugins.resolved_runtime()
         if runtime_context is None:
             runtime_context = await Builder.resolve_runtime_context(plugins.environments)
 
@@ -247,26 +278,7 @@ class SyncCommands:
                     include_prereleases=params.include_prereleases,
                     runtime_context=runtime_context,
                 )
-
-                installed = await env.packages(runtime_context=runtime_context)
-                installed_map = {str(p.name): p for p in installed}
-
-                updates = await env.check_updates(check_params)
-
-                package_infos: list[PackageUpdateInfo] = []
-                for update_pkg in updates:
-                    current = installed_map.get(str(update_pkg.name))
-                    current_version = Version(current.version) if current and current.version else None
-                    latest_version = Version(update_pkg.version) if update_pkg.version else None
-                    package_infos.append(
-                        PackageUpdateInfo(
-                            name=str(update_pkg.name),
-                            current_version=current_version,
-                            latest_version=latest_version,
-                            update_available=True,
-                        )
-                    )
-
+                package_infos = await _build_update_infos(env, check_params, runtime_context)
                 results.append(CheckResult(plugin=name, packages=package_infos))
 
             except (PluginError, UpdateError) as e:
@@ -359,26 +371,7 @@ class SyncCommands:
                         include_prereleases=params.include_prereleases,
                         runtime_context=ctx,
                     )
-
-                    installed = await env.packages(runtime_context=ctx)
-                    installed_map = {str(p.name): p for p in installed}
-
-                    updates = await env.check_updates(check_params)
-
-                    package_infos: list[PackageUpdateInfo] = []
-                    for update_pkg in updates:
-                        current = installed_map.get(str(update_pkg.name))
-                        current_version = Version(current.version) if current and current.version else None
-                        latest_version = Version(update_pkg.version) if update_pkg.version else None
-                        package_infos.append(
-                            PackageUpdateInfo(
-                                name=str(update_pkg.name),
-                                current_version=current_version,
-                                latest_version=latest_version,
-                                update_available=True,
-                            )
-                        )
-
+                    package_infos = await _build_update_infos(env, check_params, ctx)
                     check_results.append(CheckResult(plugin=name, packages=package_infos))
                 except Exception as e:
                     logger.warning(

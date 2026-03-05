@@ -79,8 +79,7 @@ class PluginCommands:
             environments = plugins.environments
             projects = plugins.project_environments
             scm_plugins = plugins.scm_environments
-            if runtime_context is None:
-                runtime_context = plugins.runtime_context
+            runtime_context = plugins.resolved_runtime(runtime_context)
         else:
             environments = PluginCommands._discover_environments()
 
@@ -145,8 +144,7 @@ class PluginCommands:
 
         if plugins is not None:
             environments = plugins.environments
-            if runtime_context is None:
-                runtime_context = plugins.runtime_context
+            runtime_context = plugins.resolved_runtime(runtime_context)
         else:
             environments = PluginCommands._discover_environments()
 

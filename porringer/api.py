@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import warnings
+from collections.abc import Awaitable, Callable
 
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
@@ -220,63 +221,26 @@ class API:
         Returns:
             A ``SetupActionResult`` describing the outcome.
         """
-        logger.debug(
-            'upgrade requested: plugin=%s package=%s runtime_tag=%s dry_run=%s',
-            plugin_name,
-            package.name,
-            runtime_tag,
-            dry_run,
-        )
-
-        if plugins is None:
-            plugins = await API.discover_plugins(use_cache=True, resolve_runtime=(runtime_context is None))
-
-        environments = plugins.environments
-
-        # Resolve runtime context: explicit > plugins.runtime_context
-        if runtime_context is None:
-            runtime_context = plugins.runtime_context
-
-        if plugin_name not in environments:
-            logger.warning("Plugin '%s' is not available for upgrade of '%s'", plugin_name, package.name)
-            return SetupActionResult(
-                action=SetupAction(description=f"Upgrade '{package.name}' via {plugin_name}"),
-                success=False,
-                message=f"Plugin '{plugin_name}' is not available",
-            )
-
-        environment = environments[plugin_name]
-        action = SetupAction(
-            description=f"Upgrade '{package.name}' via {plugin_name}",
-            kind=environment.plugin_kind(),
-            ecosystem=environment.ecosystem(),
-            installer=plugin_name,
+        return await _imperative_action(
+            verb='upgrade',
+            plugin_name=plugin_name,
             package=package,
             runtime_tag=runtime_tag,
+            plugins=plugins,
+            runtime_context=runtime_context,
+            dry_run=dry_run,
+            resolve_fn=lambda action, envs, ctx: resolve_operation(action, envs, SyncStrategy.LATEST, ctx),
+            execute_fn=lambda action, envs, queue, ctx: execute_package(
+                action, envs, SyncStrategy.LATEST, queue, context=ctx
+            ),
         )
-
-        ctx = ResolutionContext(runtime_context=runtime_context)
-
-        if dry_run:
-            resolved = await resolve_operation(action, environments, SyncStrategy.LATEST, ctx)
-            return resolved_to_result(resolved)
-
-        event_queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
-        result = await execute_package(action, environments, SyncStrategy.LATEST, event_queue, context=ctx)
-        logger.info(
-            'upgrade result: success=%s skipped=%s skip_reason=%s message=%s',
-            result.success,
-            result.skipped,
-            result.skip_reason,
-            result.message,
-        )
-        return result
 
     @staticmethod
     async def uninstall(
         plugin_name: str,
         package: PackageRef,
         *,
+        runtime_tag: str | None = None,
         plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
         dry_run: bool = False,
@@ -290,12 +254,18 @@ class API:
 
         This is an imperative operation that operates outside the
         manifest-driven sync flow.  It is intended for GUI clients
-        that wish to offer per-package removal.
+        that wish to offer per-package removal, optionally scoped
+        to a specific runtime via *runtime_tag*.
 
         Args:
             plugin_name: The installer plugin name (e.g. ``"pipx"``,
                 ``"uv"``, ``"npm"``).
             package: The package to uninstall (only ``name`` is used).
+            runtime_tag: Optional runtime tag (e.g. ``"3.12"``) to
+                target a specific interpreter.  When provided, the
+                action's ``runtime_tag`` field is set and the
+                execution engine resolves the corresponding
+                interpreter path.
             plugins: Pre-discovered plugins from :meth:`discover_plugins`.
                 When provided, plugin discovery is skipped and
                 ``runtime_context`` is extracted from
@@ -310,47 +280,111 @@ class API:
         Returns:
             A ``SetupActionResult`` describing the outcome.
         """
-        logger.debug('uninstall requested: plugin=%s package=%s dry_run=%s', plugin_name, package.name, dry_run)
-
-        if plugins is None:
-            plugins = await API.discover_plugins(use_cache=True, resolve_runtime=(runtime_context is None))
-
-        environments = plugins.environments
-
-        # Resolve runtime context: explicit > plugins.runtime_context
-        if runtime_context is None:
-            runtime_context = plugins.runtime_context
-
-        if plugin_name not in environments:
-            logger.warning("Plugin '%s' is not available for uninstall of '%s'", plugin_name, package.name)
-            return SetupActionResult(
-                action=SetupAction(description=f"Uninstall '{package.name}' via {plugin_name}"),
-                success=False,
-                message=f"Plugin '{plugin_name}' is not available",
-            )
-
-        environment = environments[plugin_name]
-        action = SetupAction(
-            description=f"Uninstall '{package.name}' via {plugin_name}",
-            kind=environment.plugin_kind(),
-            ecosystem=environment.ecosystem(),
-            installer=plugin_name,
+        return await _imperative_action(
+            verb='uninstall',
+            plugin_name=plugin_name,
             package=package,
+            runtime_tag=runtime_tag,
+            plugins=plugins,
+            runtime_context=runtime_context,
+            dry_run=dry_run,
+            resolve_fn=lambda action, envs, ctx: resolve_uninstall_operation(action, envs, ctx),
+            execute_fn=lambda action, envs, queue, ctx: execute_uninstall(action, envs, queue, context=ctx),
         )
 
-        ctx = ResolutionContext(runtime_context=runtime_context)
 
-        if dry_run:
-            resolved = await resolve_uninstall_operation(action, environments, ctx)
-            return resolved_to_result(resolved)
+# ---------------------------------------------------------------------------
+# Shared imperative-action helper
+# ---------------------------------------------------------------------------
 
-        event_queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
-        result = await execute_uninstall(action, environments, event_queue, context=ctx)
-        logger.info(
-            'uninstall result: success=%s skipped=%s skip_reason=%s message=%s',
-            result.success,
-            result.skipped,
-            result.skip_reason,
-            result.message,
+type _ResolveFn = Callable[
+    [SetupAction, dict[str, Environment], ResolutionContext],
+    Awaitable[object],
+]
+type _ExecuteFn = Callable[
+    [SetupAction, dict[str, Environment], asyncio.Queue[ProgressEvent | None], ResolutionContext],
+    Awaitable[SetupActionResult],
+]
+
+
+async def _imperative_action(
+    *,
+    verb: str,
+    plugin_name: str,
+    package: PackageRef,
+    runtime_tag: str | None,
+    plugins: DiscoveredPlugins | None,
+    runtime_context: RuntimeContext | None,
+    dry_run: bool,
+    resolve_fn: _ResolveFn,
+    execute_fn: _ExecuteFn,
+) -> SetupActionResult:
+    """Shared skeleton for imperative package operations.
+
+    Handles plugin discovery, runtime-context resolution, plugin
+    validation, action construction, dry-run resolution, and
+    execution — the common logic behind :meth:`API.upgrade` and
+    :meth:`API.uninstall`.
+
+    Args:
+        verb: Human-readable verb (``"upgrade"``, ``"uninstall"``).
+        plugin_name: The installer plugin name.
+        package: The package to act on.
+        runtime_tag: Optional runtime tag.
+        plugins: Pre-discovered plugins (or ``None`` to auto-discover).
+        runtime_context: Explicit runtime context override.
+        dry_run: Resolve only, do not execute.
+        resolve_fn: Async callable for dry-run resolution.
+        execute_fn: Async callable for live execution.
+    """
+    verb_cap = verb.capitalize()
+    logger.debug(
+        '%s requested: plugin=%s package=%s runtime_tag=%s dry_run=%s',
+        verb,
+        plugin_name,
+        package.name,
+        runtime_tag,
+        dry_run,
+    )
+
+    if plugins is None:
+        plugins = await API.discover_plugins(use_cache=True, resolve_runtime=(runtime_context is None))
+
+    environments = plugins.environments
+    runtime_context = plugins.resolved_runtime(runtime_context)
+
+    if plugin_name not in environments:
+        logger.warning("Plugin '%s' is not available for %s of '%s'", plugin_name, verb, package.name)
+        return SetupActionResult(
+            action=SetupAction(description=f"{verb_cap} '{package.name}' via {plugin_name}"),
+            success=False,
+            message=f"Plugin '{plugin_name}' is not available",
         )
-        return result
+
+    environment = environments[plugin_name]
+    action = SetupAction(
+        description=f"{verb_cap} '{package.name}' via {plugin_name}",
+        kind=environment.plugin_kind(),
+        ecosystem=environment.ecosystem(),
+        installer=plugin_name,
+        package=package,
+        runtime_tag=runtime_tag,
+    )
+
+    ctx = ResolutionContext(runtime_context=runtime_context)
+
+    if dry_run:
+        resolved = await resolve_fn(action, environments, ctx)
+        return resolved_to_result(resolved)
+
+    event_queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
+    result = await execute_fn(action, environments, event_queue, ctx)
+    logger.info(
+        '%s result: success=%s skipped=%s skip_reason=%s message=%s',
+        verb,
+        result.success,
+        result.skipped,
+        result.skip_reason,
+        result.message,
+    )
+    return result
