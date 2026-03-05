@@ -16,30 +16,20 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
-from packaging.version import Version
-
-from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from porringer.core.plugin_schema.environment import CheckUpdatesParameters
-from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.schema import (
     BatchSetupResults,
-    CheckParameters,
-    CheckResult,
     ManifestValidationResult,
-    PackageUpdateInfo,
     ProgressEvent,
     ProgressEventKind,
-    RuntimeCheckResult,
     SetupActionResult,
     SetupParameters,
     SetupResults,
     SyncStrategy,
 )
-from porringer.utility.exception import ManifestError, PluginError, UpdateError
+from porringer.utility.exception import ManifestError
 
 from .core.action_builder import (
     async_load_manifest,
@@ -57,7 +47,12 @@ logger = logging.getLogger(__name__)
 
 
 class SyncCommands:
-    """Update commands for downloading updates and setting up from manifests."""
+    """Manifest-driven sync commands.
+
+    Handles manifest loading, validation, streaming execution, and
+    manifest schema export.  Update checking for managed packages
+    has moved to :class:`~porringer.backend.command.package.PackageCommands`.
+    """
 
     def __init__(self, cache_manager: DirectoryCacheManager | None = None) -> None:
         """Initialize the SyncCommands class.
@@ -186,225 +181,6 @@ class SyncCommands:
             SetupResults containing the action plan.
         """
         return await async_load_manifest(path, strategy, plugins=plugins)
-
-    # --- Update checking ---
-
-    @staticmethod
-    async def check_updates(
-        params: CheckParameters | None = None,
-        *,
-        plugins: DiscoveredPlugins | None = None,
-    ) -> list[CheckResult]:
-        """Check for package updates across all (or selected) plugins.
-
-        This is the API equivalent of ``porringer check``.  It iterates
-        over discovered ``Environment`` plugins, calls
-        ``env.check_updates()`` on each, and assembles the results
-        into a list of :class:`CheckResult` objects.
-
-        Accepts a pre-discovered :class:`DiscoveredPlugins` to skip
-        redundant entry-point scanning and runtime resolution.
-
-        Args:
-            params: Optional check parameters (plugin filter,
-                pre-release flag).  When ``None``, all plugins are
-                checked with default settings.
-            plugins: Pre-discovered plugins from
-                :meth:`API.discover_plugins`.
-
-        Returns:
-            One :class:`CheckResult` per queried plugin, carrying
-            per-package update info or an error string.
-        """
-        if params is None:
-            params = CheckParameters()
-
-        # Discover plugins if not pre-passed
-        if plugins is None:
-            plugins = await asyncio.to_thread(discover_all_plugins, use_cache=True)
-
-        # Resolve runtime context
-        runtime_context = plugins.runtime_context
-        if runtime_context is None:
-            runtime_context = await Builder.resolve_runtime_context(plugins.environments)
-
-        results: list[CheckResult] = []
-
-        for name, env in plugins.environments.items():
-            # Filter to requested plugins
-            if params.plugins and name not in params.plugins:
-                continue
-
-            # Skip unsupported or unavailable plugins
-            plugin_type = type(env)
-            if not plugin_type.is_supported() or not env.query_availability(runtime_context):
-                logger.debug('Skipping unavailable plugin %s for update check', name)
-                continue
-
-            try:
-                check_params = CheckUpdatesParameters(
-                    packages=[],
-                    include_prereleases=params.include_prereleases,
-                    runtime_context=runtime_context,
-                )
-
-                installed = await env.packages(runtime_context=runtime_context)
-                installed_map = {str(p.name): p for p in installed}
-
-                updates = await env.check_updates(check_params)
-
-                package_infos: list[PackageUpdateInfo] = []
-                for update_pkg in updates:
-                    current = installed_map.get(str(update_pkg.name))
-                    current_version = Version(current.version) if current and current.version else None
-                    latest_version = Version(update_pkg.version) if update_pkg.version else None
-                    package_infos.append(
-                        PackageUpdateInfo(
-                            name=str(update_pkg.name),
-                            current_version=current_version,
-                            latest_version=latest_version,
-                            update_available=True,
-                        )
-                    )
-
-                results.append(CheckResult(plugin=name, packages=package_infos))
-
-            except (PluginError, UpdateError) as e:
-                logger.error('Plugin error checking updates for %s: %s', name, e)
-                results.append(CheckResult(plugin=name, error=str(e)))
-            except Exception as e:
-                logger.warning('Failed to check updates for %s: %s', name, e)
-                results.append(CheckResult(plugin=name, error=str(e)))
-
-        return results
-
-    @staticmethod
-    async def check_updates_by_runtime(
-        params: CheckParameters | None = None,
-        *,
-        plugins: DiscoveredPlugins | None = None,
-    ) -> list[RuntimeCheckResult]:
-        """Check for package updates per installed runtime.
-
-        For each :class:`~porringer.core.plugin_schema.runtime.RuntimeConsumer`
-        plugin, resolves **all** available runtime tags via
-        :meth:`Builder.resolve_all_runtime_executables
-        <porringer.backend.builder.Builder.resolve_all_runtime_executables>`
-        and checks each runtime independently.  Non-consumer plugins
-        are skipped.
-
-        Availability checks and update queries for each runtime run
-        concurrently via :func:`asyncio.gather`.
-
-        Args:
-            params: Optional check parameters (plugin filter,
-                pre-release flag).  When ``None``, all consumer
-                plugins are checked with default settings.
-            plugins: Pre-discovered plugins from
-                :meth:`API.discover_plugins`.
-
-        Returns:
-            A list of :class:`RuntimeCheckResult` entries, one per
-            successfully queried runtime, ordered by descending tag
-            version.
-        """
-        if params is None:
-            params = CheckParameters()
-
-        if plugins is not None:
-            environments = plugins.environments
-        else:
-            environments = dict((await asyncio.to_thread(discover_all_plugins, use_cache=True)).environments)
-
-        # Resolve every runtime tag across all providers
-        all_runtimes = await Builder.resolve_all_runtime_executables(environments)
-        if not all_runtimes:
-            return []
-
-        # Collect the consumer plugins we need to check
-        consumers: dict[str, Any] = {}
-        for name, env in environments.items():
-            if params.plugins and name not in params.plugins:
-                continue
-            if not isinstance(env, RuntimeConsumer):
-                continue
-            if not env.is_supported():
-                continue
-            consumers[name] = env
-
-        if not consumers:
-            return []
-
-        results: list[RuntimeCheckResult] = []
-
-        async def _check_runtime(rt) -> RuntimeCheckResult | None:
-            ctx = RuntimeContext(executables={rt.kind: rt.executable})
-            check_results: list[CheckResult] = []
-
-            for name, env in consumers.items():
-                if env.consumed_runtime_kind() != rt.kind:
-                    continue
-                if not env.query_availability(ctx):
-                    logger.debug(
-                        "Plugin '%s' not available for runtime %s (tag=%s)",
-                        name,
-                        rt.executable,
-                        rt.tag,
-                    )
-                    continue
-
-                try:
-                    check_params = CheckUpdatesParameters(
-                        packages=[],
-                        include_prereleases=params.include_prereleases,
-                        runtime_context=ctx,
-                    )
-
-                    installed = await env.packages(runtime_context=ctx)
-                    installed_map = {str(p.name): p for p in installed}
-
-                    updates = await env.check_updates(check_params)
-
-                    package_infos: list[PackageUpdateInfo] = []
-                    for update_pkg in updates:
-                        current = installed_map.get(str(update_pkg.name))
-                        current_version = Version(current.version) if current and current.version else None
-                        latest_version = Version(update_pkg.version) if update_pkg.version else None
-                        package_infos.append(
-                            PackageUpdateInfo(
-                                name=str(update_pkg.name),
-                                current_version=current_version,
-                                latest_version=latest_version,
-                                update_available=True,
-                            )
-                        )
-
-                    check_results.append(CheckResult(plugin=name, packages=package_infos))
-                except Exception as e:
-                    logger.warning(
-                        'Failed to check updates for %s on runtime %s: %s',
-                        name,
-                        rt.tag,
-                        e,
-                    )
-                    check_results.append(CheckResult(plugin=name, error=str(e)))
-
-            if not check_results:
-                return None
-
-            return RuntimeCheckResult(
-                provider=rt.provider,
-                tag=rt.tag,
-                executable=rt.executable,
-                results=check_results,
-            )
-
-        gathered = await asyncio.gather(*[_check_runtime(rt) for rt in all_runtimes])
-        for entry in gathered:
-            if entry is not None:
-                results.append(entry)
-
-        return results
 
     # --- Path resolution ---
 

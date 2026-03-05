@@ -7,7 +7,7 @@ import typer
 from rich.panel import Panel
 from rich.table import Table
 
-from porringer.backend.command.sync import SyncCommands
+from porringer.backend.command.package import PackageCommands
 from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
     CheckParameters,
@@ -15,21 +15,6 @@ from porringer.schema import (
 )
 
 app = typer.Typer()
-
-
-async def _check_plugin_updates(params: CheckParameters) -> list[CheckResult]:
-    """Check for updates across all plugins (async).
-
-    Delegates to :meth:`SyncCommands.check_updates` so that the
-    update-checking logic lives in a single place (the API layer).
-
-    Args:
-        params: Check parameters.
-
-    Returns:
-        List of check results per plugin.
-    """
-    return await SyncCommands.check_updates(params)
 
 
 def _display_results(configuration: ConsoleConfiguration, results: list[CheckResult]) -> None:
@@ -100,5 +85,5 @@ def check_default(
         include_prereleases=include_prereleases,
     )
 
-    results = asyncio.run(_check_plugin_updates(params))
+    results = asyncio.run(PackageCommands.check_updates(params))
     _display_results(configuration, results)

@@ -1,11 +1,9 @@
 """Porringer CLI plugin command module"""
 
 import asyncio
-from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.table import Table
 
 from porringer.backend.command.plugin import PluginCommands
 from porringer.console.schema import ConsoleConfiguration
@@ -36,48 +34,6 @@ def plugin_list(
             configuration.console.print(
                 f'{result.name} [{result.kind.value}] v{result.version} (tool: {tool_ver}) {status}'
             )
-
-
-@app.command('packages')
-def plugin_packages(
-    context: typer.Context,
-    plugin_name: Annotated[str, typer.Argument(help='Plugin name to query (e.g. pipx, pip, uv)')],
-    project_path: Annotated[
-        Path,
-        typer.Option('--project-path', '-p', help='Project directory for scoped package listing'),
-    ] = Path('.'),
-) -> None:
-    """List packages installed via a specific plugin.
-
-    Queries the named plugin's environment and displays all packages it
-    reports as currently installed.  For venv-scoped plugins (pip, uv),
-    the listing can be scoped to a project directory.
-    """
-    configuration = context.ensure_object(ConsoleConfiguration)
-
-    resolved_path = project_path.resolve()
-
-    try:
-        packages = asyncio.run(PluginCommands.list_packages(plugin_name, resolved_path))
-    except PluginError as e:
-        configuration.console.print(f'[red]Error: {e.error}[/red]')
-        raise typer.Exit(code=1) from None
-
-    if not packages:
-        configuration.console.print(f'[yellow]No packages found for plugin: {plugin_name}[/yellow]')
-    else:
-        table = Table(title=f'Packages ({plugin_name})')
-        table.add_column('Name', style='cyan')
-        table.add_column('Version', style='green')
-        table.add_column('Host', style='magenta')
-
-        for pkg in sorted(packages, key=lambda p: p.name.lower()):
-            host_text = ''
-            if pkg.relation is not None:
-                host_text = f'{pkg.relation.host} ({pkg.relation.kind.value})'
-            table.add_row(pkg.name, pkg.version or 'n/a', host_text)
-
-        configuration.console.print(table)
 
 
 @app.command('install')
@@ -151,5 +107,5 @@ def plugin_uninstall(
 
 @app.callback(invoke_without_command=True, no_args_is_help=True)
 def application() -> None:
-    """Plugin management and operations"""
+    """Porringer extension management (install, update, remove plugin packages)."""
     pass

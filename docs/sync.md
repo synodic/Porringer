@@ -199,7 +199,7 @@ results = api.sync.run(params)
 
 # Inspect which actions were skipped and why
 for skip in results.skips:
-    print(f"Skipped: {skip.action.description} — {skip.skip_reason.value}: {skip.message}")
+    print(f'Skipped: {skip.action.description} — {skip.skip_reason.value}: {skip.message}')
 ```
 
 **Note:** `project_directory=False` skips only **project-sync** actions (Phase 3).
@@ -217,6 +217,7 @@ from porringer.schema import LocalConfiguration, SetupParameters
 
 api = API(LocalConfiguration())
 
+
 async def main():
     # Full sync (project + packages)
     results = await api.sync.run(SetupParameters(paths=project_path))
@@ -225,13 +226,12 @@ async def main():
     results = await api.sync.run(SetupParameters(paths=manifest_path, project_directory=False))
 
     # Override project directory (manifest and project in different locations)
-    results = await api.sync.run(
-        SetupParameters(paths=manifest_path, project_directory=project_path)
-    )
+    results = await api.sync.run(SetupParameters(paths=manifest_path, project_directory=project_path))
 
     # Execute with streaming progress
     async for event in api.sync.execute_stream(SetupParameters(paths=project_path)):
         print(event.kind, getattr(event.action, 'description', 'manifest loaded'))
+
 
 asyncio.run(main())
 ```

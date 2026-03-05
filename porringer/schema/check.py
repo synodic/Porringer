@@ -53,7 +53,7 @@ class CheckResult:
 class RuntimeCheckResult:
     """Result of checking updates for a plugin against a specific runtime.
 
-    Produced by :meth:`SyncCommands.check_updates_by_runtime` — one
+    Produced by :meth:`PackageCommands.check_updates_by_runtime` — one
     entry per successfully queried runtime.
 
     Attributes:

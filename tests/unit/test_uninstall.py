@@ -7,7 +7,7 @@ Covers:
 - SkipReason.NOT_INSTALLED enum value
 - uninstall_command on MockEnvironment
 - plugin_remove_command / plugin_remove on MockPluginManager
-- API.uninstall() auto-resolves runtime_context
+- PackageCommands.uninstall() auto-resolves runtime_context
 """
 
 import asyncio
@@ -15,10 +15,8 @@ from pathlib import Path
 from typing import override
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from packaging.version import Version
 
-from porringer.api import API
 from porringer.backend.builder import Builder
 from porringer.backend.command.core.action_builder import get_uninstall_cli_command
 from porringer.backend.command.core.discovery import DiscoveredPlugins
@@ -28,11 +26,12 @@ from porringer.backend.command.core.resolution import (
     resolve_uninstall_operation,
     resolved_to_result,
 )
+from porringer.backend.command.package import PackageCommands
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
-from porringer.schema import LocalConfiguration, SetupAction, Skip, SkipReason, Uninstall
+from porringer.schema import SetupAction, Skip, SkipReason, Uninstall
 from porringer.test.mock.environment import MockEnvironment
 from porringer.test.mock.plugin_manager import MockPluginManager
 
@@ -360,12 +359,12 @@ class TestUninstallCliCommand:
 
 
 # ---------------------------------------------------------------------------
-# API.uninstall — runtime context auto-resolution
+# PackageCommands.uninstall — runtime context auto-resolution
 # ---------------------------------------------------------------------------
 
 
 class TestUninstallAutoResolveRuntimeContext:
-    """API.uninstall() auto-resolves RuntimeContext when none is provided.
+    """PackageCommands.uninstall() auto-resolves RuntimeContext when none is provided.
 
     This ensures that RuntimeConsumer plugins (e.g. pip) can
     locate and remove packages using the correct interpreter even
@@ -385,14 +384,12 @@ class TestUninstallAutoResolveRuntimeContext:
         )
 
         with (
-            patch('porringer.api.discover_all_plugins', return_value=plugins),
+            patch('porringer.backend.command.package.discover_all_plugins', return_value=plugins),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
             patch.object(type(mock_env), 'ecosystem', return_value=_PY),
             patch.object(type(mock_env), 'plugin_kind', return_value=PluginKind.PACKAGE),
         ):
-            config = LocalConfiguration()
-            api = API(config)
-            result = await api.uninstall('mock', PackageRef.model_validate('requests'), dry_run=True)
+            result = await PackageCommands.uninstall('mock', PackageRef.model_validate('requests'), dry_run=True)
 
         mock_resolve.assert_called_once()
         assert result is not None
@@ -410,14 +407,12 @@ class TestUninstallAutoResolveRuntimeContext:
         )
 
         with (
-            patch('porringer.api.discover_all_plugins', return_value=plugins),
+            patch('porringer.backend.command.package.discover_all_plugins', return_value=plugins),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock) as mock_resolve,
             patch.object(type(mock_env), 'ecosystem', return_value=_PY),
             patch.object(type(mock_env), 'plugin_kind', return_value=PluginKind.PACKAGE),
         ):
-            config = LocalConfiguration()
-            api = API(config)
-            result = await api.uninstall(
+            result = await PackageCommands.uninstall(
                 'mock',
                 PackageRef.model_validate('requests'),
                 runtime_context=ctx,
@@ -526,13 +521,10 @@ class TestUninstallAutoResolveRuntimeContext:
         )
 
         with (
-            patch('porringer.api.discover_all_plugins', return_value=plugins),
             patch.object(type(mock_env), 'ecosystem', return_value=_PY),
             patch.object(type(mock_env), 'plugin_kind', return_value=PluginKind.PACKAGE),
         ):
-            config = LocalConfiguration()
-            api = API(config)
-            result = await api.uninstall(
+            result = await PackageCommands.uninstall(
                 'mock',
                 PackageRef.model_validate('requests'),
                 plugins=plugins,
@@ -540,52 +532,3 @@ class TestUninstallAutoResolveRuntimeContext:
             )
 
         assert result is not None
-
-
-# ---------------------------------------------------------------------------
-# API.resolve_runtime_context
-# ---------------------------------------------------------------------------
-
-
-class TestAPIResolveRuntimeContext:
-    """Verify the deprecated API.resolve_runtime_context() helper."""
-
-    @staticmethod
-    async def test_auto_discovers_when_no_environments() -> None:
-        """When environments=None, plugins are auto-discovered."""
-        ctx = RuntimeContext(executables={'python': Path('/resolved/python')})
-        mock_env = _make_mock_env()
-
-        plugins = DiscoveredPlugins(
-            environments={'mock': mock_env},
-            project_environments={},
-            scm_environments={},
-        )
-
-        with (
-            patch('porringer.api.discover_all_plugins', return_value=plugins) as mock_discover,
-            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
-            pytest.warns(DeprecationWarning, match='resolve_runtime_context.*deprecated'),
-        ):
-            result = await API.resolve_runtime_context()
-
-        mock_discover.assert_called_once_with(use_cache=True)
-        mock_resolve.assert_called_once_with({'mock': mock_env})
-        assert result is ctx
-
-    @staticmethod
-    async def test_uses_provided_environments() -> None:
-        """When environments dict is passed, discovery is skipped."""
-        ctx = RuntimeContext(executables={'python': Path('/resolved/python')})
-        env_dict: dict[str, Environment] = {'pip': MagicMock(spec=Environment)}
-
-        with (
-            patch('porringer.api.discover_all_plugins') as mock_discover,
-            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
-            pytest.warns(DeprecationWarning, match='resolve_runtime_context.*deprecated'),
-        ):
-            result = await API.resolve_runtime_context(environments=env_dict)
-
-        mock_discover.assert_not_called()
-        mock_resolve.assert_called_once_with(env_dict)
-        assert result is ctx
