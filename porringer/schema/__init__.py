@@ -34,7 +34,7 @@ from porringer.schema.manifest import (
     PluginSpec,
     SetupManifest,
 )
-from porringer.schema.plugin import PluginInfo, PluginOperationResult
+from porringer.schema.plugin import PluginInfo, PluginOperationResult, RuntimePackageResult
 from porringer.schema.progress import CancellationToken, ProgressEvent, ProgressEventKind, SubActionProgress
 from porringer.utility.exception import ManifestValidationCode
 
@@ -65,6 +65,7 @@ __all__ = [
     'PluginInfo',
     'PluginOperationResult',
     'PluginSpec',
+    'RuntimePackageResult',
     'ProgressCallback',
     'ProgressEvent',
     'ProgressEventKind',

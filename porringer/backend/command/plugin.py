@@ -1,5 +1,6 @@
 """The plugin command module."""
 
+import asyncio
 import builtins
 import logging
 import subprocess
@@ -14,10 +15,10 @@ from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.resolver import build_plugin_info
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Package, Plugin, PluginKind
-from porringer.schema import PluginInfo, PluginOperationResult
+from porringer.schema import PluginInfo, PluginOperationResult, RuntimePackageResult
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import is_pipx_installation
 
@@ -163,6 +164,100 @@ class PluginCommands:
             logger.debug("Plugin '%s' is not available; returning empty package list", plugin_name)
             return []
         return await env.packages(project_path=project_path, runtime_context=runtime_context)
+
+    @staticmethod
+    async def list_packages_by_runtime(
+        plugin_name: str,
+        *,
+        project_path: Path | None = None,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> builtins.list[RuntimePackageResult]:
+        """List packages for every installed runtime of a consumer plugin.
+
+        Discovers all runtime tags from available
+        :class:`~porringer.core.plugin_schema.runtime.RuntimeProvider`
+        plugins, resolves each to an interpreter executable, and
+        queries the named plugin's ``packages()`` method against every
+        matching runtime.  Results are returned tagged by provider,
+        version tag, and executable path.
+
+        Availability checks and package queries for each runtime run
+        concurrently via :func:`asyncio.gather`.
+
+        When *plugins* is provided, its environments are used
+        directly — no entry-point scanning is performed.
+
+        Args:
+            plugin_name: The canonical plugin name to query (must be a
+                :class:`~porringer.core.plugin_schema.runtime.RuntimeConsumer`).
+            project_path: Path to the project directory.  ``None``
+                queries the global / default environment.
+            plugins: Pre-discovered plugins from
+                :meth:`API.discover_plugins
+                <porringer.api.API.discover_plugins>`.
+
+        Returns:
+            A list of :class:`RuntimePackageResult` entries, one per
+            successfully queried runtime, ordered by descending tag
+            version.
+
+        Raises:
+            PluginError: If the plugin is not found or is not a
+                :class:`RuntimeConsumer`.
+        """
+        logger.debug('Listing packages by runtime for plugin: %s', plugin_name)
+
+        environments = plugins.environments if plugins is not None else PluginCommands._discover_environments()
+
+        # Look up the target environment
+        env = environments.get(str(canonicalize_name(plugin_name)))
+        if env is None:
+            available = sorted(environments.keys())
+            raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(available)}")
+
+        if not isinstance(env, RuntimeConsumer):
+            raise PluginError(f"Plugin '{plugin_name}' is not a RuntimeConsumer and cannot be queried per-runtime")
+
+        consumer = env
+        consumed_kind = consumer.consumed_runtime_kind()
+
+        # Resolve every runtime tag across all providers
+        all_runtimes = await Builder.resolve_all_runtime_executables(environments)
+
+        # Filter to the kind consumed by the target plugin
+        matching = [rt for rt in all_runtimes if rt.kind == consumed_kind]
+        if not matching:
+            logger.debug("No runtimes of kind '%s' found for plugin '%s'", consumed_kind, plugin_name)
+            return []
+
+        # Query availability + packages concurrently per runtime
+        async def _query(rt) -> RuntimePackageResult | None:
+            ctx = RuntimeContext(executables={rt.kind: rt.executable})
+            if not consumer.query_availability(ctx):
+                logger.debug(
+                    "Plugin '%s' not available for runtime %s (tag=%s)",
+                    plugin_name,
+                    rt.executable,
+                    rt.tag,
+                )
+                return None
+            pkgs = await consumer.packages(project_path=project_path, runtime_context=ctx)
+            return RuntimePackageResult(
+                provider=rt.provider,
+                tag=rt.tag,
+                executable=rt.executable,
+                packages=pkgs,
+            )
+
+        gathered = await asyncio.gather(*[_query(rt) for rt in matching])
+        results = [r for r in gathered if r is not None]
+
+        logger.debug(
+            'list_packages_by_runtime complete: %d runtime(s) queried for %s',
+            len(results),
+            plugin_name,
+        )
+        return results
 
     _PLUGIN_GROUPS = (
         'porringer.environment',

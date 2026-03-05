@@ -1,10 +1,11 @@
 """Plugin metadata schemas."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from packaging.version import Version
 
-from porringer.core.schema import PluginKind
+from porringer.core.schema import Package, PluginKind
 
 
 @dataclass(slots=True)
@@ -40,3 +41,27 @@ class PluginOperationResult:
     plugin_name: str
     success: bool
     message: str
+
+
+@dataclass(slots=True)
+class RuntimePackageResult:
+    """Packages installed under a single resolved runtime.
+
+    Returned by
+    :meth:`PluginCommands.list_packages_by_runtime
+    <porringer.backend.command.plugin.PluginCommands.list_packages_by_runtime>`
+    — one instance per successfully queried runtime tag.
+
+    Attributes:
+        provider: Canonical name of the runtime-provider plugin
+            (e.g. ``"pim"``).
+        tag: The version tag (e.g. ``"3.14"``).
+        executable: Absolute path to the resolved interpreter.
+        packages: Packages reported by the queried plugin for this
+            runtime.
+    """
+
+    provider: str
+    tag: str
+    executable: Path
+    packages: list[Package]

@@ -87,6 +87,39 @@ class PyenvEnvironment(Environment, RuntimeProvider):
     # ------------------------------------------------------------------
 
     @override
+    async def default_tag(self) -> str | None:
+        """Return the tag of pyenv's currently active Python version.
+
+        Runs ``pyenv version-name`` which respects (in order)
+        ``PYENV_VERSION``, ``.python-version``, and ``pyenv global``.
+        Returns ``None`` when the result is ``"system"`` (the
+        provider cannot resolve a path for the system interpreter)
+        or when pyenv is not available.
+
+        Returns:
+            A version string (e.g. ``"3.14.0"``), or ``None``.
+        """
+        logger = logging.getLogger('porringer.pyenv.default_tag')
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                'pyenv',
+                'version-name',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                return None
+            tag = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
+            if tag and tag != 'system':
+                return tag
+        except FileNotFoundError:
+            logger.debug('pyenv not found on PATH')
+        except Exception as e:
+            logger.debug('default_tag failed: %s', e)
+        return None
+
+    @override
     async def resolve_executable(self, tag: str) -> Path | None:
         """Return the path to the Python interpreter for a pyenv-managed runtime.
 

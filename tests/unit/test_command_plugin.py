@@ -12,9 +12,11 @@ from packaging.version import InvalidVersion, Version
 
 from porringer.api import API
 from porringer.backend.builder import Builder, PluginInformation
+from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.plugin import PluginCommands
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
+from porringer.core.plugin_schema.python_environment import PythonEnvironment
+from porringer.core.plugin_schema.runtime import ResolvedRuntime, RuntimeConsumer, RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Distribution, Ecosystem, Package, PluginDependency, PluginKind, PluginParameters
 from porringer.schema import LocalConfiguration
@@ -24,6 +26,8 @@ from porringer.utility.utility import is_pipx_installation
 # Test constants
 NUM_PLUGINS_MULTIPLE = 3
 NUM_PLUGINS_PARTIAL = 2
+NUM_RESOLVABLE_RUNTIMES = 2
+NUM_CONCURRENT_RUNTIMES = 3
 
 
 class TestCommandPlugin:
@@ -866,6 +870,399 @@ class TestResolveRuntimeContext:
         assert ctx.executables['python'] == Path('/python/3.14/python')
 
 
+class TestDefaultTag:
+    """Builder.resolve_runtime_context prefers default_tag() when available."""
+
+    @staticmethod
+    async def test_default_tag_preferred_over_highest_version() -> None:
+        """When default_tag() returns a resolvable tag, it is used instead of the highest."""
+
+        class _DefaultProvider(Environment, RuntimeProvider):
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem | None:
+                return Ecosystem('python')
+
+            @staticmethod
+            def plugin_kind() -> PluginKind:
+                return PluginKind.RUNTIME
+
+            @classmethod
+            def provided_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def tool_name(cls) -> str:
+                return 'py'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return True
+
+            @override
+            async def default_tag(self) -> str | None:
+                return '3.12'  # Not the highest
+
+            @override
+            async def resolve_executable(self, tag: str) -> Path | None:
+                return Path(f'/python/{tag}/python')
+
+            @override
+            async def available_tags(self) -> list[str]:
+                return ['3.14', '3.12']
+
+            @override
+            def install_command(self, package, **kw):
+                return []
+
+            @override
+            def upgrade_command(self, package, **kw):
+                return []
+
+            @override
+            def uninstall_command(self, package, **kw):
+                return []
+
+            @override
+            async def packages(self, **kw):
+                return []
+
+            @override
+            async def check_updates(self, params):
+                return []
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = _DefaultProvider(params)
+
+        ctx = await Builder.resolve_runtime_context({'pim': provider})
+
+        assert ctx.executables['python'] == Path('/python/3.12/python')
+
+    @staticmethod
+    async def test_default_tag_none_falls_back_to_sort_tags() -> None:
+        """When default_tag() returns None, the highest sorted tag is used."""
+
+        class _NoDefaultProvider(Environment, RuntimeProvider):
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem | None:
+                return Ecosystem('python')
+
+            @staticmethod
+            def plugin_kind() -> PluginKind:
+                return PluginKind.RUNTIME
+
+            @classmethod
+            def provided_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def tool_name(cls) -> str:
+                return 'py'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return True
+
+            @override
+            async def default_tag(self) -> str | None:
+                return None
+
+            @override
+            async def resolve_executable(self, tag: str) -> Path | None:
+                return Path(f'/python/{tag}/python')
+
+            @override
+            async def available_tags(self) -> list[str]:
+                return ['3.12', '3.14']
+
+            @override
+            def install_command(self, package, **kw):
+                return []
+
+            @override
+            def upgrade_command(self, package, **kw):
+                return []
+
+            @override
+            def uninstall_command(self, package, **kw):
+                return []
+
+            @override
+            async def packages(self, **kw):
+                return []
+
+            @override
+            async def check_updates(self, params):
+                return []
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = _NoDefaultProvider(params)
+
+        ctx = await Builder.resolve_runtime_context({'pim': provider})
+
+        # Falls back to sort_tags → highest first → 3.14
+        assert ctx.executables['python'] == Path('/python/3.14/python')
+
+    @staticmethod
+    async def test_default_tag_unresolvable_falls_back() -> None:
+        """When default_tag() returns a tag that fails resolution, fallback kicks in."""
+
+        class _BadDefaultProvider(Environment, RuntimeProvider):
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem | None:
+                return Ecosystem('python')
+
+            @staticmethod
+            def plugin_kind() -> PluginKind:
+                return PluginKind.RUNTIME
+
+            @classmethod
+            def provided_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def tool_name(cls) -> str:
+                return 'py'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return True
+
+            @override
+            async def default_tag(self) -> str | None:
+                return '3.99'  # Not installed
+
+            @override
+            async def resolve_executable(self, tag: str) -> Path | None:
+                if tag == '3.99':
+                    return None  # Default can't be resolved
+                return Path(f'/python/{tag}/python')
+
+            @override
+            async def available_tags(self) -> list[str]:
+                return ['3.14', '3.12']
+
+            @override
+            def install_command(self, package, **kw):
+                return []
+
+            @override
+            def upgrade_command(self, package, **kw):
+                return []
+
+            @override
+            def uninstall_command(self, package, **kw):
+                return []
+
+            @override
+            async def packages(self, **kw):
+                return []
+
+            @override
+            async def check_updates(self, params):
+                return []
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = _BadDefaultProvider(params)
+
+        ctx = await Builder.resolve_runtime_context({'pim': provider})
+
+        # Falls back to sort_tags → 3.14 (highest)
+        assert ctx.executables['python'] == Path('/python/3.14/python')
+
+    @staticmethod
+    async def test_default_tag_exception_falls_back() -> None:
+        """When default_tag() raises, resolution falls back to available_tags."""
+
+        class _ErrorDefaultProvider(Environment, RuntimeProvider):
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem | None:
+                return Ecosystem('python')
+
+            @staticmethod
+            def plugin_kind() -> PluginKind:
+                return PluginKind.RUNTIME
+
+            @classmethod
+            def provided_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def tool_name(cls) -> str:
+                return 'py'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return True
+
+            @override
+            async def default_tag(self) -> str | None:
+                raise RuntimeError('subprocess failed')
+
+            @override
+            async def resolve_executable(self, tag: str) -> Path | None:
+                return Path(f'/python/{tag}/python')
+
+            @override
+            async def available_tags(self) -> list[str]:
+                return ['3.14', '3.12']
+
+            @override
+            def install_command(self, package, **kw):
+                return []
+
+            @override
+            def upgrade_command(self, package, **kw):
+                return []
+
+            @override
+            def uninstall_command(self, package, **kw):
+                return []
+
+            @override
+            async def packages(self, **kw):
+                return []
+
+            @override
+            async def check_updates(self, params):
+                return []
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = _ErrorDefaultProvider(params)
+
+        ctx = await Builder.resolve_runtime_context({'pim': provider})
+
+        # Falls back to sort_tags → 3.14 (highest)
+        assert ctx.executables['python'] == Path('/python/3.14/python')
+
+    @staticmethod
+    async def test_protocol_default_returns_none() -> None:
+        """The base RuntimeProvider.default_tag() returns None (opt-in pattern)."""
+
+        class _BareProvider(Environment, RuntimeProvider):
+            _distribution: Distribution
+
+            def __init__(self, parameters: PluginParameters) -> None:
+                self._distribution = parameters.distribution
+
+            @staticmethod
+            def ecosystem() -> Ecosystem | None:
+                return Ecosystem('python')
+
+            @staticmethod
+            def plugin_kind() -> PluginKind:
+                return PluginKind.RUNTIME
+
+            @classmethod
+            def provided_runtime_kind(cls) -> str:
+                return 'python'
+
+            @classmethod
+            def tool_name(cls) -> str:
+                return 'py'
+
+            @classmethod
+            def is_available(cls) -> bool:
+                return True
+
+            @override
+            async def resolve_executable(self, tag: str) -> Path | None:
+                return Path(f'/python/{tag}/python')
+
+            @override
+            async def available_tags(self) -> list[str]:
+                return ['3.14']
+
+            @override
+            def install_command(self, package, **kw):
+                return []
+
+            @override
+            def upgrade_command(self, package, **kw):
+                return []
+
+            @override
+            def uninstall_command(self, package, **kw):
+                return []
+
+            @override
+            async def packages(self, **kw):
+                return []
+
+            @override
+            async def check_updates(self, params):
+                return []
+
+            @staticmethod
+            def dependencies() -> list:
+                return []
+
+            @property
+            def distribution(self) -> Distribution:
+                return self._distribution
+
+        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+        provider = _BareProvider(params)
+
+        # Protocol default returns None
+        assert await provider.default_tag() is None
+
+        # Still resolves via fallback
+        ctx = await Builder.resolve_runtime_context({'pim': provider})
+        assert ctx.executables['python'] == Path('/python/3.14/python')
+
+
 class TestSortTags:
     """RuntimeProvider.sort_tags default implementation (PEP 440).
 
@@ -1151,3 +1548,308 @@ class TestSortTagsOverride:
         assert 'python' in ctx.executables
         # 'gamma' is first in reverse-alpha order, so it gets resolved
         assert ctx.executables['python'] == Path('/custom/gamma/bin')
+
+
+# ---------------------------------------------------------------------------
+# Builder.resolve_all_runtime_executables — multi-tag resolution
+# ---------------------------------------------------------------------------
+
+
+class _FakeMultiTagProvider(Environment, RuntimeProvider):
+    """Minimal RuntimeProvider exposing multiple resolvable tags.
+
+    Tags ``"3.14"`` and ``"3.12"`` resolve successfully.
+    Tag ``"3.10"`` does not resolve (simulates missing install).
+    """
+
+    _distribution: Distribution
+
+    def __init__(self, parameters: PluginParameters) -> None:
+        self._distribution = parameters.distribution
+
+    @staticmethod
+    def ecosystem() -> Ecosystem | None:
+        return Ecosystem('python')
+
+    @staticmethod
+    def plugin_kind() -> PluginKind:
+        return PluginKind.RUNTIME
+
+    @classmethod
+    def provided_runtime_kind(cls) -> str:
+        return 'python'
+
+    @classmethod
+    def tool_name(cls) -> str:
+        return 'py'
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return True
+
+    @override
+    async def resolve_executable(self, tag: str) -> Path | None:
+        if tag == '3.10':
+            return None  # not installed
+        return Path(f'/python/{tag}/python')
+
+    @override
+    async def available_tags(self) -> list[str]:
+        return ['3.14', '3.12', '3.10']
+
+    @override
+    def install_command(self, package, **kw):
+        return []
+
+    @override
+    def upgrade_command(self, package, **kw):
+        return []
+
+    @override
+    def uninstall_command(self, package, **kw):
+        return []
+
+    @override
+    async def packages(self, **kw):
+        return []
+
+    @override
+    async def check_updates(self, params):
+        return []
+
+    @staticmethod
+    def dependencies() -> list:
+        return []
+
+    @property
+    def distribution(self) -> Distribution:
+        return self._distribution
+
+
+def _make_provider() -> _FakeMultiTagProvider:
+    """Convenience helper to construct a ``_FakeMultiTagProvider``."""
+    params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+    return _FakeMultiTagProvider(params)
+
+
+class TestResolveAllRuntimeExecutables:
+    """Builder.resolve_all_runtime_executables resolves every tag."""
+
+    @staticmethod
+    async def test_resolves_multiple_tags() -> None:
+        """All resolvable tags are returned, in descending version order."""
+        provider = _make_provider()
+
+        results = await Builder.resolve_all_runtime_executables({'pim': provider})
+
+        assert len(results) == NUM_RESOLVABLE_RUNTIMES
+        assert results[0].tag == '3.14'
+        assert results[0].executable == Path('/python/3.14/python')
+        assert results[0].provider == 'pim'
+        assert results[0].kind == 'python'
+        assert results[1].tag == '3.12'
+        assert results[1].executable == Path('/python/3.12/python')
+
+    @staticmethod
+    async def test_skips_unresolvable_tags() -> None:
+        """Tags where resolve_executable returns None are excluded."""
+        provider = _make_provider()
+
+        results = await Builder.resolve_all_runtime_executables({'pim': provider})
+
+        tags = [r.tag for r in results]
+        assert '3.10' not in tags
+
+    @staticmethod
+    async def test_skips_unavailable_provider() -> None:
+        """A provider that is not available is skipped entirely."""
+        mock_env = MagicMock(spec=Environment)
+        mock_env.is_available = MagicMock(return_value=False)
+        type(mock_env).is_supported = MagicMock(return_value=True)
+
+        results = await Builder.resolve_all_runtime_executables({'unavailable': mock_env})
+
+        assert results == []
+
+    @staticmethod
+    async def test_no_providers_returns_empty() -> None:
+        """An environment dict with no RuntimeProvider returns []."""
+        mock_env = MagicMock(spec=Environment)
+        type(mock_env).is_supported = MagicMock(return_value=True)
+        mock_env.is_available = MagicMock(return_value=True)
+
+        results = await Builder.resolve_all_runtime_executables({'pip': mock_env})
+
+        assert results == []
+
+    @staticmethod
+    async def test_multiple_providers() -> None:
+        """Runtimes from multiple providers are all included."""
+        provider = _make_provider()
+
+        results = await Builder.resolve_all_runtime_executables({'pim': provider})
+        assert len(results) == NUM_RESOLVABLE_RUNTIMES  # from pim
+
+
+# ---------------------------------------------------------------------------
+# PluginCommands.list_packages_by_runtime — per-runtime package queries
+# ---------------------------------------------------------------------------
+
+
+class TestListPackagesByRuntime:
+    """PluginCommands.list_packages_by_runtime queries every runtime."""
+
+    @staticmethod
+    async def test_returns_packages_per_runtime() -> None:
+        """Each resolved runtime produces a RuntimePackageResult with its packages."""
+        provider = _make_provider()
+
+        # Mock consumer environment that returns different packages per runtime
+        mock_env = MagicMock(spec=PythonEnvironment)
+        mock_env.query_availability = MagicMock(return_value=True)
+        mock_env.consumed_runtime_kind = MagicMock(return_value='python')
+
+        async def _fake_packages(*, project_path=None, runtime_context=None):
+            exe = runtime_context.get('python') if runtime_context is not None else None
+            if exe and '3.14' in str(exe):
+                return [Package(name='numpy', version='2.0')]
+            return [Package(name='requests', version='2.31')]
+
+        mock_env.packages = AsyncMock(side_effect=_fake_packages)
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env, 'pim': provider}),
+            patch.object(Builder, 'resolve_all_runtime_executables', new_callable=AsyncMock) as mock_resolve,
+        ):
+            mock_resolve.return_value = [
+                ResolvedRuntime(provider='pim', tag='3.14', kind='python', executable=Path('/python/3.14/python')),
+                ResolvedRuntime(provider='pim', tag='3.12', kind='python', executable=Path('/python/3.12/python')),
+            ]
+
+            results = await PluginCommands.list_packages_by_runtime('pip')
+
+        assert len(results) == NUM_RESOLVABLE_RUNTIMES
+        assert results[0].tag == '3.14'
+        assert results[0].provider == 'pim'
+        assert results[0].executable == Path('/python/3.14/python')
+        assert results[0].packages == [Package(name='numpy', version='2.0')]
+        assert results[1].tag == '3.12'
+        assert results[1].packages == [Package(name='requests', version='2.31')]
+
+    @staticmethod
+    async def test_skips_unavailable_runtimes() -> None:
+        """Runtimes where query_availability returns False are excluded."""
+        mock_env = MagicMock(spec=PythonEnvironment)
+        mock_env.consumed_runtime_kind = MagicMock(return_value='python')
+
+        # Only available for 3.14, not 3.12
+        def _avail(ctx):
+            return ctx.get('python') is not None and '3.14' in str(ctx.get('python'))
+
+        mock_env.query_availability = MagicMock(side_effect=_avail)
+        mock_env.packages = AsyncMock(return_value=[Package(name='foo', version='1.0')])
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch.object(Builder, 'resolve_all_runtime_executables', new_callable=AsyncMock) as mock_resolve,
+        ):
+            mock_resolve.return_value = [
+                ResolvedRuntime(provider='pim', tag='3.14', kind='python', executable=Path('/python/3.14/python')),
+                ResolvedRuntime(provider='pim', tag='3.12', kind='python', executable=Path('/python/3.12/python')),
+            ]
+
+            results = await PluginCommands.list_packages_by_runtime('pip')
+
+        assert len(results) == 1
+        assert results[0].tag == '3.14'
+
+    @staticmethod
+    async def test_non_consumer_raises() -> None:
+        """A plugin that is not a RuntimeConsumer raises PluginError."""
+        mock_env = MagicMock(spec=Environment)
+        # Not a RuntimeConsumer — no consumed_runtime_kind
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'brew': mock_env}),
+            pytest.raises(PluginError, match='not a RuntimeConsumer'),
+        ):
+            await PluginCommands.list_packages_by_runtime('brew')
+
+    @staticmethod
+    async def test_missing_plugin_raises() -> None:
+        """A non-existent plugin name raises PluginError."""
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={}),
+            pytest.raises(PluginError, match='not found'),
+        ):
+            await PluginCommands.list_packages_by_runtime('nonexistent')
+
+    @staticmethod
+    async def test_empty_when_no_matching_runtimes() -> None:
+        """Returns [] when no runtimes match the consumer's kind."""
+        mock_env = MagicMock(spec=PythonEnvironment)
+        mock_env.consumed_runtime_kind = MagicMock(return_value='python')
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch.object(
+                Builder,
+                'resolve_all_runtime_executables',
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            results = await PluginCommands.list_packages_by_runtime('pip')
+
+        assert results == []
+
+    @staticmethod
+    async def test_uses_prediscovered_plugins() -> None:
+        """When plugins= is provided, environments are used directly."""
+        mock_env = MagicMock(spec=PythonEnvironment)
+        mock_env.consumed_runtime_kind = MagicMock(return_value='python')
+        mock_env.query_availability = MagicMock(return_value=True)
+        mock_env.packages = AsyncMock(return_value=[])
+
+        discovered = DiscoveredPlugins(
+            environments={'pip': mock_env},
+            project_environments={},
+            scm_environments={},
+        )
+
+        with (
+            patch.object(PluginCommands, '_discover_environments') as mock_discover,
+            patch.object(
+                Builder,
+                'resolve_all_runtime_executables',
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            results = await PluginCommands.list_packages_by_runtime('pip', plugins=discovered)
+
+        mock_discover.assert_not_called()
+        assert results == []
+
+    @staticmethod
+    async def test_concurrent_queries() -> None:
+        """All runtimes are queried (verifies packages() is called for each)."""
+        mock_env = MagicMock(spec=PythonEnvironment)
+        mock_env.consumed_runtime_kind = MagicMock(return_value='python')
+        mock_env.query_availability = MagicMock(return_value=True)
+        mock_env.packages = AsyncMock(return_value=[Package(name='pkg', version='1.0')])
+
+        with (
+            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch.object(Builder, 'resolve_all_runtime_executables', new_callable=AsyncMock) as mock_resolve,
+        ):
+            mock_resolve.return_value = [
+                ResolvedRuntime(provider='pim', tag='3.14', kind='python', executable=Path('/python/3.14/python')),
+                ResolvedRuntime(provider='pim', tag='3.13', kind='python', executable=Path('/python/3.13/python')),
+                ResolvedRuntime(provider='pim', tag='3.12', kind='python', executable=Path('/python/3.12/python')),
+            ]
+
+            results = await PluginCommands.list_packages_by_runtime('pip')
+
+        assert len(results) == NUM_CONCURRENT_RUNTIMES
+        assert mock_env.packages.call_count == NUM_CONCURRENT_RUNTIMES

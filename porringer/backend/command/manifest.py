@@ -668,6 +668,6 @@ def _patch_string_shorthand(schema: dict) -> None:
             'description': description,
             'anyOf': [
                 {'type': 'string', 'description': string_description},
-                {k: v for k, v in original.items() if k not in ('title', 'description')},
+                {k: v for k, v in original.items() if k not in {'title', 'description'}},
             ],
         }
