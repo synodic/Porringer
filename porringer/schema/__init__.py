@@ -5,7 +5,7 @@ All public types are re-exported here for flat access via
 """
 
 from porringer.schema.cache import DirectoryCache, DirectoryValidationResult, ManifestDirectory
-from porringer.schema.check import CheckParameters, CheckResult, PackageUpdateInfo
+from porringer.schema.check import CheckParameters, CheckResult, PackageUpdateInfo, RuntimeCheckResult
 from porringer.schema.config import LocalConfiguration
 from porringer.schema.download import DownloadParameters, DownloadResult, HashAlgorithm, ProgressCallback
 from porringer.schema.execution import (
@@ -43,6 +43,7 @@ __all__ = [
     'CancellationToken',
     'CheckParameters',
     'CheckResult',
+    'RuntimeCheckResult',
     'CloneStatus',
     'CloneStatusKind',
     'DirectoryCache',

@@ -166,7 +166,7 @@ class RuntimeProvider(Protocol):
             or ``None`` if the tool has no default concept or the
             default cannot be determined.
         """
-        _ = self  # Instance method — subclasses override with self-dependent logic
+        _ = self  # Protocol default; overriders use self
         return None
 
     def sort_tags(self, tags: list[str]) -> list[str]:
