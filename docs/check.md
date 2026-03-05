@@ -50,7 +50,7 @@ for env in environments:
     updates = env.check_updates(params)
 
     for pkg in updates:
-        print(f"{pkg.name}: update available to {pkg.version}")
+        print(f'{pkg.name}: update available to {pkg.version}')
 ```
 
 ## Plugin Implementation
@@ -63,6 +63,7 @@ from porringer.core.plugin_schema.environment import (
     CheckUpdatesParameters,
 )
 from porringer.core.schema import Package
+
 
 class MyPluginEnvironment(Environment):
     def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:

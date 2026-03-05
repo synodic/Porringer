@@ -47,13 +47,13 @@ from porringer.schema import LocalConfiguration, DownloadParameters
 api = API(LocalConfiguration())
 
 params = DownloadParameters(
-    url="https://example.com/file.zip",
-    destination=Path("./file.zip"),
-    expected_hash="sha256:abc123...",
+    url='https://example.com/file.zip',
+    destination=Path('./file.zip'),
+    expected_hash='sha256:abc123...',
 )
 
 result = asyncio.run(api.download(params))
-print(f"Download success: {result.success}")
+print(f'Download success: {result.success}')
 ```
 
 ## Progress Callback
@@ -63,10 +63,12 @@ For programmatic usage, you can provide a progress callback:
 ```python
 import asyncio
 
+
 def progress(downloaded: int, total: int | None) -> None:
     if total:
         percent = (downloaded / total) * 100
-        print(f"Progress: {percent:.1f}%")
+        print(f'Progress: {percent:.1f}%')
+
 
 result = asyncio.run(api.download(params, progress_callback=progress))
 ```

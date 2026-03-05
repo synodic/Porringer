@@ -24,6 +24,7 @@ from porringer.backend.command.core.discovery import DiscoveredPlugins, discover
 from porringer.backend.command.core.execution import execute_package, execute_uninstall
 from porringer.backend.command.core.resolution import (
     ResolutionContext,
+    ResolvedOperation,
     resolve_operation,
     resolve_uninstall_operation,
     resolved_to_result,
@@ -52,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 type _ResolveFn = Callable[
     [SetupAction, dict[str, Environment], ResolutionContext],
-    Awaitable[object],
+    Awaitable[ResolvedOperation],
 ]
 type _ExecuteFn = Callable[
     [SetupAction, dict[str, Environment], asyncio.Queue[ProgressEvent | None], ResolutionContext],
