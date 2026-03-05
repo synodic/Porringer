@@ -264,6 +264,15 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
     return result
 
 
+def discover_environments() -> dict[str, Environment]:
+    """Discover and build all environment plugins.
+
+    Convenience wrapper around :func:`discover_plugins` for the
+    ``environment`` group with dependency checking enabled.
+    """
+    return discover_plugins('environment', Environment, check_dependencies=True)
+
+
 def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
     """Discover all three plugin groups in one call.
 

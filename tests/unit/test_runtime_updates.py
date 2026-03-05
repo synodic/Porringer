@@ -14,7 +14,7 @@ from porringer.backend.command.core.execution import (
     resolve_runtime_tag_override,
 )
 from porringer.backend.command.core.resolution import ResolutionContext
-from porringer.backend.command.sync import SyncCommands
+from porringer.backend.command.package import PackageCommands
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import (
@@ -116,7 +116,7 @@ def _provider() -> _FakeProvider:
 
 
 class TestCheckUpdatesByRuntime:
-    """SyncCommands.check_updates_by_runtime queries each runtime."""
+    """PackageCommands.check_updates_by_runtime queries each runtime."""
 
     @staticmethod
     async def test_returns_results_per_runtime() -> None:
@@ -152,7 +152,7 @@ class TestCheckUpdatesByRuntime:
                 ResolvedRuntime(provider='pim', tag='3.12', kind='python', executable=Path('/py/3.12')),
             ]
 
-            results = await SyncCommands.check_updates_by_runtime(plugins=discovered)
+            results = await PackageCommands.check_updates_by_runtime(plugins=discovered)
 
         assert len(results) == NUM_RUNTIMES_EXPECTED
         assert results[0].provider == 'pim'
@@ -182,7 +182,7 @@ class TestCheckUpdatesByRuntime:
                 ResolvedRuntime(provider='pim', tag='3.14', kind='python', executable=Path('/py/3.14')),
             ],
         ):
-            results = await SyncCommands.check_updates_by_runtime(plugins=discovered)
+            results = await PackageCommands.check_updates_by_runtime(plugins=discovered)
 
         assert results == []
 
@@ -204,7 +204,7 @@ class TestCheckUpdatesByRuntime:
             new_callable=AsyncMock,
             return_value=[],
         ):
-            results = await SyncCommands.check_updates_by_runtime(plugins=discovered)
+            results = await PackageCommands.check_updates_by_runtime(plugins=discovered)
 
         assert results == []
 
@@ -231,7 +231,7 @@ class TestCheckUpdatesByRuntime:
                 ResolvedRuntime(provider='pim', tag='3.14', kind='python', executable=Path('/py/3.14')),
             ]
 
-            results = await SyncCommands.check_updates_by_runtime(plugins=discovered)
+            results = await PackageCommands.check_updates_by_runtime(plugins=discovered)
 
         assert results == []
 
@@ -268,7 +268,7 @@ class TestCheckUpdatesByRuntime:
             ]
 
             params = CheckParameters(plugins=['pip'])
-            results = await SyncCommands.check_updates_by_runtime(params, plugins=discovered)
+            results = await PackageCommands.check_updates_by_runtime(params, plugins=discovered)
 
         # Only pip was checked, uv was filtered out
         assert len(results) == 1
@@ -300,7 +300,7 @@ class TestCheckUpdatesByRuntime:
                 ResolvedRuntime(provider='pim', tag='3.14', kind='python', executable=Path('/py/3.14')),
             ]
 
-            results = await SyncCommands.check_updates_by_runtime(plugins=discovered)
+            results = await PackageCommands.check_updates_by_runtime(plugins=discovered)
 
         assert len(results) == 1
         cr = results[0].results[0]

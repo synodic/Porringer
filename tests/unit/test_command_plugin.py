@@ -13,6 +13,7 @@ from packaging.version import InvalidVersion, Version
 from porringer.api import API
 from porringer.backend.builder import Builder, PluginInformation
 from porringer.backend.command.core.discovery import DiscoveredPlugins
+from porringer.backend.command.package import PackageCommands
 from porringer.backend.command.plugin import PluginCommands
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
@@ -435,7 +436,7 @@ class TestListRuntimeConsumerVisibility:
         type(mock_env).distribution = MagicMock(return_value=Distribution(version=Version('1.0.0')))
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.plugin.discover_environments', return_value={'pip': mock_env}),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
             patch.object(Builder, 'find_plugins', return_value=[]),
             patch.object(Builder, 'build_plugins', return_value=[]),
@@ -459,7 +460,7 @@ class TestListRuntimeConsumerVisibility:
         type(mock_env).distribution = MagicMock(return_value=Distribution(version=Version('1.0.0')))
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.plugin.discover_environments', return_value={'pip': mock_env}),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
             patch.object(Builder, 'find_plugins', return_value=[]),
             patch.object(Builder, 'build_plugins', return_value=[]),
@@ -481,7 +482,7 @@ class TestListRuntimeConsumerVisibility:
         type(mock_env).distribution = MagicMock(return_value=Distribution(version=Version('1.0.0')))
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.plugin.discover_environments', return_value={'pip': mock_env}),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock) as mock_resolve,
             patch.object(Builder, 'find_plugins', return_value=[]),
             patch.object(Builder, 'build_plugins', return_value=[]),
@@ -492,12 +493,12 @@ class TestListRuntimeConsumerVisibility:
 
 
 # ---------------------------------------------------------------------------
-# list_packages — query_availability gating + runtime resolution
+# PackageCommands.list — query_availability gating + runtime resolution
 # ---------------------------------------------------------------------------
 
 
 class TestListPackagesAvailabilityGate:
-    """list_packages uses query_availability with auto-resolved RuntimeContext."""
+    """PackageCommands.list uses query_availability with auto-resolved RuntimeContext."""
 
     @staticmethod
     async def test_unavailable_plugin_returns_empty() -> None:
@@ -507,10 +508,10 @@ class TestListPackagesAvailabilityGate:
         mock_env.packages = AsyncMock(return_value=[Package(name='foo', version='1.0.0')])
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'mock-env': mock_env}),
+            patch('porringer.backend.command.package._discover_environments', return_value={'mock-env': mock_env}),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
         ):
-            result = await PluginCommands.list_packages('mock-env')
+            result = await PackageCommands.list('mock-env')
 
         assert result == []
         mock_env.packages.assert_not_called()
@@ -526,10 +527,10 @@ class TestListPackagesAvailabilityGate:
         mock_env.packages = AsyncMock(return_value=expected)
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'mock-env': mock_env}),
+            patch('porringer.backend.command.package._discover_environments', return_value={'mock-env': mock_env}),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
         ):
-            result = await PluginCommands.list_packages('mock-env')
+            result = await PackageCommands.list('mock-env')
 
         assert result == expected
         mock_env.packages.assert_called_once_with(project_path=None, runtime_context=ctx)
@@ -546,10 +547,10 @@ class TestListPackagesAvailabilityGate:
         mock_env.packages = AsyncMock(return_value=expected)
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.package._discover_environments', return_value={'pip': mock_env}),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
         ):
-            result = await PluginCommands.list_packages('pip')
+            result = await PackageCommands.list('pip')
 
         assert result == expected
         mock_env.query_availability.assert_called_once_with(ctx)
@@ -565,23 +566,23 @@ class TestListPackagesAvailabilityGate:
         mock_env.packages = AsyncMock(return_value=expected)
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.package._discover_environments', return_value={'pip': mock_env}),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock) as mock_resolve,
         ):
-            result = await PluginCommands.list_packages('pip', runtime_context=ctx)
+            result = await PackageCommands.list('pip', runtime_context=ctx)
 
         mock_resolve.assert_not_called()
         assert result == expected
 
     @staticmethod
     async def test_missing_plugin_raises() -> None:
-        """list_packages raises PluginError for a non-existent plugin name."""
+        """List raises PluginError for a non-existent plugin name."""
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={}),
+            patch('porringer.backend.command.package._discover_environments', return_value={}),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
             pytest.raises(PluginError, match='not found'),
         ):
-            await PluginCommands.list_packages('nonexistent')
+            await PackageCommands.list('nonexistent')
 
 
 # ---------------------------------------------------------------------------
@@ -1709,12 +1710,12 @@ class TestResolveAllRuntimeExecutables:
 
 
 # ---------------------------------------------------------------------------
-# PluginCommands.list_packages_by_runtime — per-runtime package queries
+# PackageCommands.list_by_runtime — per-runtime package queries
 # ---------------------------------------------------------------------------
 
 
 class TestListPackagesByRuntime:
-    """PluginCommands.list_packages_by_runtime queries every runtime."""
+    """PackageCommands.list_by_runtime queries every runtime."""
 
     @staticmethod
     async def test_returns_packages_per_runtime() -> None:
@@ -1735,7 +1736,10 @@ class TestListPackagesByRuntime:
         mock_env.packages = AsyncMock(side_effect=_fake_packages)
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env, 'pim': provider}),
+            patch(
+                'porringer.backend.command.package._discover_environments',
+                return_value={'pip': mock_env, 'pim': provider},
+            ),
             patch.object(Builder, 'resolve_all_runtime_executables', new_callable=AsyncMock) as mock_resolve,
         ):
             mock_resolve.return_value = [
@@ -1743,7 +1747,7 @@ class TestListPackagesByRuntime:
                 ResolvedRuntime(provider='pim', tag='3.12', kind='python', executable=Path('/python/3.12/python')),
             ]
 
-            results = await PluginCommands.list_packages_by_runtime('pip')
+            results = await PackageCommands.list_by_runtime('pip')
 
         assert len(results) == NUM_RESOLVED_TAGS
         assert results[0].tag == '3.14'
@@ -1767,7 +1771,7 @@ class TestListPackagesByRuntime:
         mock_env.packages = AsyncMock(return_value=[Package(name='foo', version='1.0')])
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.package._discover_environments', return_value={'pip': mock_env}),
             patch.object(Builder, 'resolve_all_runtime_executables', new_callable=AsyncMock) as mock_resolve,
         ):
             mock_resolve.return_value = [
@@ -1775,7 +1779,7 @@ class TestListPackagesByRuntime:
                 ResolvedRuntime(provider='pim', tag='3.12', kind='python', executable=Path('/python/3.12/python')),
             ]
 
-            results = await PluginCommands.list_packages_by_runtime('pip')
+            results = await PackageCommands.list_by_runtime('pip')
 
         assert len(results) == 1
         assert results[0].tag == '3.14'
@@ -1787,19 +1791,19 @@ class TestListPackagesByRuntime:
         # Not a RuntimeConsumer — no consumed_runtime_kind
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'brew': mock_env}),
+            patch('porringer.backend.command.package._discover_environments', return_value={'brew': mock_env}),
             pytest.raises(PluginError, match='not a RuntimeConsumer'),
         ):
-            await PluginCommands.list_packages_by_runtime('brew')
+            await PackageCommands.list_by_runtime('brew')
 
     @staticmethod
     async def test_missing_plugin_raises() -> None:
         """A non-existent plugin name raises PluginError."""
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={}),
+            patch('porringer.backend.command.package._discover_environments', return_value={}),
             pytest.raises(PluginError, match='not found'),
         ):
-            await PluginCommands.list_packages_by_runtime('nonexistent')
+            await PackageCommands.list_by_runtime('nonexistent')
 
     @staticmethod
     async def test_empty_when_no_matching_runtimes() -> None:
@@ -1808,7 +1812,7 @@ class TestListPackagesByRuntime:
         mock_env.consumed_runtime_kind = MagicMock(return_value='python')
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.package._discover_environments', return_value={'pip': mock_env}),
             patch.object(
                 Builder,
                 'resolve_all_runtime_executables',
@@ -1816,7 +1820,7 @@ class TestListPackagesByRuntime:
                 return_value=[],
             ),
         ):
-            results = await PluginCommands.list_packages_by_runtime('pip')
+            results = await PackageCommands.list_by_runtime('pip')
 
         assert results == []
 
@@ -1835,7 +1839,7 @@ class TestListPackagesByRuntime:
         )
 
         with (
-            patch.object(PluginCommands, '_discover_environments') as mock_discover,
+            patch('porringer.backend.command.package._discover_environments') as mock_discover,
             patch.object(
                 Builder,
                 'resolve_all_runtime_executables',
@@ -1843,7 +1847,7 @@ class TestListPackagesByRuntime:
                 return_value=[],
             ),
         ):
-            results = await PluginCommands.list_packages_by_runtime('pip', plugins=discovered)
+            results = await PackageCommands.list_by_runtime('pip', plugins=discovered)
 
         mock_discover.assert_not_called()
         assert results == []
@@ -1857,7 +1861,7 @@ class TestListPackagesByRuntime:
         mock_env.packages = AsyncMock(return_value=[Package(name='pkg', version='1.0')])
 
         with (
-            patch.object(PluginCommands, '_discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.package._discover_environments', return_value={'pip': mock_env}),
             patch.object(Builder, 'resolve_all_runtime_executables', new_callable=AsyncMock) as mock_resolve,
         ):
             mock_resolve.return_value = [
@@ -1866,7 +1870,7 @@ class TestListPackagesByRuntime:
                 ResolvedRuntime(provider='pim', tag='3.12', kind='python', executable=Path('/python/3.12/python')),
             ]
 
-            results = await PluginCommands.list_packages_by_runtime('pip')
+            results = await PackageCommands.list_by_runtime('pip')
 
         assert len(results) == NUM_CONCURRENT_RUNTIMES
         assert mock_env.packages.call_count == NUM_CONCURRENT_RUNTIMES

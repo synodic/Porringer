@@ -48,8 +48,8 @@ class RuntimePackageResult:
     """Packages installed under a single resolved runtime.
 
     Returned by
-    :meth:`PluginCommands.list_packages_by_runtime
-    <porringer.backend.command.plugin.PluginCommands.list_packages_by_runtime>`
+    :meth:`PackageCommands.list_by_runtime
+    <porringer.backend.command.package.PackageCommands.list_by_runtime>`
     — one instance per successfully queried runtime tag.
 
     Attributes:

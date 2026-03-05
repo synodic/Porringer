@@ -10,6 +10,7 @@ from rich.console import Console
 from porringer.console.command.cache import app as cache_app
 from porringer.console.command.check import app as check_app
 from porringer.console.command.download import app as download_app
+from porringer.console.command.package import app as package_app
 from porringer.console.command.plugin import app as plugin_app
 from porringer.console.command.schema import app as schema_app
 from porringer.console.command.self import app as self_app
@@ -22,6 +23,7 @@ app = typer.Typer()
 app.add_typer(cache_app, name='cache')
 app.add_typer(check_app, name='check')
 app.add_typer(download_app, name='download')
+app.add_typer(package_app, name='package')
 app.add_typer(schema_app, name='schema')
 app.add_typer(sync_app, name='sync')
 app.add_typer(plugin_app, name='plugin')

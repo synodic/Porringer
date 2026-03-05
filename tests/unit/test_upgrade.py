@@ -1,27 +1,26 @@
-"""Tests for the imperative package upgrade feature (API.upgrade).
+"""Tests for the imperative package upgrade feature (PackageCommands.upgrade).
 
 Covers:
 - execute_package with SyncStrategy.LATEST (upgrade vs install routing)
-- API.upgrade() plugin validation, dry-run, and runtime_tag threading
-- API.upgrade() auto-resolves runtime_context from plugins
+- PackageCommands.upgrade() plugin validation, dry-run, and runtime_tag threading
+- PackageCommands.upgrade() auto-resolves runtime_context from plugins
 """
 
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from packaging.version import Version
 
-from porringer.api import API
 from porringer.backend.builder import Builder
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.core.execution import execute_package
+from porringer.backend.command.package import PackageCommands
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
-from porringer.schema import LocalConfiguration, SetupAction, SetupActionResult, SyncStrategy
+from porringer.schema import SetupAction, SetupActionResult, SyncStrategy
 from porringer.test.mock.environment import MockEnvironment
 
 _PY = Ecosystem('python')
@@ -138,38 +137,35 @@ class TestExecutePackageUpgrade:
 
 
 # ---------------------------------------------------------------------------
-# API.upgrade — plugin validation
+# PackageCommands.upgrade — plugin validation
 # ---------------------------------------------------------------------------
 
 
 class TestUpgradePluginValidation:
-    """Test that API.upgrade() validates plugin availability."""
+    """Test that PackageCommands.upgrade() validates plugin availability."""
 
     @staticmethod
     async def test_unknown_plugin_returns_error() -> None:
-        """API.upgrade with unknown plugin returns failure result."""
+        """PackageCommands.upgrade with unknown plugin returns failure result."""
         plugins = _make_plugins()
 
-        with patch('porringer.api.discover_all_plugins', return_value=plugins):
-            config = LocalConfiguration()
-            api = API(config)
-            result = await api.upgrade(
-                'nonexistent',
-                PackageRef.model_validate('requests'),
-                plugins=plugins,
-            )
+        result = await PackageCommands.upgrade(
+            'nonexistent',
+            PackageRef.model_validate('requests'),
+            plugins=plugins,
+        )
 
         assert result.success is False
         assert 'not available' in (result.message or '')
 
 
 # ---------------------------------------------------------------------------
-# API.upgrade — dry run
+# PackageCommands.upgrade — dry run
 # ---------------------------------------------------------------------------
 
 
 class TestUpgradeDryRun:
-    """Test that API.upgrade() dry_run resolves without executing."""
+    """Test that PackageCommands.upgrade() dry_run resolves without executing."""
 
     @staticmethod
     async def test_dry_run_installed_package() -> None:
@@ -180,13 +176,10 @@ class TestUpgradeDryRun:
         plugins = _make_plugins(environments=envs)
 
         with (
-            patch('porringer.api.discover_all_plugins', return_value=plugins),
             patch.object(type(env), 'ecosystem', return_value=_PY),
             patch.object(type(env), 'plugin_kind', return_value=PluginKind.PACKAGE),
         ):
-            config = LocalConfiguration()
-            api = API(config)
-            result = await api.upgrade(
+            result = await PackageCommands.upgrade(
                 'mock',
                 PackageRef.model_validate('requests'),
                 plugins=plugins,
@@ -205,13 +198,10 @@ class TestUpgradeDryRun:
         plugins = _make_plugins(environments=envs)
 
         with (
-            patch('porringer.api.discover_all_plugins', return_value=plugins),
             patch.object(type(env), 'ecosystem', return_value=_PY),
             patch.object(type(env), 'plugin_kind', return_value=PluginKind.PACKAGE),
         ):
-            config = LocalConfiguration()
-            api = API(config)
-            result = await api.upgrade(
+            result = await PackageCommands.upgrade(
                 'mock',
                 PackageRef.model_validate('requests'),
                 plugins=plugins,
@@ -224,12 +214,12 @@ class TestUpgradeDryRun:
 
 
 # ---------------------------------------------------------------------------
-# API.upgrade — runtime context auto-resolution
+# PackageCommands.upgrade — runtime context auto-resolution
 # ---------------------------------------------------------------------------
 
 
 class TestUpgradeAutoResolveRuntimeContext:
-    """API.upgrade() auto-resolves RuntimeContext when none is provided."""
+    """PackageCommands.upgrade() auto-resolves RuntimeContext when none is provided."""
 
     @staticmethod
     async def test_auto_resolves_when_none() -> None:
@@ -244,14 +234,12 @@ class TestUpgradeAutoResolveRuntimeContext:
         )
 
         with (
-            patch('porringer.api.discover_all_plugins', return_value=plugins),
+            patch('porringer.backend.command.package.discover_all_plugins', return_value=plugins),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx) as mock_resolve,
             patch.object(type(mock_env), 'ecosystem', return_value=_PY),
             patch.object(type(mock_env), 'plugin_kind', return_value=PluginKind.PACKAGE),
         ):
-            config = LocalConfiguration()
-            api = API(config)
-            result = await api.upgrade('mock', PackageRef.model_validate('requests'), dry_run=True)
+            result = await PackageCommands.upgrade('mock', PackageRef.model_validate('requests'), dry_run=True)
 
         mock_resolve.assert_called_once()
         assert result is not None
@@ -269,14 +257,12 @@ class TestUpgradeAutoResolveRuntimeContext:
         )
 
         with (
-            patch('porringer.api.discover_all_plugins', return_value=plugins),
+            patch('porringer.backend.command.package.discover_all_plugins', return_value=plugins),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock) as mock_resolve,
             patch.object(type(mock_env), 'ecosystem', return_value=_PY),
             patch.object(type(mock_env), 'plugin_kind', return_value=PluginKind.PACKAGE),
         ):
-            config = LocalConfiguration()
-            api = API(config)
-            result = await api.upgrade(
+            result = await PackageCommands.upgrade(
                 'mock',
                 PackageRef.model_validate('requests'),
                 runtime_context=ctx,
@@ -288,12 +274,12 @@ class TestUpgradeAutoResolveRuntimeContext:
 
 
 # ---------------------------------------------------------------------------
-# API.upgrade — runtime_tag parameter
+# PackageCommands.upgrade — runtime_tag parameter
 # ---------------------------------------------------------------------------
 
 
 class TestUpgradeRuntimeTag:
-    """Test that API.upgrade() threads runtime_tag through to the action."""
+    """Test that PackageCommands.upgrade() threads runtime_tag through to the action."""
 
     @staticmethod
     async def test_runtime_tag_set_on_action() -> None:
@@ -310,14 +296,11 @@ class TestUpgradeRuntimeTag:
             return SetupActionResult(action=action, success=True, message='captured')
 
         with (
-            patch('porringer.api.execute_package', side_effect=_capture_execute),
-            patch('porringer.api.discover_all_plugins', return_value=plugins),
+            patch('porringer.backend.command.package.execute_package', side_effect=_capture_execute),
             patch.object(type(env), 'ecosystem', return_value=_PY),
             patch.object(type(env), 'plugin_kind', return_value=PluginKind.PACKAGE),
         ):
-            config = LocalConfiguration()
-            api = API(config)
-            await api.upgrade(
+            await PackageCommands.upgrade(
                 'mock',
                 PackageRef.model_validate('requests'),
                 runtime_tag='3.11',

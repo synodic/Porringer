@@ -321,11 +321,8 @@ class TestConsoleCheckAsync:
     """Console check command properly awaits async plugin methods."""
 
     @staticmethod
-    def test_check_plugin_updates_is_async() -> None:
-        """``_check_plugin_updates`` is a coroutine function."""
-        from porringer.console.command.check import (  # noqa: PLC0415
-            _check_plugin_updates,  # noqa: PLC2701
-        )
+    def test_check_updates_is_async() -> None:
+        """``PackageCommands.check_updates`` is a coroutine function."""
+        from porringer.backend.command.package import PackageCommands  # noqa: PLC0415
 
-        # Verify _check_plugin_updates is a coroutine function
-        assert inspect.iscoroutinefunction(_check_plugin_updates)
+        assert inspect.iscoroutinefunction(PackageCommands.check_updates)
