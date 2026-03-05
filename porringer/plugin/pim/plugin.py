@@ -94,6 +94,42 @@ class PIMEnvironment(Environment, RuntimeProvider):
         ]
 
     @override
+    async def default_tag(self) -> str | None:
+        """Return the tag of the launcher's default Python runtime.
+
+        Runs ``py -c "..."`` **without** a version flag so the
+        launcher dispatches to its configured default interpreter.
+        The major.minor version of that interpreter is returned as
+        the tag (e.g. ``"3.14"``).
+
+        Returns:
+            A major.minor version tag, or ``None`` if the default
+            cannot be determined.
+        """
+        logger = logging.getLogger('porringer.pim.default_tag')
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                'py',
+                '-c',
+                'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ''
+                logger.debug('py (default) failed: %s', stderr)
+                return None
+            stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
+            if stdout:
+                return stdout
+        except FileNotFoundError:
+            logger.debug('py launcher not found')
+        except Exception as e:
+            logger.debug('default_tag failed: %s', e)
+        return None
+
+    @override
     async def resolve_executable(self, tag: str) -> Path | None:
         """Return the path to the Python interpreter for a managed runtime.
 

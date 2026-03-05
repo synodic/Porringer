@@ -37,7 +37,9 @@ class API:
 
     Provides namespace sub-APIs:
 
-    * ``api.plugin`` — plugin listing, package queries, install/uninstall.
+    * ``api.plugin`` — plugin listing, package queries (including
+      per-runtime queries via ``list_packages_by_runtime``),
+      install/uninstall.
     * ``api.sync``   — manifest loading, streaming execution, update checks.
     * ``api.cache``  — directory registration and validation.
 

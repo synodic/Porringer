@@ -51,6 +51,29 @@ class RuntimeContext:
         return self.executables.get(kind)
 
 
+@dataclass(slots=True)
+class ResolvedRuntime:
+    """A single resolved runtime executable.
+
+    Produced by :meth:`Builder.resolve_all_runtime_executables
+    <porringer.backend.builder.Builder.resolve_all_runtime_executables>`
+    for every successfully resolved tag across all runtime providers.
+
+    Attributes:
+        provider: Canonical name of the runtime-provider plugin
+            (e.g. ``"pim"``, ``"pyenv"``).
+        tag: The version tag that was resolved (e.g. ``"3.14"``,
+            ``"3.12-64"``).
+        kind: The runtime kind string (e.g. ``"python"``).
+        executable: Absolute path to the resolved interpreter.
+    """
+
+    provider: str
+    tag: str
+    kind: str
+    executable: Path
+
+
 # ---------------------------------------------------------------------------
 # Provider / consumer protocols
 # ---------------------------------------------------------------------------
@@ -120,6 +143,32 @@ class RuntimeProvider(Protocol):
         """
         ...
 
+    async def default_tag(self) -> str | None:
+        """Return the tag of the tool's currently configured default runtime.
+
+        When the underlying tool has a notion of "the active" or
+        "the default" runtime (e.g. ``pyenv global``, the ``py``
+        launcher's default lookup), this method should return the
+        corresponding version tag so that
+        :meth:`Builder.resolve_runtime_context
+        <porringer.backend.builder.Builder.resolve_runtime_context>`
+        can prefer it over the highest-version heuristic.
+
+        The default implementation returns ``None``, which causes the
+        builder to fall back to :meth:`available_tags` →
+        :meth:`sort_tags` → first-resolvable iteration.
+
+        Providers should override this when the tool exposes a
+        deterministic default (most runtime managers do).
+
+        Returns:
+            A version tag string (e.g. ``"3.14"``, ``"3.12-64"``),
+            or ``None`` if the tool has no default concept or the
+            default cannot be determined.
+        """
+        _ = self  # Instance method — subclasses override with self-dependent logic
+        return None
+
     def sort_tags(self, tags: list[str]) -> list[str]:
         """Filter and sort *tags* in descending order for this provider's ecosystem.
 
@@ -133,9 +182,9 @@ class RuntimeProvider(Protocol):
 
         :meth:`Builder.resolve_runtime_context
         <porringer.backend.builder.Builder.resolve_runtime_context>`
-        calls this after :meth:`available_tags` to obtain a
-        deterministic, version-ordered list before attempting
-        executable resolution.
+        calls this after :meth:`available_tags` as a fallback when
+        :meth:`default_tag` returns ``None`` or its tag cannot be
+        resolved.
 
         Args:
             tags: Raw version tag strings from :meth:`available_tags`.
