@@ -7,8 +7,8 @@ import warnings
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins
-from porringer.backend.command.core.execution import execute_uninstall
-from porringer.backend.command.core.resolution import ResolutionContext, resolve_uninstall_operation, resolved_to_result
+from porringer.backend.command.core.execution import execute_package, execute_uninstall
+from porringer.backend.command.core.resolution import ResolutionContext, resolve_operation, resolve_uninstall_operation, resolved_to_result
 from porringer.backend.command.plugin import PluginCommands
 from porringer.backend.command.self import check_self_updates
 from porringer.backend.command.sync import SyncCommands
@@ -26,6 +26,7 @@ from porringer.schema import (
     ProgressEvent,
     SetupAction,
     SetupActionResult,
+    SyncStrategy,
 )
 from porringer.utility.download import download_file
 
@@ -46,8 +47,8 @@ class API:
     * ``api.cache``  — directory registration and validation.
 
     Cross-cutting helpers live directly on the ``API`` class:
-    :meth:`discover_plugins`, :meth:`uninstall`, :meth:`download`,
-    :meth:`check_self_updates`.
+    :meth:`discover_plugins`, :meth:`upgrade`, :meth:`uninstall`,
+    :meth:`download`, :meth:`check_self_updates`.
     """
 
     def __init__(
@@ -172,6 +173,104 @@ class API:
         """
         logger.info(f'Downloading: {parameters.url}')
         return await download_file(parameters, progress_callback)
+
+    @staticmethod
+    async def upgrade(
+        plugin_name: str,
+        package: PackageRef,
+        *,
+        runtime_tag: str | None = None,
+        plugins: DiscoveredPlugins | None = None,
+        runtime_context: RuntimeContext | None = None,
+        dry_run: bool = False,
+    ) -> SetupActionResult:
+        """Upgrade (or install) a single package to its latest version.
+
+        Resolves the named plugin, checks whether the package is
+        already installed, and either upgrades it to the latest
+        allowed version or installs it if absent.  When ``dry_run``
+        is ``True``, only reports what *would* happen without
+        executing.
+
+        This is an imperative operation that operates outside the
+        manifest-driven sync flow.  It is intended for GUI clients
+        that wish to offer per-package upgrades, optionally scoped
+        to a specific runtime via *runtime_tag*.
+
+        Args:
+            plugin_name: The installer plugin name (e.g. ``"pipx"``,
+                ``"uv"``, ``"npm"``).
+            package: The package to upgrade.
+            runtime_tag: Optional runtime tag (e.g. ``"3.12"``) to
+                target a specific interpreter.  When provided, the
+                action's ``runtime_tag`` field is set and the
+                execution engine resolves the corresponding
+                interpreter path.
+            plugins: Pre-discovered plugins from :meth:`discover_plugins`.
+                When provided, plugin discovery is skipped and
+                ``runtime_context`` is extracted from
+                ``plugins.runtime_context`` if not explicitly supplied.
+            runtime_context: Optional resolved runtime paths.  When
+                provided, Python-ecosystem plugins use this to target
+                the correct interpreter instead of ``sys.executable``.
+                Overrides ``plugins.runtime_context`` when both are
+                given.
+            dry_run: When ``True``, resolve presence but do not execute.
+
+        Returns:
+            A ``SetupActionResult`` describing the outcome.
+        """
+        logger.debug(
+            'upgrade requested: plugin=%s package=%s runtime_tag=%s dry_run=%s',
+            plugin_name,
+            package.name,
+            runtime_tag,
+            dry_run,
+        )
+
+        if plugins is None:
+            plugins = await API.discover_plugins(use_cache=True, resolve_runtime=(runtime_context is None))
+
+        environments = plugins.environments
+
+        # Resolve runtime context: explicit > plugins.runtime_context
+        if runtime_context is None:
+            runtime_context = plugins.runtime_context
+
+        if plugin_name not in environments:
+            logger.warning("Plugin '%s' is not available for upgrade of '%s'", plugin_name, package.name)
+            return SetupActionResult(
+                action=SetupAction(description=f"Upgrade '{package.name}' via {plugin_name}"),
+                success=False,
+                message=f"Plugin '{plugin_name}' is not available",
+            )
+
+        environment = environments[plugin_name]
+        action = SetupAction(
+            description=f"Upgrade '{package.name}' via {plugin_name}",
+            kind=environment.plugin_kind(),
+            ecosystem=environment.ecosystem(),
+            installer=plugin_name,
+            package=package,
+            runtime_tag=runtime_tag,
+        )
+
+        ctx = ResolutionContext(runtime_context=runtime_context)
+
+        if dry_run:
+            resolved = await resolve_operation(action, environments, SyncStrategy.LATEST, ctx)
+            return resolved_to_result(resolved)
+
+        event_queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
+        result = await execute_package(action, environments, SyncStrategy.LATEST, event_queue, context=ctx)
+        logger.info(
+            'upgrade result: success=%s skipped=%s skip_reason=%s message=%s',
+            result.success,
+            result.skipped,
+            result.skip_reason,
+            result.message,
+        )
+        return result
 
     @staticmethod
     async def uninstall(
