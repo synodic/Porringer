@@ -434,7 +434,7 @@ class PackageCommands:
             plugins=plugins,
             runtime_context=runtime_context,
             dry_run=dry_run,
-            resolve_fn=lambda action, envs, ctx: resolve_uninstall_operation(action, envs, ctx),
+            resolve_fn=resolve_uninstall_operation,
             execute_fn=lambda action, envs, queue, ctx: execute_uninstall(action, envs, queue, context=ctx),
         )
 
