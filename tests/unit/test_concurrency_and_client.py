@@ -2,7 +2,7 @@
 
 Validates:
 1. ``max_concurrency`` field on ``SetupParameters``
-2. Semaphore bounding in ``_dry_run_package_actions``
+2. Semaphore bounding in ``dry_run_package_actions``
 3. Shared ``httpx.AsyncClient`` is threaded through the update-check chain
 4. Console ``check`` command properly awaits async methods
 """
@@ -17,12 +17,13 @@ import httpx
 from packaging.version import Version
 
 from porringer.backend.command.core.execution import (
-    _dry_run_package_actions,  # noqa: PLC2701
+    dry_run_package_actions,
 )
 from porringer.backend.command.core.resolution import (
     ResolutionContext,
     check_for_newer_version,
 )
+from porringer.backend.command.package import PackageCommands
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import (
@@ -152,7 +153,7 @@ class TestResolutionContextHttpClient:
 
 
 class TestDryRunConcurrencyBounding:
-    """``_dry_run_package_actions`` respects ``max_concurrency``."""
+    """``dry_run_package_actions`` respects ``max_concurrency``."""
 
     @staticmethod
     async def test_semaphore_limits_concurrency() -> None:
@@ -184,7 +185,7 @@ class TestDryRunConcurrencyBounding:
             'porringer.backend.command.core.execution.dry_run_action',
             side_effect=_counting_dry_run,
         ):
-            results = await _dry_run_package_actions(
+            results = await dry_run_package_actions(
                 actions,
                 environments,
                 asyncio.Queue(),
@@ -215,7 +216,7 @@ class TestDryRunConcurrencyBounding:
             'porringer.backend.command.core.execution.dry_run_action',
             side_effect=_mock_dry_run,
         ):
-            results = await _dry_run_package_actions(
+            results = await dry_run_package_actions(
                 actions,
                 environments,
                 asyncio.Queue(),
@@ -246,7 +247,7 @@ class TestSharedHttpClient:
             captured_params.append(params)
             return [Package(name='ruff', version='0.9.0')]
 
-        env.check_updates = _spy_check_updates  # type: ignore[assignment]
+        env.check_updates = _spy_check_updates
 
         result = await check_for_newer_version(
             env,
@@ -269,7 +270,7 @@ class TestSharedHttpClient:
             captured_params.append(params)
             return [Package(name='ruff', version='0.9.0')]
 
-        env.check_updates = _spy_check_updates  # type: ignore[assignment]
+        env.check_updates = _spy_check_updates
 
         await check_for_newer_version(
             env,
@@ -298,7 +299,7 @@ class TestSharedHttpClient:
             'porringer.backend.command.core.execution.dry_run_action',
             side_effect=_capture_client,
         ):
-            await _dry_run_package_actions(
+            await dry_run_package_actions(
                 actions,
                 environments,
                 asyncio.Queue(),
@@ -323,6 +324,4 @@ class TestConsoleCheckAsync:
     @staticmethod
     def test_check_updates_is_async() -> None:
         """``PackageCommands.check_updates`` is a coroutine function."""
-        from porringer.backend.command.package import PackageCommands  # noqa: PLC0415
-
         assert inspect.iscoroutinefunction(PackageCommands.check_updates)

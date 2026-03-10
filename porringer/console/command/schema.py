@@ -51,7 +51,7 @@ def schema(
             configuration.console.print(f'Schema written to {output}')
         else:
             # Print raw JSON to stdout (not via Rich) so it can be piped
-            print(schema_json)  # noqa: T201
+            print(schema_json)
 
     except Exception as e:
         configuration.console.print(f'[red]Error:[/red] Failed to generate schema: {e}')

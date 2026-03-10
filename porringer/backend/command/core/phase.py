@@ -98,11 +98,11 @@ class _PhaseBase:
         return self._kind
 
     # Default no-ops — subclasses override as needed.
-    async def refresh(self, state: ExecutionState) -> None:  # noqa: D102
-        pass
+    async def refresh(self, state: ExecutionState) -> None:
+        """Re-discover plugins (no-op by default)."""
 
-    async def post_execute(self, state: ExecutionState) -> None:  # noqa: D102
-        pass
+    async def post_execute(self, state: ExecutionState) -> None:
+        """Run post-execution hooks (no-op by default)."""
 
 
 class RuntimePhase(_PhaseBase):
@@ -110,7 +110,8 @@ class RuntimePhase(_PhaseBase):
 
     _kind = PluginKind.RUNTIME
 
-    async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
+    async def execute(self, state: ExecutionState) -> PhaseResult:
+        """Install and resolve language runtimes."""
         results, ok = await state.run_package_actions(state.phases[self._kind])
         return PhaseResult(results=results, should_continue=ok)
 
@@ -126,7 +127,8 @@ class PackagePhase(_PhaseBase):
 
     _kind = PluginKind.PACKAGE
 
-    async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
+    async def execute(self, state: ExecutionState) -> PhaseResult:
+        """Install packages into the current environment."""
         results, ok = await state.run_package_actions(state.phases[self._kind])
         return PhaseResult(results=results, should_continue=ok)
 
@@ -141,7 +143,8 @@ class ToolPhase(_PhaseBase):
         """Re-discover plugins so that tools installed in Phase 2a become available."""
         await asyncio.to_thread(state.refresh_all_plugins)
 
-    async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
+    async def execute(self, state: ExecutionState) -> PhaseResult:
+        """Install isolated CLI tools."""
         results, ok = await state.run_package_actions(state.phases[self._kind])
         return PhaseResult(results=results, should_continue=ok)
 
@@ -156,7 +159,8 @@ class ProjectPhase(_PhaseBase):
         """Re-discover all plugins so that project environments installed in earlier phases are available."""
         await asyncio.to_thread(state.refresh_all_plugins)
 
-    async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
+    async def execute(self, state: ExecutionState) -> PhaseResult:
+        """Run project sync actions."""
         results = await state.run_project_phase(state.phases[self._kind])
         failed = any(not r.success and not r.skipped for r in results)
         ok = not (failed and state.parameters.fail_fast)
@@ -173,7 +177,8 @@ class ScmPhase(_PhaseBase):
         """Re-discover plugins so that SCM tools installed in earlier phases are available."""
         await asyncio.to_thread(state.refresh_all_plugins)
 
-    async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
+    async def execute(self, state: ExecutionState) -> PhaseResult:
+        """Clone source-control repositories."""
         results = await state.run_scm_actions(state.phases[self._kind])
         failed = any(not r.success and not r.skipped for r in results)
         ok = not (failed and state.parameters.fail_fast)
@@ -185,7 +190,8 @@ class CommandPhase(_PhaseBase):
 
     _kind = None
 
-    async def execute(self, state: ExecutionState) -> PhaseResult:  # noqa: D102
+    async def execute(self, state: ExecutionState) -> PhaseResult:
+        """Run post-sync shell commands."""
         results = await state.run_command_actions(state.phases[self._kind])
         failed = any(not r.success and not r.skipped for r in results)
         ok = not (failed and state.parameters.fail_fast)

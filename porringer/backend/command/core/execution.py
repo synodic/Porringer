@@ -828,7 +828,7 @@ async def execute_package_actions(
     """
     if parameters.dry_run:
         return (
-            await _dry_run_package_actions(
+            await dry_run_package_actions(
                 package_actions,
                 environments,
                 event_queue,
@@ -887,7 +887,7 @@ async def execute_package_actions(
     return results, should_continue
 
 
-async def _dry_run_package_actions(
+async def dry_run_package_actions(
     package_actions: list[SetupAction],
     environments: dict[str, Environment],
     event_queue: asyncio.Queue[ProgressEvent | None],

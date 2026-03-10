@@ -76,13 +76,13 @@ def _apply_mock_packages(
     cached = _cached_pip_packages
     session_plugins = _session_plugins
 
-    async def _fast_packages(self, *, project_path=None, runtime_context=None):  # noqa: ARG001
+    async def _fast_packages(self, *, project_path=None, runtime_context=None):
         return cached
 
-    async def _noop_check_updates(self, params):  # noqa: ARG001
+    async def _noop_check_updates(self, params):
         return []
 
-    def _fast_discover(*, use_cache=False):  # noqa: ARG001
+    def _fast_discover(*, use_cache=False):
         return session_plugins.copy()
 
     with (

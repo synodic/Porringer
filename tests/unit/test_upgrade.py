@@ -63,7 +63,7 @@ def _make_mock_env(*, installed: list[Package] | None = None) -> MockEnvironment
         del project_path, runtime_context
         return pkgs
 
-    env.packages = _packages  # type: ignore[assignment]
+    env.packages = _packages
     return env
 
 
@@ -79,14 +79,14 @@ class TestExecutePackageUpgrade:
     async def test_upgrades_installed_package() -> None:
         """execute_package with LATEST calls upgrade on installed package."""
         env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
-        env.upgrade = AsyncMock(return_value=Package(name='requests', version='2.32.0'))  # type: ignore[assignment]
+        env.upgrade = AsyncMock(return_value=Package(name='requests', version='2.32.0'))
 
         # check_updates must report a newer version so resolve_operation
         # produces an Upgrade rather than Skip(ALREADY_LATEST).
         async def _check_updates(params):
             return [Package(name='requests', version='2.32.0')]
 
-        env.check_updates = _check_updates  # type: ignore[assignment]
+        env.check_updates = _check_updates
         envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action()
@@ -98,7 +98,7 @@ class TestExecutePackageUpgrade:
     async def test_installs_missing_package() -> None:
         """execute_package with LATEST installs when package is not present."""
         env = _make_mock_env(installed=[])
-        env.install = AsyncMock(return_value=Package(name='requests', version='2.32.0'))  # type: ignore[assignment]
+        env.install = AsyncMock(return_value=Package(name='requests', version='2.32.0'))
         envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action()
@@ -123,7 +123,7 @@ class TestExecutePackageUpgrade:
     async def test_runtime_tag_flows_through() -> None:
         """execute_package respects runtime_tag on the action."""
         env = _make_mock_env(installed=[])
-        env.install = AsyncMock(return_value=Package(name='requests', version='2.32.0'))  # type: ignore[assignment]
+        env.install = AsyncMock(return_value=Package(name='requests', version='2.32.0'))
         envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action(runtime_tag='3.12')
@@ -171,7 +171,7 @@ class TestUpgradeDryRun:
     async def test_dry_run_installed_package() -> None:
         """dry_run=True resolves operation but does not execute."""
         env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
-        env.upgrade = AsyncMock()  # type: ignore[assignment]
+        env.upgrade = AsyncMock()
         envs: dict[str, Environment] = {'mock': env}
         plugins = _make_plugins(environments=envs)
 

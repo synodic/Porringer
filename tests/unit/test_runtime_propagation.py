@@ -414,7 +414,7 @@ class TestCacheMutationRegression:
         # Runtime is recorded on the state's context …
         assert state.runtime_context.get('python') == _MOCK_RUNTIME_EXE
         # … but the plugin instance itself has no mutable runtime state.
-        assert not hasattr(consumer, 'runtime_executable') or consumer.runtime_executable is None  # type: ignore[attr-defined]
+        assert not hasattr(consumer, 'runtime_executable') or consumer.runtime_executable is None
 
     @staticmethod
     async def test_second_state_with_same_plugins_gets_clean_context() -> None:
