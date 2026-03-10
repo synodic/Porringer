@@ -180,6 +180,6 @@ class RuntimeProviderUnitTests[T: Environment](EnvironmentUnitTests[T], RuntimeP
     def test_provided_runtime_kind_is_nonempty(plugin_type: type[T]) -> None:
         """provided_runtime_kind() must return a non-empty string."""
         assert hasattr(plugin_type, 'provided_runtime_kind')
-        kind = plugin_type.provided_runtime_kind()  # type: ignore[attr-defined]
+        kind = plugin_type.provided_runtime_kind()
         assert isinstance(kind, str)
         assert len(kind) > 0

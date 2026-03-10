@@ -485,7 +485,6 @@ async def execute_package(
         ctx = ResolutionContext(
             project_path=ctx.project_path,
             project_environments=ctx.project_environments,
-            detect_updates=ctx.detect_updates,
             http_client=ctx.http_client,
             package_cache=package_cache,
             runtime_context=ctx.runtime_context,
@@ -503,7 +502,6 @@ async def execute_package(
         ctx = ResolutionContext(
             project_path=ctx.project_path,
             project_environments=ctx.project_environments,
-            detect_updates=ctx.detect_updates,
             http_client=ctx.http_client,
             package_cache=ctx.package_cache,
             runtime_context=override_ctx,
@@ -624,7 +622,6 @@ async def execute_uninstall(
         ctx = ResolutionContext(
             project_path=ctx.project_path,
             project_environments=ctx.project_environments,
-            detect_updates=ctx.detect_updates,
             http_client=ctx.http_client,
             package_cache=package_cache,
             runtime_context=ctx.runtime_context,
@@ -831,7 +828,7 @@ async def execute_package_actions(
     """
     if parameters.dry_run:
         return (
-            await _dry_run_package_actions(
+            await dry_run_package_actions(
                 package_actions,
                 environments,
                 event_queue,
@@ -849,35 +846,48 @@ async def execute_package_actions(
     # installer.  Invalidated by execute_package after successful mutations.
     cache = PackageCache()
 
-    # Execute parallel actions concurrently
-    if parallel_actions:
-        parallel_results, should_continue = await _run_parallel_packages(
-            parallel_actions,
+    ctx = context or ResolutionContext()
+
+    # Shared HTTP client — resolution now always checks for upstream
+    # updates, so a pooled connection avoids per-action TCP overhead.
+    async with httpx.AsyncClient(timeout=10.0) as shared_client:
+        enriched = ResolutionContext(
+            project_path=ctx.project_path,
+            project_environments=ctx.project_environments,
+            http_client=shared_client,
+            package_cache=cache,
+            runtime_context=ctx.runtime_context,
+        )
+
+        # Execute parallel actions concurrently
+        if parallel_actions:
+            parallel_results, should_continue = await _run_parallel_packages(
+                parallel_actions,
+                environments,
+                parameters,
+                event_queue,
+                enriched,
+                package_cache=cache,
+            )
+            results.extend(parallel_results)
+            if not should_continue:
+                return results, False
+
+        # Execute sequential actions one at a time
+        sequential_results, should_continue = await _run_sequential_packages(
+            sequential_actions,
             environments,
             parameters,
             event_queue,
-            context,
+            enriched,
             package_cache=cache,
         )
-        results.extend(parallel_results)
-        if not should_continue:
-            return results, False
-
-    # Execute sequential actions one at a time
-    sequential_results, should_continue = await _run_sequential_packages(
-        sequential_actions,
-        environments,
-        parameters,
-        event_queue,
-        context,
-        package_cache=cache,
-    )
-    results.extend(sequential_results)
+        results.extend(sequential_results)
 
     return results, should_continue
 
 
-async def _dry_run_package_actions(
+async def dry_run_package_actions(
     package_actions: list[SetupAction],
     environments: dict[str, Environment],
     event_queue: asyncio.Queue[ProgressEvent | None],

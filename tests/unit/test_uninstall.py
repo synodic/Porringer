@@ -75,7 +75,7 @@ def _make_mock_env(*, installed: list[Package] | None = None) -> MockEnvironment
         del project_path, runtime_context
         return pkgs
 
-    env.packages = _packages  # type: ignore[assignment]
+    env.packages = _packages
     return env
 
 
@@ -216,7 +216,7 @@ class TestExecuteUninstall:
         """execute_uninstall calls uninstall on installed package."""
         env = _make_mock_env(installed=[Package(name='requests', version='2.31.0')])
         # Patch uninstall to verify it's called
-        env.uninstall = AsyncMock(return_value=Package(name='requests', version=None))  # type: ignore[assignment]
+        env.uninstall = AsyncMock(return_value=Package(name='requests', version=None))
         envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action()

@@ -32,14 +32,25 @@ class Install:
 
     ``reason`` distinguishes a fresh install from an
     extras-ensuring re-run of the same install command.
+
+    ``installed_version`` is populated when ``reason`` is
+    ``ENSURE_EXTRAS`` — the package is already present.
     """
 
     reason: InstallReason = InstallReason.NOT_INSTALLED
+    installed_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Upgrade:
-    """Resolved operation: upgrade a package to a newer version."""
+    """Resolved operation: upgrade a package to a newer version.
+
+    Version metadata is carried so that both the dry-run reporter
+    and the real execution path can surface it on the result.
+    """
+
+    installed_version: str | None = None
+    available_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,14 +248,7 @@ class SetupParameters(BaseModel):
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
     dry_run: bool = Field(default=False, description='Preview actions without executing them')
     strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal, latest, or exact')
-    detect_updates: bool = Field(
-        default=False,
-        description=(
-            'When True and dry_run is True, installed packages are checked '
-            'for newer upstream versions via each plugin\u2019s native tooling. '
-            'Adds network latency; the GUI sets this explicitly.'
-        ),
-    )
+
     prerelease_packages: set[str] | None = Field(
         default=None,
         description=(

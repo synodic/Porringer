@@ -1309,27 +1309,27 @@ class TestSortTags:
             return []
 
         @override
-        def install_command(self, package, **kw):  # type: ignore[override]
+        def install_command(self, package, **kw):
             return []
 
         @override
-        def upgrade_command(self, package, **kw):  # type: ignore[override]
+        def upgrade_command(self, package, **kw):
             return []
 
         @override
-        def uninstall_command(self, package, **kw):  # type: ignore[override]
+        def uninstall_command(self, package, **kw):
             return []
 
         @override
-        async def packages(self, **kw):  # type: ignore[override]
+        async def packages(self, **kw):
             return []
 
         @override
-        async def check_updates(self, params):  # type: ignore[override]
+        async def check_updates(self, params):
             return []
 
         @staticmethod
-        def dependencies() -> list:  # type: ignore[override]
+        def dependencies() -> list:
             return []
 
         @property

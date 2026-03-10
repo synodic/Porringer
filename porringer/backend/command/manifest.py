@@ -57,7 +57,7 @@ NATIVE_MANIFEST = 'porringer.json'
 # Manifest contribution cache — invalidated alongside the plugin scan cache
 # ---------------------------------------------------------------------------
 
-_manifest_contributions: tuple[ManifestContribution, ...] | None = None
+_manifest_contributions: dict[str, tuple[ManifestContribution, ...]] = {}
 
 
 def invalidate_manifest_cache() -> None:
@@ -66,8 +66,7 @@ def invalidate_manifest_cache() -> None:
     Called automatically when :func:`invalidate_plugin_cache` fires
     (via the registered hook).  Can also be called directly.
     """
-    global _manifest_contributions  # noqa: PLW0603
-    _manifest_contributions = None
+    _manifest_contributions.pop('value', None)
 
 
 # Wire into the plugin scan invalidation so that newly installed
@@ -90,9 +89,8 @@ def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
     Returns:
         Unique ``ManifestContribution`` instances contributed by plugins.
     """
-    global _manifest_contributions  # noqa: PLW0603
-    if _manifest_contributions is not None:
-        return _manifest_contributions
+    if 'value' in _manifest_contributions:
+        return _manifest_contributions['value']
 
     seen_filenames: set[str] = set()
     contributions: list[ManifestContribution] = []
@@ -106,8 +104,9 @@ def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
                 seen_filenames.add(contrib.filename)
                 contributions.append(contrib)
 
-    _manifest_contributions = tuple(contributions)
-    return _manifest_contributions
+    result = tuple(contributions)
+    _manifest_contributions['value'] = result
+    return result
 
 
 def manifest_filenames() -> tuple[str, ...]:

@@ -59,7 +59,7 @@ async def dry_run_action(
             used for SCM clone presence detection.
         working_dir: Working directory (manifest location) for SCM checks.
         parameters: Full setup parameters.  When provided, ``strategy``
-            and ``detect_updates`` are read from it.  When ``None``,
+            is read from it.  When ``None``,
             ``SyncStrategy.MINIMAL`` is used.
 
     Returns:
@@ -186,7 +186,6 @@ async def _dry_run_package_action(
     decision and maps the result via :func:`resolved_to_result`.
     """
     strategy = parameters.strategy if parameters else SyncStrategy.MINIMAL
-    detect_updates = parameters.detect_updates if parameters else False
 
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=True)
@@ -196,7 +195,6 @@ async def _dry_run_package_action(
     ctx = ResolutionContext(
         project_path=ctx.project_path,
         project_environments=ctx.project_environments,
-        detect_updates=detect_updates,
         http_client=ctx.http_client,
         package_cache=ctx.package_cache,
         runtime_context=ctx.runtime_context,

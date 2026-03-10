@@ -27,7 +27,7 @@ if sys.platform == 'win32':
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
-_synced = False
+_state = {'synced': False}
 
 
 # ---------------------------------------------------------------------------
@@ -126,21 +126,19 @@ def ensure_system_path() -> None:
     Subsequent calls return immediately.  It is safe to call from any
     thread.
     """
-    global _synced  # noqa: PLW0603
-
     # Fast path: already synchronized.
-    if _synced:
+    if _state['synced']:
         return
 
     with _lock:
         # Double-check under lock.
-        if _synced:
+        if _state['synced']:
             return
 
         new_dirs = read_registry_path() if os.name == 'nt' else probe_unix_paths()
 
         if not new_dirs:
-            _synced = True
+            _state['synced'] = True
             return
 
         current = os.environ.get('PATH', '')
@@ -158,7 +156,7 @@ def ensure_system_path() -> None:
         else:
             logger.debug('System PATH already in sync')
 
-        _synced = True
+        _state['synced'] = True
 
 
 def reset_sync_state() -> None:
@@ -167,6 +165,5 @@ def reset_sync_state() -> None:
     Intended for testing and for long-running processes that want to
     periodically re-synchronize (e.g. after a tool install phase).
     """
-    global _synced  # noqa: PLW0603
     with _lock:
-        _synced = False
+        _state['synced'] = False
