@@ -65,8 +65,8 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
     execution paths so that the translation lives in one place.
 
     For :class:`Skip` operations the result carries version metadata
-    and the skip reason.  For all other operations the result reports
-    success with an optional message.
+    and the skip reason.  For :class:`Upgrade` and :class:`Install`
+    operations the result carries version metadata when available.
     """
     match resolved.operation:
         case Skip(reason=reason, installed_version=iv, available_version=av):
@@ -79,6 +79,21 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
                 message=resolved.message,
                 installed_version=iv,
                 available_version=av,
+            )
+        case Upgrade(installed_version=iv, available_version=av):
+            return SetupActionResult(
+                action=resolved.action,
+                success=True,
+                message=resolved.message,
+                installed_version=iv,
+                available_version=av,
+            )
+        case Install(installed_version=iv):
+            return SetupActionResult(
+                action=resolved.action,
+                success=True,
+                message=resolved.message,
+                installed_version=iv,
             )
         case _:
             return SetupActionResult(
@@ -204,9 +219,6 @@ class ResolutionContext:
     project_environments: dict[str, ProjectEnvironment] | None = None
     """Dict of project-environment plugins, used to look up
     ``PluginManager`` instances for plugin-target actions."""
-    detect_updates: bool = False
-    """When ``True`` and the package is already installed under
-    ``MINIMAL`` strategy, check for newer upstream versions."""
     http_client: httpx.AsyncClient | None = None
     """Shared ``httpx.AsyncClient`` for connection pooling across
     concurrent update checks.  ``None`` means each check creates
@@ -302,7 +314,6 @@ async def _resolve_plugin_operation(
         action=action,
         strategy=strategy,
         presence=presence,
-        detect_updates=ctx.detect_updates,
         plugin_manager=manager,
         http_client=ctx.http_client,
         runtime_context=ctx.runtime_context,
@@ -351,7 +362,6 @@ async def _resolve_package_operation(
         action=action,
         strategy=strategy,
         presence=presence,
-        detect_updates=ctx.detect_updates,
         http_client=ctx.http_client,
         runtime_context=ctx.runtime_context,
     )
@@ -400,7 +410,10 @@ async def _resolve_latest_installed(
                 pkg_name = action.package.name if action.package else ''
                 return ResolvedOperation(
                     action=action,
-                    operation=Upgrade(),
+                    operation=Upgrade(
+                        installed_version=installed_ver,
+                        available_version=newer,
+                    ),
                     message=f'{pkg_name} {installed_ver} → {newer}',
                     plugin_manager=plugin_manager,
                 )
@@ -408,7 +421,10 @@ async def _resolve_latest_installed(
             if has_extras:
                 return ResolvedOperation(
                     action=action,
-                    operation=Install(reason=InstallReason.ENSURE_EXTRAS),
+                    operation=Install(
+                        reason=InstallReason.ENSURE_EXTRAS,
+                        installed_version=installed_ver,
+                    ),
                     message='ensuring extras',
                     plugin_manager=plugin_manager,
                 )
@@ -437,7 +453,6 @@ async def _apply_strategy(
     action: SetupAction,
     strategy: SyncStrategy,
     presence: _PresenceResult,
-    detect_updates: bool,
     plugin_manager: PluginManager | None = None,
     http_client: httpx.AsyncClient | None = None,
     runtime_context: RuntimeContext | None = None,
@@ -447,6 +462,10 @@ async def _apply_strategy(
     This is the single source of truth for the install/upgrade/skip
     decision.  Both normal packages and plugin-management actions
     share this logic.
+
+    When an already-installed package is skipped under MINIMAL
+    strategy, an upstream version check is always performed so that
+    callers receive populated version metadata.
     """
     installed_ver = presence.matched.version if presence.matched else None
     has_extras = action.package is not None and bool(action.package.extras)
@@ -459,17 +478,20 @@ async def _apply_strategy(
             if has_extras:
                 return ResolvedOperation(
                     action=action,
-                    operation=Install(reason=InstallReason.ENSURE_EXTRAS),
+                    operation=Install(
+                        reason=InstallReason.ENSURE_EXTRAS,
+                        installed_version=installed_ver,
+                    ),
                     message='ensuring extras',
                     plugin_manager=plugin_manager,
                 )
 
-            # Check for updates if requested (dry-run feature)
+            # Always check for updates so version metadata is populated
             skip_reason = SkipReason.ALREADY_INSTALLED
             available_ver: str | None = None
             msg: str | None = presence.detail
 
-            if detect_updates and presence.env_for_updates is not None:
+            if presence.env_for_updates is not None:
                 try:
                     newer = await check_for_newer_version(
                         presence.env_for_updates,
