@@ -195,11 +195,10 @@ def _format_cli_command(result: SetupActionResult) -> str:
     Returns:
         Formatted command string with arrow prefix.
     """
-    action = result.action
-    if action.cli_command:
-        return ' '.join(action.cli_command)
+    if result.cli_command:
+        return ' '.join(result.cli_command)
     # Fallback to description if no CLI command
-    return action.description
+    return result.action.description
 
 
 def _display_summary(

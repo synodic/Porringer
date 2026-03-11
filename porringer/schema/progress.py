@@ -74,6 +74,7 @@ class ProgressEvent:
     failed_path: tuple[Path, str] | None = None
     plugin_names: list[str] | None = None
     plugin_availability: dict[str, bool] | None = None
+    action_index: int | None = None
 
 
 @dataclass(slots=True)

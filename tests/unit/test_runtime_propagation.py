@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 from packaging.version import Version
 
-from porringer.backend.command.core.action_builder import PHASE_ORDER
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.core.execution import ExecutionState
 from porringer.backend.command.core.phase import PackagePhase, ToolPhase
@@ -213,9 +212,6 @@ def _make_state(
 ) -> ExecutionState:
     """Build a minimal ExecutionState for testing."""
     actions = runtime_actions or []
-    phases: dict[PluginKind | None, list[SetupAction]] = {k: [] for k in PHASE_ORDER}
-    if runtime_actions:
-        phases[PluginKind.RUNTIME] = runtime_actions
 
     plugins = DiscoveredPlugins(
         environments=environments or {},
@@ -229,7 +225,6 @@ def _make_state(
 
     return ExecutionState(
         actions=actions,
-        phases=phases,
         plugins=plugins,
         parameters=SetupParameters(),
         event_queue=asyncio.Queue(),

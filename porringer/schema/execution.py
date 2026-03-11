@@ -141,7 +141,7 @@ class SkipReason(Enum):
     ALREADY_LATEST = auto()
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class SetupAction:
     """A single action to perform during setup.
 
@@ -158,6 +158,8 @@ class SetupAction:
     tool via its native ``PluginManager`` (e.g.
     ``pdm self add cppython``).
 
+    Frozen and hashable — can be used as dict keys and in sets.
+
     Args:
         description: Human-readable description of the action.
         kind: The plugin kind, or `None` for post-sync commands.
@@ -166,7 +168,6 @@ class SetupAction:
         package: The package reference (for PACKAGE/TOOL/RUNTIME/SCM).
         plugin_target: The parent tool for plugin actions, or `None`.
         command: The command to run (for post-sync commands).
-        cli_command: The actual CLI command (for display purposes).
         package_description: Optional per-package description from the manifest.
         include_prereleases: Per-package opt-in for pre-release update detection.
     """
@@ -177,8 +178,7 @@ class SetupAction:
     installer: str | None = None
     package: PackageRef | None = None
     plugin_target: PackageRef | None = None
-    command: list[str] | None = None
-    cli_command: list[str] | None = None
+    command: tuple[str, ...] | None = None
     package_description: str | None = None
     include_prereleases: bool = False
     runtime_tag: str | None = None
@@ -207,6 +207,7 @@ class SetupActionResult:
     skip_reason: SkipReason | None = None
     installed_version: str | None = None
     available_version: str | None = None
+    cli_command: tuple[str, ...] | None = None
 
 
 class SyncStrategy(Enum):

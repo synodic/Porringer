@@ -5,6 +5,7 @@ version fields on ``SetupActionResult``, and version propagation on
 ``Upgrade`` results.
 """
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -294,8 +295,7 @@ class TestDryRunUpdateAvailable:
     @staticmethod
     async def test_per_action_prereleases_forwarded() -> None:
         """Per-action include_prereleases is threaded to check_updates."""
-        action = _make_action()
-        action.include_prereleases = True
+        action = replace(_make_action(), include_prereleases=True)
         env = _make_env(
             installed=[Package(name='ruff', version='0.8.0')],
             updates=[Package(name='ruff', version='0.9.0a1')],
@@ -665,7 +665,7 @@ class TestPrereleasePackagesOverride:
         if params.prerelease_packages:
             overrides = {n.lower() for n in params.prerelease_packages}
             if action.package is not None and action.package.name.lower() in overrides:
-                action.include_prereleases = True
+                action = replace(action, include_prereleases=True)
 
         assert action.include_prereleases
 
@@ -684,7 +684,7 @@ class TestPrereleasePackagesOverride:
         if params.prerelease_packages:
             overrides = {n.lower() for n in params.prerelease_packages}
             if action.package is not None and action.package.name.lower() in overrides:
-                action.include_prereleases = True
+                action = replace(action, include_prereleases=True)
         assert action.include_prereleases is True
 
     @staticmethod
@@ -695,7 +695,7 @@ class TestPrereleasePackagesOverride:
         if params.prerelease_packages:
             overrides = {n.lower() for n in params.prerelease_packages}
             if action.package is not None and action.package.name.lower() in overrides:
-                action.include_prereleases = True
+                action = replace(action, include_prereleases=True)
         assert action.include_prereleases is False
 
     @staticmethod
@@ -709,7 +709,7 @@ class TestPrereleasePackagesOverride:
         envs = {'pip': env}
 
         # Apply override (mirrors _load_manifests logic)
-        action.include_prereleases = True
+        action = replace(action, include_prereleases=True)
 
         params = SetupParameters(dry_run=True)
         result = await dry_run_action(action, envs, parameters=params)

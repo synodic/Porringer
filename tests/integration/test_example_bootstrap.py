@@ -82,7 +82,7 @@ class TestBootstrapPreview:
         """A RUN_COMMAND action for `pdm install` should be in the plan."""
         command_actions = [a for a in preview.actions if a.kind is None]
         assert len(command_actions) == 1
-        assert command_actions[0].command == ['pdm', 'install']
+        assert command_actions[0].command == ('pdm', 'install')
 
     @staticmethod
     def test_scm_action_present(preview: SetupResults) -> None:

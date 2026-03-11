@@ -200,11 +200,11 @@ class TestCliCommandPreview:
         environments: dict[str, Environment] = {'pipx': mock_env}
 
         cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.MINIMAL)
-        assert cmd == mock_pm.plugin_add_command(ref)
+        assert cmd == tuple(mock_pm.plugin_add_command(ref))
 
     @staticmethod
     def test_empty_command_when_plugin_manager_unavailable() -> None:
-        """get_cli_command returns empty list when PluginManager tool is not on PATH."""
+        """get_cli_command returns empty tuple when PluginManager tool is not on PATH."""
         pdm_env = PDMEnvironment(_MOCK_PARAMS)
         project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
 
@@ -223,11 +223,11 @@ class TestCliCommandPreview:
         with patch.object(type(pdm_env), 'is_available', return_value=False):
             cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.MINIMAL)
 
-        assert cmd == []
+        assert cmd == ()
 
     @staticmethod
     def test_empty_command_when_no_project_environments() -> None:
-        """get_cli_command returns empty list with no project envs."""
+        """get_cli_command returns empty tuple with no project envs."""
         action = SetupAction(
             description="Add 'cppython' to 'pdm'",
             kind=PluginKind.TOOL,
@@ -241,7 +241,7 @@ class TestCliCommandPreview:
         environments: dict[str, Environment] = {'pipx': mock_env}
 
         cmd = get_cli_command(action, _make_plugins(environments), SyncStrategy.MINIMAL)
-        assert cmd == []
+        assert cmd == ()
 
 
 # ---------------------------------------------------------------------------
@@ -954,7 +954,7 @@ class TestCliCommandUpgradePreview:
         environments: dict[str, Environment] = {'pipx': mock_env}
 
         cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.LATEST)
-        assert cmd == mock_pm.plugin_update_command(ref)
+        assert cmd == tuple(mock_pm.plugin_update_command(ref))
 
     def test_minimal_returns_add_command(self) -> None:
         """get_cli_command returns plugin_add_command for MINIMAL strategy."""
@@ -975,7 +975,7 @@ class TestCliCommandUpgradePreview:
         environments: dict[str, Environment] = {'pipx': mock_env}
 
         cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.MINIMAL)
-        assert cmd == mock_pm.plugin_add_command(ref)
+        assert cmd == tuple(mock_pm.plugin_add_command(ref))
 
     @staticmethod
     def test_poetry_latest_delegates_update_to_add() -> None:
@@ -1000,8 +1000,8 @@ class TestCliCommandUpgradePreview:
             cmd = get_cli_command(action, _make_plugins(environments, project_environments), SyncStrategy.LATEST)
 
         # Poetry delegates update to add â€” verify via protocol method
-        assert cmd == poetry_env.plugin_update_command(ref)
-        assert cmd == poetry_env.plugin_add_command(ref)
+        assert cmd == tuple(poetry_env.plugin_update_command(ref))
+        assert cmd == tuple(poetry_env.plugin_add_command(ref))
 
 
 # ---------------------------------------------------------------------------
