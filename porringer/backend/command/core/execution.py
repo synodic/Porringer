@@ -11,7 +11,7 @@ import os
 import sysconfig
 import threading
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
@@ -76,6 +76,13 @@ from .resolution import (
 logger = logging.getLogger(__name__)
 
 
+def _action_index(action: SetupAction, index_map: dict[int, int] | None) -> int | None:
+    """Look up the global action index for *action* via its ``id()``."""
+    if index_map is None:
+        return None
+    return index_map.get(id(action))
+
+
 @dataclass(slots=True)
 class ExecutionState:
     """Mutable state for a single phased execution run.
@@ -90,7 +97,6 @@ class ExecutionState:
     """
 
     actions: list[SetupAction]
-    phases: dict[PluginKind | None, list[SetupAction]]
     plugins: DiscoveredPlugins
     parameters: SetupParameters
     event_queue: asyncio.Queue[ProgressEvent | None]
@@ -108,6 +114,11 @@ class ExecutionState:
     def environments(self) -> dict[str, Environment]:
         """Environment plugins from the current discovery."""
         return self.plugins.environments
+
+    @property
+    def phases(self) -> dict[PluginKind | None, list[SetupAction]]:
+        """Group actions into phase buckets on access."""
+        return group_actions_by_phase(self.actions)
 
     @property
     def project_environments(self) -> dict[str, ProjectEnvironment] | None:
@@ -150,6 +161,11 @@ class ExecutionState:
     def strategy(self) -> SyncStrategy:
         """The sync strategy from the current parameters."""
         return self.parameters.strategy
+
+    @property
+    def action_index_map(self) -> dict[int, int]:
+        """Map ``id(action)`` → global index in :attr:`actions`."""
+        return {id(a): i for i, a in enumerate(self.actions)}
 
     # -- plugin refresh machinery --------------------------------------
 
@@ -219,6 +235,7 @@ class ExecutionState:
             self.parameters,
             self.event_queue,
             self.resolution_context,
+            action_index_map=self.action_index_map,
         )
 
     async def run_project_phase(self, actions: list[SetupAction]) -> list[SetupActionResult]:
@@ -233,6 +250,7 @@ class ExecutionState:
             self.fallback_dir,
             self.parameters,
             self.event_queue,
+            action_index_map=self.action_index_map,
         )
 
     async def run_command_actions(self, actions: list[SetupAction]) -> list[SetupActionResult]:
@@ -240,21 +258,14 @@ class ExecutionState:
         return await execute_command_actions(actions, self)
 
     def resolve_deferred(self, actions: list[SetupAction]) -> None:
-        """Resolve deferred actions and update their CLI commands."""
+        """Resolve deferred actions via ``replace()`` on frozen ``SetupAction``."""
         resolve_deferred_actions(
-            actions,
+            self.actions,
             self.plugins,
             self.strategy,
             preferences=self.preferences,
             runtime_context=self.runtime_context,
         )
-        for action in actions:
-            if action.cli_command is None or action.installer is not None:
-                action.cli_command = get_cli_command(
-                    action,
-                    self.plugins,
-                    self.strategy,
-                )
 
     def early_return(self) -> SetupResults:
         """Create a ``SetupResults`` from the results accumulated so far."""
@@ -820,6 +831,8 @@ async def execute_package_actions(
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None],
     context: ResolutionContext | None = None,
+    *,
+    action_index_map: dict[int, int] | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Execute PACKAGE actions with parallel support.
 
@@ -834,6 +847,7 @@ async def execute_package_actions(
                 event_queue,
                 context=context,
                 parameters=parameters,
+                action_index_map=action_index_map,
             ),
             True,
         )
@@ -868,6 +882,7 @@ async def execute_package_actions(
                 event_queue,
                 enriched,
                 package_cache=cache,
+                action_index_map=action_index_map,
             )
             results.extend(parallel_results)
             if not should_continue:
@@ -881,6 +896,7 @@ async def execute_package_actions(
             event_queue,
             enriched,
             package_cache=cache,
+            action_index_map=action_index_map,
         )
         results.extend(sequential_results)
 
@@ -894,6 +910,7 @@ async def dry_run_package_actions(
     *,
     context: ResolutionContext | None = None,
     parameters: SetupParameters | None = None,
+    action_index_map: dict[int, int] | None = None,
 ) -> list[SetupActionResult]:
     """Execute dry-run for package actions in parallel.
 
@@ -922,7 +939,7 @@ async def dry_run_package_actions(
         try:
             # Emit ACTION_STARTED *before* the check so GUI clients can
             # show a spinner while the dry-run is in progress.
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, action_index_map)))
             try:
                 result = await dry_run_action(
                     action,
@@ -945,6 +962,7 @@ async def dry_run_package_actions(
                     kind=ProgressEventKind.ACTION_COMPLETED,
                     action=action,
                     result=result,
+                    action_index=_action_index(action, action_index_map),
                 )
             )
         finally:
@@ -1001,12 +1019,13 @@ async def _run_sequential_packages(
     context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
+    action_index_map: dict[int, int] | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions sequentially."""
     ctx = context or ResolutionContext()
     results: list[SetupActionResult] = []
     for action in sequential_actions:
-        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, action_index_map)))
         result = await execute_package(
             action,
             environments,
@@ -1027,6 +1046,7 @@ async def _run_sequential_packages(
                 kind=ProgressEventKind.ACTION_COMPLETED,
                 action=action,
                 result=result,
+                action_index=_action_index(action, action_index_map),
             )
         )
         if not result.success and not result.skipped and parameters.fail_fast:
@@ -1043,6 +1063,7 @@ async def _run_parallel_packages(
     context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
+    action_index_map: dict[int, int] | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions in parallel using TaskGroup.
 
@@ -1053,15 +1074,14 @@ async def _run_parallel_packages(
         Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
     """
     results: dict[int, SetupActionResult] = {}
-    action_indices = {id(action): i for i, action in enumerate(parallel_actions)}
     max_concurrency = parameters.max_concurrency
     semaphore: asyncio.Semaphore | None = asyncio.Semaphore(max_concurrency) if max_concurrency > 0 else None
 
-    async def package_with_event(action: SetupAction) -> None:
+    async def package_with_event(index: int, action: SetupAction) -> None:
         if semaphore is not None:
             await semaphore.acquire()
         try:
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, action_index_map)))
             try:
                 result = await execute_package(
                     action,
@@ -1078,17 +1098,18 @@ async def _run_parallel_packages(
                     kind=ProgressEventKind.ACTION_COMPLETED,
                     action=action,
                     result=result,
+                    action_index=_action_index(action, action_index_map),
                 )
             )
-            results[action_indices[id(action)]] = result
+            results[index] = result
         finally:
             if semaphore is not None:
                 semaphore.release()
 
     try:
         async with asyncio.TaskGroup() as tg:
-            for action in parallel_actions:
-                tg.create_task(package_with_event(action))
+            for i, action in enumerate(parallel_actions):
+                tg.create_task(package_with_event(i, action))
     except ExceptionGroup as eg:
         # TaskGroup raises ExceptionGroup if any task fails with unhandled exception
         # Our package_with_event catches exceptions, so this shouldn't happen normally
@@ -1123,9 +1144,10 @@ async def execute_command_actions(
     state: ExecutionState,
 ) -> list[SetupActionResult]:
     """Execute RUN_COMMAND actions sequentially."""
+    aim = state.action_index_map
     results: list[SetupActionResult] = []
     for action in command_actions:
-        state.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+        state.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, aim)))
 
         if state.parameters.dry_run:
             result = await dry_run_action(
@@ -1146,6 +1168,7 @@ async def execute_command_actions(
                 kind=ProgressEventKind.ACTION_COMPLETED,
                 action=action,
                 result=result,
+                action_index=_action_index(action, aim),
             )
         )
         if not result.success and not result.skipped:
@@ -1187,6 +1210,7 @@ async def handle_project_phase(
     Returns:
         Results for each project action.
     """
+    aim = state.action_index_map
     if not state.skip_project:
         return await _execute_project_sync_actions(
             project_actions,
@@ -1195,12 +1219,14 @@ async def handle_project_phase(
             state.parameters,
             state.event_queue,
             runtime_context=state.runtime_context,
+            action_index_map=aim,
         )
     return skip_actions(
         project_actions,
         SkipReason.NO_PROJECT_DIRECTORY,
         'No project directory provided',
         state.event_queue,
+        action_index_map=aim,
     )
 
 
@@ -1294,7 +1320,6 @@ async def execute_single(
 
     state = ExecutionState(
         actions=actions,
-        phases=group_actions_by_phase(actions),
         # .copy() builds fresh plugin instances (when factory metadata
         # is present) so that accidental state on a plugin object
         # cannot leak between runs or back to the caller.
@@ -1305,10 +1330,7 @@ async def execute_single(
         preview=preview,
     )
 
-    # Populate CLI commands for all resolved actions
-    _populate_cli_commands(actions, state)
-
-    # Emit MANIFEST_LOADED — the fully-resolved preview with CLI commands.
+    # Emit MANIFEST_LOADED — the fully-resolved preview.
     state.emit(
         ProgressEvent(
             kind=ProgressEventKind.MANIFEST_LOADED,
@@ -1318,6 +1340,10 @@ async def execute_single(
 
     # Run all phases via the generalized phase loop.
     await run_phases(state)
+
+    # Populate CLI commands on results for display.
+    for result in state.results:
+        result.cli_command = get_cli_command(result.action, state.plugins, state.strategy)
 
     return SetupResults(
         actions=actions,
@@ -1349,16 +1375,6 @@ def group_actions_by_phase(
     for action in actions:
         phases[action.kind].append(action)
     return phases
-
-
-def _populate_cli_commands(actions: list[SetupAction], state: ExecutionState) -> None:
-    """Set ``cli_command`` on every action from the current plugin state."""
-    for action in actions:
-        action.cli_command = get_cli_command(
-            action,
-            state.plugins,
-            state.strategy,
-        )
 
 
 async def _propagate_runtime(
@@ -1435,16 +1451,22 @@ def resolve_deferred_actions(
     plugin availability against the target interpreter rather than
     only checking the host process's PATH.
 
+    Frozen ``SetupAction`` objects are replaced via
+    ``dataclasses.replace()``; the list is mutated in-place (element
+    swap) so that all collections sharing the same list see the update.
+
     Args:
-        actions: Mutable list of actions to resolve in-place.
+        actions: List of actions — elements are swapped in-place.
         plugins: Freshly-discovered plugin container.
         strategy: Sync strategy (for description verb).
         preferences: Optional ecosystem → plugin-name preferences from the manifest.
         runtime_context: Resolved runtime executables, if any.
     """
-    deferred = [a for a in actions if a.installer is None and a.ecosystem is not None]
-    if not deferred:
+    deferred_indices = [i for i, a in enumerate(actions) if a.installer is None and a.ecosystem is not None]
+    if not deferred_indices:
         return
+
+    deferred = [actions[i] for i in deferred_indices]
 
     # Pass runtime_context so that RuntimeConsumer plugins can be
     # probed against the target interpreter, not just the host PATH.
@@ -1454,20 +1476,21 @@ def resolve_deferred_actions(
     )
     verb = STRATEGY_VERB[strategy]
 
-    for action in deferred:
+    for idx in deferred_indices:
+        action = actions[idx]
         assert action.kind is not None
         assert action.ecosystem is not None
         installer = resolver.resolve(action.kind, action.ecosystem)
         if installer is not None:
-            action.installer = installer
-            action.description = action_description(
+            new_description = action_description(
                 action.kind,
                 verb,
                 installer,
                 package=action.package,
                 plugin_target=action.plugin_target,
             )
-            logger.info('Deferred action resolved: %s -> %s', action.description, installer)
+            actions[idx] = replace(action, installer=installer, description=new_description)
+            logger.info('Deferred action resolved: %s -> %s', new_description, installer)
         else:
             registered = resolver.registered_names(action.kind, action.ecosystem)
             if registered:
@@ -1492,6 +1515,8 @@ def skip_actions(
     skip_reason: SkipReason,
     message: str,
     event_queue: asyncio.Queue[ProgressEvent | None],
+    *,
+    action_index_map: dict[int, int] | None = None,
 ) -> list[SetupActionResult]:
     """Skip a list of actions, emitting progress events and a warning for each.
 
@@ -1500,6 +1525,7 @@ def skip_actions(
         skip_reason: Machine-readable skip code.
         message: Human-readable skip detail.
         event_queue: Queue for progress events.
+        action_index_map: Optional id(action) → global index map.
 
     Returns:
         List of skipped action results.
@@ -1515,12 +1541,14 @@ def skip_actions(
             message=message,
         )
         results.append(result)
-        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+        idx = _action_index(action, action_index_map)
+        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=idx))
         event_queue.put_nowait(
             ProgressEvent(
                 kind=ProgressEventKind.ACTION_COMPLETED,
                 action=action,
                 result=result,
+                action_index=idx,
             )
         )
     return results
@@ -1539,6 +1567,7 @@ async def _execute_project_sync_actions(
     event_queue: asyncio.Queue[ProgressEvent | None],
     *,
     runtime_context: RuntimeContext | None = None,
+    action_index_map: dict[int, int] | None = None,
 ) -> list[SetupActionResult]:
     """Execute PROJECT_SYNC actions sequentially.
 
@@ -1557,6 +1586,7 @@ async def _execute_project_sync_actions(
         parameters: Setup parameters (dry-run, etc.).
         event_queue: Queue for progress events.
         runtime_context: Resolved runtime paths for this execution run.
+        action_index_map: Optional id(action) → global index map.
 
     Returns:
         List of action results.
@@ -1564,7 +1594,8 @@ async def _execute_project_sync_actions(
     results: list[SetupActionResult] = []
 
     for action in project_sync_actions:
-        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+        idx = _action_index(action, action_index_map)
+        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=idx))
 
         result = await _execute_project_sync(
             action,
@@ -1581,6 +1612,7 @@ async def _execute_project_sync_actions(
                 kind=ProgressEventKind.ACTION_COMPLETED,
                 action=action,
                 result=result,
+                action_index=idx,
             )
         )
         if not result.success and parameters.fail_fast:
@@ -1712,6 +1744,8 @@ async def _execute_scm_actions(
     working_dir: Path,
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None],
+    *,
+    action_index_map: dict[int, int] | None = None,
 ) -> list[SetupActionResult]:
     """Execute SCM_CLONE actions sequentially.
 
@@ -1724,6 +1758,7 @@ async def _execute_scm_actions(
         working_dir: Working directory (manifest location).
         parameters: Setup parameters (dry-run, etc.).
         event_queue: Queue for progress events.
+        action_index_map: Optional id(action) → global index map.
 
     Returns:
         List of action results.
@@ -1731,7 +1766,8 @@ async def _execute_scm_actions(
     results: list[SetupActionResult] = []
 
     for action in scm_actions:
-        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action))
+        idx = _action_index(action, action_index_map)
+        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=idx))
 
         result = await _execute_scm_clone(
             action,
@@ -1747,6 +1783,7 @@ async def _execute_scm_actions(
                 kind=ProgressEventKind.ACTION_COMPLETED,
                 action=action,
                 result=result,
+                action_index=idx,
             )
         )
         if not result.success and not result.skipped and parameters.fail_fast:

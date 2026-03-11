@@ -223,10 +223,11 @@ def test_resolved_action_logs_info(caplog: pytest.LogCaptureFixture) -> None:
         scm_environments={},
     )
 
+    actions = [action]
     with caplog.at_level(logging.DEBUG):
-        resolve_deferred_actions([action], plugins)
+        resolve_deferred_actions(actions, plugins)
 
-    assert action.installer == 'pip'
+    assert actions[0].installer == 'pip'
     info_messages = [r for r in caplog.records if r.levelno == logging.INFO]
     assert any('resolved' in r.message.lower() for r in info_messages)
 
@@ -252,6 +253,7 @@ def test_preferences_threaded_through(caplog: pytest.LogCaptureFixture) -> None:
     )
     preferences = {Ecosystem('python'): 'bravo'}
 
-    resolve_deferred_actions([action], plugins, preferences=preferences)
+    actions = [action]
+    resolve_deferred_actions(actions, plugins, preferences=preferences)
 
-    assert action.installer == 'bravo'
+    assert actions[0].installer == 'bravo'

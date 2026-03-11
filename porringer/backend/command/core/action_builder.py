@@ -124,7 +124,7 @@ def get_cli_command(
     action: SetupAction,
     plugins: DiscoveredPlugins,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
-) -> list[str]:
+) -> tuple[str, ...]:
     """Gets the CLI command string for an action.
 
     Args:
@@ -133,7 +133,7 @@ def get_cli_command(
         strategy: The sync strategy (determines install vs upgrade command).
 
     Returns:
-        The CLI command as a list of strings, or empty list if not applicable.
+        The CLI command as a tuple of strings, or empty tuple if not applicable.
     """
     environments = plugins.environments
     project_environments = plugins.project_environments
@@ -160,8 +160,8 @@ def get_cli_command(
                 scm_env = scm_envs[action.installer]
                 cmd = scm_env.clone_command(action.package.name, Path('.'))
         case None:
-            cmd = action.command or []
-    return cmd
+            return action.command or ()
+    return tuple(cmd)
 
 
 def get_uninstall_cli_command(
@@ -353,7 +353,7 @@ def build_actions(
 
     # Add post-sync command actions (kind=None)
     for command_str in manifest.post_sync:
-        command_parts = shlex.split(command_str)
+        command_parts = tuple(shlex.split(command_str))
         actions.append(
             SetupAction(
                 description=f'Run: {command_str}',

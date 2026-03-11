@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 
 from porringer.backend.cache import DirectoryCacheManager
@@ -254,9 +255,12 @@ class SyncCommands:
             # Apply caller-level prerelease overrides
             if parameters.prerelease_packages:
                 overrides = {n.lower() for n in parameters.prerelease_packages}
-                for action in preview.actions:
-                    if action.package is not None and action.package.name.lower() in overrides:
-                        action.include_prereleases = True
+                preview.actions = [
+                    replace(a, include_prereleases=True)
+                    if a.package is not None and a.package.name.lower() in overrides
+                    else a
+                    for a in preview.actions
+                ]
 
             previews.append(preview)
 
