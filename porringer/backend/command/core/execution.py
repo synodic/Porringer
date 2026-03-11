@@ -201,7 +201,7 @@ class ExecutionState:
         )
         if result is not None:
             kind, executable = result
-            self.runtime_context.executables[kind] = executable
+            self.runtime_context = self.runtime_context.with_executable(kind, executable)
 
     # -- result helpers ------------------------------------------------
 
@@ -1338,6 +1338,16 @@ async def execute_single(
     if plugins_discovered_here:
         event_queue.put_nowait(_plugins_discovered_event(plugins))
 
+    # Seed runtime_context from pre-resolved plugins (e.g. from
+    # API.discover_plugins(resolve_runtime=True)).  A defensive copy
+    # prevents in-place mutations from aliasing the shared plugins
+    # object when propagate_runtime() writes into the dict later.
+    seeded_context = (
+        RuntimeContext(executables=dict(plugins.runtime_context.executables))
+        if plugins.runtime_context is not None
+        else RuntimeContext()
+    )
+
     state = ExecutionState(
         actions=actions,
         # .copy() builds fresh plugin instances (when factory metadata
@@ -1348,6 +1358,7 @@ async def execute_single(
         event_queue=event_queue,
         manifest_directory=root_directory,
         preview=preview,
+        runtime_context=seeded_context,
     )
 
     # Emit MANIFEST_LOADED — the fully-resolved preview.

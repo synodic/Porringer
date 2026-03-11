@@ -15,6 +15,7 @@ focus on their tool-specific behaviour.
 """
 
 import logging
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -153,6 +154,18 @@ class PythonEnvironment(Environment, RuntimeConsumer):
             _logger.debug('python_command: runtime_context present but no entry for kind=%s', kind)
         else:
             _logger.debug('python_command: no runtime_context supplied, falling back to sys.executable')
+
+        # In frozen applications (e.g. PyInstaller), sys.executable is
+        # the packaged binary — not a Python interpreter.  Attempt to
+        # find a real Python on PATH before falling back.
+        if getattr(sys, 'frozen', False):
+            _logger.debug('python_command: frozen application detected, trying shutil.which')
+            which_python = shutil.which('python')
+            if which_python is not None:
+                _logger.debug('python_command: using PATH python %s', which_python)
+                return which_python
+            _logger.debug('python_command: shutil.which found no python, falling back to sys.executable')
+
         return sys.executable
 
     @staticmethod

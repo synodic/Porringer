@@ -11,6 +11,8 @@ helper used by resolution, dry-run, and execution paths.
 
 import asyncio
 import logging
+import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -357,6 +359,31 @@ async def _resolve_package_operation(
         logger.debug('Plugin error checking packages for %s: %s', action.installer, e)
     except Exception as e:
         logger.debug('Could not check installed packages for %s: %s', action.installer, e)
+
+    # Secondary detection: if the package was not found via the
+    # environment's package list and we are running in a frozen
+    # (PyInstaller) context, check whether it exists as a CLI
+    # executable on PATH.  This catches cross-environment installs
+    # (e.g. pipx installed in a different Python's site-packages)
+    # where pip list fails entirely because sys.executable is not
+    # a Python interpreter.
+    #
+    # Only applied in frozen apps to avoid masking genuine "not
+    # installed" results during normal development / CI.
+    if (
+        not presence.is_installed
+        and getattr(sys, 'frozen', False)
+        and action.kind in {PluginKind.PACKAGE, PluginKind.TOOL}
+        and action.package is not None
+        and shutil.which(action.package.name) is not None
+    ):
+        logger.debug(
+            'Package %s not found via %s but available on PATH; treating as installed',
+            action.package.name,
+            action.installer,
+        )
+        presence.is_installed = True
+        presence.detail = 'found on PATH'
 
     return await _apply_strategy(
         action=action,
