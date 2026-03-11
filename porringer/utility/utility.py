@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Literal, NamedTuple
 
 from porringer.schema import SetupAction, SubActionProgress
@@ -113,7 +113,7 @@ async def run_command(
 
 
 async def stream_command(
-    args: list[str],
+    args: Sequence[str],
     *,
     progress: StreamProgress,
     cwd: str | os.PathLike[str] | None = None,

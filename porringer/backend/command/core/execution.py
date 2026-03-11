@@ -163,7 +163,7 @@ class ExecutionState:
         return self.parameters.strategy
 
     @property
-    def action_index_map(self) -> dict[int, int]:
+    def _action_index_map(self) -> dict[int, int]:
         """Map ``id(action)`` → global index in :attr:`actions`."""
         return {id(a): i for i, a in enumerate(self.actions)}
 
@@ -235,7 +235,7 @@ class ExecutionState:
             self.parameters,
             self.event_queue,
             self.resolution_context,
-            action_index_map=self.action_index_map,
+            action_index_map=self._action_index_map,
         )
 
     async def run_project_phase(self, actions: list[SetupAction]) -> list[SetupActionResult]:
@@ -250,7 +250,7 @@ class ExecutionState:
             self.fallback_dir,
             self.parameters,
             self.event_queue,
-            action_index_map=self.action_index_map,
+            action_index_map=self._action_index_map,
         )
 
     async def run_command_actions(self, actions: list[SetupAction]) -> list[SetupActionResult]:
@@ -939,7 +939,13 @@ async def dry_run_package_actions(
         try:
             # Emit ACTION_STARTED *before* the check so GUI clients can
             # show a spinner while the dry-run is in progress.
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, action_index_map)))
+            event_queue.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_STARTED,
+                    action=action,
+                    action_index=_action_index(action, action_index_map),
+                )
+            )
             try:
                 result = await dry_run_action(
                     action,
@@ -1025,7 +1031,13 @@ async def _run_sequential_packages(
     ctx = context or ResolutionContext()
     results: list[SetupActionResult] = []
     for action in sequential_actions:
-        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, action_index_map)))
+        event_queue.put_nowait(
+            ProgressEvent(
+                kind=ProgressEventKind.ACTION_STARTED,
+                action=action,
+                action_index=_action_index(action, action_index_map),
+            )
+        )
         result = await execute_package(
             action,
             environments,
@@ -1081,7 +1093,13 @@ async def _run_parallel_packages(
         if semaphore is not None:
             await semaphore.acquire()
         try:
-            event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, action_index_map)))
+            event_queue.put_nowait(
+                ProgressEvent(
+                    kind=ProgressEventKind.ACTION_STARTED,
+                    action=action,
+                    action_index=_action_index(action, action_index_map),
+                )
+            )
             try:
                 result = await execute_package(
                     action,
@@ -1144,10 +1162,12 @@ async def execute_command_actions(
     state: ExecutionState,
 ) -> list[SetupActionResult]:
     """Execute RUN_COMMAND actions sequentially."""
-    aim = state.action_index_map
+    aim = state._action_index_map
     results: list[SetupActionResult] = []
     for action in command_actions:
-        state.event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, aim)))
+        state.event_queue.put_nowait(
+            ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, aim))
+        )
 
         if state.parameters.dry_run:
             result = await dry_run_action(
@@ -1210,7 +1230,7 @@ async def handle_project_phase(
     Returns:
         Results for each project action.
     """
-    aim = state.action_index_map
+    aim = state._action_index_map
     if not state.skip_project:
         return await _execute_project_sync_actions(
             project_actions,
