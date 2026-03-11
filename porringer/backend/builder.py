@@ -322,7 +322,7 @@ class Builder:
             A ``RuntimeContext`` populated with resolved executables.
             May be empty when no provider or runtime is available.
         """
-        ctx = RuntimeContext()
+        resolved: dict[str, Path] = {}
 
         for name, env in environments.items():
             if not isinstance(env, RuntimeProvider):
@@ -332,17 +332,18 @@ class Builder:
                 continue
 
             kind = env.provided_runtime_kind()
-            if kind in ctx.executables:
+            if kind in resolved:
                 # Already resolved this kind from a previous provider
                 continue
 
             executable = await _resolve_provider_executable(name, env, kind)
             if executable is not None:
-                ctx.executables[kind] = executable
+                resolved[kind] = executable
 
+        ctx = RuntimeContext(executables=resolved)
         logger.debug(
             'resolve_runtime_context complete: %s',
-            {k: str(v) for k, v in ctx.executables.items()} if ctx.executables else '<empty>',
+            {k: str(v) for k, v in resolved.items()} if resolved else '<empty>',
         )
         return ctx
 

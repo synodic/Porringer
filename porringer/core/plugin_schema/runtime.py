@@ -32,9 +32,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class RuntimeContext:
     """Resolved runtime executables for a single execution run.
+
+    Frozen dataclass — instances are immutable.  Use
+    :meth:`with_executable` to produce a new context with an
+    additional or overridden runtime entry.
 
     Owned by ``ExecutionState``; passed explicitly to every plugin
     method that needs to know which interpreter to target.  Plugin
@@ -49,6 +53,14 @@ class RuntimeContext:
     def get(self, kind: str) -> Path | None:
         """Return the resolved executable for *kind*, or ``None``."""
         return self.executables.get(kind)
+
+    def with_executable(self, kind: str, executable: Path) -> RuntimeContext:
+        """Return a new context with *kind* mapped to *executable*.
+
+        Existing entries are preserved; *kind* is added or
+        overwritten.
+        """
+        return RuntimeContext(executables={**self.executables, kind: executable})
 
 
 @dataclass(slots=True)
