@@ -21,10 +21,13 @@ from dataclasses import dataclass, field
 
 from porringer.backend.builder import Builder, PluginInformation
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.manifest import ManifestContributor
+from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin
+from porringer.schema.plugin import PluginCapability
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +113,37 @@ class DiscoveredPlugins:
             scm_environments=dict(self.scm_environments),
             runtime_context=self.runtime_context,
         )
+
+    # -- Capability introspection --------------------------------------
+
+    _CAPABILITY_MAP: tuple[tuple[type, PluginCapability], ...] = (
+        (RuntimeConsumer, PluginCapability.RUNTIME_CONSUMER),
+        (PluginManager, PluginCapability.PLUGIN_MANAGER),
+        (ManifestContributor, PluginCapability.MANIFEST_CONTRIBUTOR),
+        (RuntimeProvider, PluginCapability.RUNTIME_PROVIDER),
+    )
+
+    def capabilities(self, plugin_name: str) -> set[PluginCapability]:
+        """Return the set of capabilities implemented by *plugin_name*.
+
+        Probes the instantiated plugin object for each known protocol
+        mixin (``RuntimeConsumer``, ``PluginManager``,
+        ``ManifestContributor``, ``RuntimeProvider``) via ``isinstance``.
+
+        Args:
+            plugin_name: Canonical plugin name to inspect.
+
+        Returns:
+            A (possibly empty) set of capabilities.
+
+        Raises:
+            KeyError: If *plugin_name* is not found among discovered
+                plugins.
+        """
+        plugin = self.all_plugins.get(plugin_name)
+        if plugin is None:
+            raise KeyError(f"Plugin '{plugin_name}' not found among discovered plugins")
+        return {cap for proto, cap in self._CAPABILITY_MAP if isinstance(plugin, proto)}
 
 
 def _build_instances[T: Plugin](infos: list[PluginInformation[T]]) -> dict[str, T]:

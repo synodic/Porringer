@@ -32,12 +32,15 @@ from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, Package, PluginKind
 from porringer.schema import (
+    ActionCompletedEvent,
+    ActionStartedEvent,
     Install,
     InstallReason,
+    ManifestLoadedEvent,
     ManifestMetadata,
     Operation,
+    PluginsDiscoveredEvent,
     ProgressEvent,
-    ProgressEventKind,
     SetupAction,
     SetupActionResult,
     SetupParameters,
@@ -45,10 +48,12 @@ from porringer.schema import (
     Skip,
     SkipReason,
     SubActionProgress,
+    SubActionProgressEvent,
     SyncStrategy,
     Uninstall,
     Upgrade,
 )
+from porringer.schema.progress import DiscoveredPluginEntry
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import StreamProgress, stream_command
 
@@ -387,13 +392,7 @@ async def execute_run_command(
     logger.info(f'Running command: {" ".join(action.command)}')
 
     def _progress_cb(update: SubActionProgress) -> None:
-        event_queue.put_nowait(
-            ProgressEvent(
-                kind=ProgressEventKind.SUB_ACTION_PROGRESS,
-                action=action,
-                sub_action=update,
-            )
-        )
+        event_queue.put_nowait(SubActionProgressEvent(action=action, sub_action=update))
 
     progress = StreamProgress(
         action=action,
@@ -784,13 +783,7 @@ async def _attempt_operation(
     message = ''
 
     def sub_action_cb(update: SubActionProgress) -> None:
-        event_queue.put_nowait(
-            ProgressEvent(
-                kind=ProgressEventKind.SUB_ACTION_PROGRESS,
-                action=action,
-                sub_action=update,
-            )
-        )
+        event_queue.put_nowait(SubActionProgressEvent(action=action, sub_action=update))
 
     try:
         if action.package is None:
@@ -944,8 +937,7 @@ async def dry_run_package_actions(
             # Emit ACTION_STARTED *before* the check so GUI clients can
             # show a spinner while the dry-run is in progress.
             event_queue.put_nowait(
-                ProgressEvent(
-                    kind=ProgressEventKind.ACTION_STARTED,
+                ActionStartedEvent(
                     action=action,
                     action_index=_action_index(action, action_index_map),
                 )
@@ -968,8 +960,7 @@ async def dry_run_package_actions(
                 result = SetupActionResult(action=action, success=False, message=str(exc))
             result_slots[index] = result
             event_queue.put_nowait(
-                ProgressEvent(
-                    kind=ProgressEventKind.ACTION_COMPLETED,
+                ActionCompletedEvent(
                     action=action,
                     result=result,
                     action_index=_action_index(action, action_index_map),
@@ -1036,8 +1027,7 @@ async def _run_sequential_packages(
     results: list[SetupActionResult] = []
     for action in sequential_actions:
         event_queue.put_nowait(
-            ProgressEvent(
-                kind=ProgressEventKind.ACTION_STARTED,
+            ActionStartedEvent(
                 action=action,
                 action_index=_action_index(action, action_index_map),
             )
@@ -1058,8 +1048,7 @@ async def _run_sequential_packages(
             if action.plugin_target is not None:
                 package_cache.invalidate_plugins(action.plugin_target.name)
         event_queue.put_nowait(
-            ProgressEvent(
-                kind=ProgressEventKind.ACTION_COMPLETED,
+            ActionCompletedEvent(
                 action=action,
                 result=result,
                 action_index=_action_index(action, action_index_map),
@@ -1098,8 +1087,7 @@ async def _run_parallel_packages(
             await semaphore.acquire()
         try:
             event_queue.put_nowait(
-                ProgressEvent(
-                    kind=ProgressEventKind.ACTION_STARTED,
+                ActionStartedEvent(
                     action=action,
                     action_index=_action_index(action, action_index_map),
                 )
@@ -1116,8 +1104,7 @@ async def _run_parallel_packages(
             except Exception as e:
                 result = SetupActionResult(action=action, success=False, message=str(e))
             event_queue.put_nowait(
-                ProgressEvent(
-                    kind=ProgressEventKind.ACTION_COMPLETED,
+                ActionCompletedEvent(
                     action=action,
                     result=result,
                     action_index=_action_index(action, action_index_map),
@@ -1169,9 +1156,7 @@ async def execute_command_actions(
     aim = state._action_index_map
     results: list[SetupActionResult] = []
     for action in command_actions:
-        state.event_queue.put_nowait(
-            ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=_action_index(action, aim))
-        )
+        state.event_queue.put_nowait(ActionStartedEvent(action=action, action_index=_action_index(action, aim)))
 
         if state.parameters.dry_run:
             result = await dry_run_action(
@@ -1188,8 +1173,7 @@ async def execute_command_actions(
             )
         results.append(result)
         state.event_queue.put_nowait(
-            ProgressEvent(
-                kind=ProgressEventKind.ACTION_COMPLETED,
+            ActionCompletedEvent(
                 action=action,
                 result=result,
                 action_index=_action_index(action, aim),
@@ -1277,13 +1261,23 @@ def _plugins_discovered_event(
         **plugins.project_environments,
         **plugins.scm_environments,
     }
-    plugin_availability = {name: plugin.query_availability(runtime_context) for name, plugin in all_plugins.items()}
-    logger.info('Plugins discovered — availability: %s', plugin_availability)
-    return ProgressEvent(
-        kind=ProgressEventKind.PLUGINS_DISCOVERED,
-        plugin_names=sorted(plugin_availability.keys()),
-        plugin_availability=plugin_availability,
-    )
+
+    entries: list[DiscoveredPluginEntry] = []
+    for name, plugin in sorted(all_plugins.items()):
+        available = plugin.query_availability(runtime_context)
+        caps = plugins.capabilities(name)
+        entries.append(
+            DiscoveredPluginEntry(
+                name=name,
+                available=available,
+                capabilities=frozenset(caps),
+                kind=plugin.plugin_kind(),
+            )
+        )
+
+    discovered = tuple(entries)
+    logger.info('Plugins discovered — %d plugin(s)', len(discovered))
+    return PluginsDiscoveredEvent(discovered_plugins=discovered)
 
 
 async def execute_single(
@@ -1366,12 +1360,7 @@ async def execute_single(
     )
 
     # Emit MANIFEST_LOADED — the fully-resolved preview.
-    state.emit(
-        ProgressEvent(
-            kind=ProgressEventKind.MANIFEST_LOADED,
-            manifest=preview,
-        )
-    )
+    state.emit(ManifestLoadedEvent(manifest=preview))
 
     # Run all phases via the generalized phase loop.
     await run_phases(state)
@@ -1577,10 +1566,9 @@ def skip_actions(
         )
         results.append(result)
         idx = _action_index(action, action_index_map)
-        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=idx))
+        event_queue.put_nowait(ActionStartedEvent(action=action, action_index=idx))
         event_queue.put_nowait(
-            ProgressEvent(
-                kind=ProgressEventKind.ACTION_COMPLETED,
+            ActionCompletedEvent(
                 action=action,
                 result=result,
                 action_index=idx,
@@ -1630,7 +1618,7 @@ async def _execute_project_sync_actions(
 
     for action in project_sync_actions:
         idx = _action_index(action, action_index_map)
-        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=idx))
+        event_queue.put_nowait(ActionStartedEvent(action=action, action_index=idx))
 
         result = await _execute_project_sync(
             action,
@@ -1643,8 +1631,7 @@ async def _execute_project_sync_actions(
 
         results.append(result)
         event_queue.put_nowait(
-            ProgressEvent(
-                kind=ProgressEventKind.ACTION_COMPLETED,
+            ActionCompletedEvent(
                 action=action,
                 result=result,
                 action_index=idx,
@@ -1736,13 +1723,7 @@ async def _execute_project_sync(
             args.append('--dry-run')
 
         def _progress_cb(update: SubActionProgress) -> None:
-            event_queue.put_nowait(
-                ProgressEvent(
-                    kind=ProgressEventKind.SUB_ACTION_PROGRESS,
-                    action=action,
-                    sub_action=update,
-                )
-            )
+            event_queue.put_nowait(SubActionProgressEvent(action=action, sub_action=update))
 
         progress = StreamProgress(
             action=action,
@@ -1802,7 +1783,7 @@ async def _execute_scm_actions(
 
     for action in scm_actions:
         idx = _action_index(action, action_index_map)
-        event_queue.put_nowait(ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action, action_index=idx))
+        event_queue.put_nowait(ActionStartedEvent(action=action, action_index=idx))
 
         result = await _execute_scm_clone(
             action,
@@ -1814,8 +1795,7 @@ async def _execute_scm_actions(
 
         results.append(result)
         event_queue.put_nowait(
-            ProgressEvent(
-                kind=ProgressEventKind.ACTION_COMPLETED,
+            ActionCompletedEvent(
                 action=action,
                 result=result,
                 action_index=idx,
@@ -1896,8 +1876,7 @@ async def _execute_scm_clone(
             # progress on stderr ("Receiving objects: 42%").
             def _progress_cb(update: SubActionProgress) -> None:
                 event_queue.put_nowait(
-                    ProgressEvent(
-                        kind=ProgressEventKind.SUB_ACTION_PROGRESS,
+                    SubActionProgressEvent(
                         action=action,
                         sub_action=update,
                     )

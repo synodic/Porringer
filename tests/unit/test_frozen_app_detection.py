@@ -70,17 +70,10 @@ class TestPythonCommandFrozenApp:
         original_exe = sys.executable
         # Ensure sys.frozen is absent (the normal case)
         with (
+            patch.object(sys, 'frozen', False, create=True),
             patch('porringer.core.plugin_schema.python_environment.shutil.which', return_value=_SYSTEM_PYTHON),
         ):
-            # Remove sys.frozen if it somehow exists
-            frozen = getattr(sys, 'frozen', None)
-            if frozen is not None:
-                delattr(sys, 'frozen')
-            try:
-                result = env.python_command(empty_ctx)
-            finally:
-                if frozen is not None:
-                    sys.frozen = frozen  # type: ignore[attr-defined]
+            result = env.python_command(empty_ctx)
 
         assert result == original_exe
 

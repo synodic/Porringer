@@ -12,12 +12,15 @@ from porringer.core.plugin_schema.environment import PackageParameters
 from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.plugin.pip.plugin import PIPEnvironment
 from porringer.schema import (
+    ActionCompletedEvent,
+    ActionStartedEvent,
+    ManifestLoadedEvent,
     ProgressEvent,
-    ProgressEventKind,
     SetupAction,
     SetupActionResult,
     SetupParameters,
     SubActionProgress,
+    SubActionProgressEvent,
 )
 
 HALF_PROGRESS = 0.5
@@ -60,30 +63,26 @@ class TestProgressEvent:
 
     @staticmethod
     def test_action_started() -> None:
-        """ACTION_STARTED event populates expected fields."""
+        """ActionStartedEvent populates expected fields."""
         action = _make_action()
-        event = ProgressEvent(kind=ProgressEventKind.ACTION_STARTED, action=action)
-        assert event.kind == ProgressEventKind.ACTION_STARTED
+        event = ActionStartedEvent(action=action, action_index=0)
         assert event.action is action
-        assert event.result is None
-        assert event.sub_action is None
+        assert event.action_index == 0
 
     @staticmethod
     def test_action_completed() -> None:
-        """ACTION_COMPLETED event includes result."""
+        """ActionCompletedEvent includes result."""
         action = _make_action()
         result = SetupActionResult(action=action, success=True, message='ok')
-        event = ProgressEvent(kind=ProgressEventKind.ACTION_COMPLETED, action=action, result=result)
-        assert event.kind == ProgressEventKind.ACTION_COMPLETED
+        event = ActionCompletedEvent(action=action, result=result, action_index=0)
         assert event.result is result
 
     @staticmethod
     def test_sub_action_progress() -> None:
-        """SUB_ACTION_PROGRESS event includes sub-action."""
+        """SubActionProgressEvent includes sub-action."""
         action = _make_action()
         sub = SubActionProgress(action=action, phase='downloading', progress=HALF_PROGRESS, message='pkg')
-        event = ProgressEvent(kind=ProgressEventKind.SUB_ACTION_PROGRESS, action=action, sub_action=sub)
-        assert event.kind == ProgressEventKind.SUB_ACTION_PROGRESS
+        event = SubActionProgressEvent(action=action, sub_action=sub)
         assert event.sub_action is sub
 
 
@@ -241,11 +240,11 @@ class TestExecuteStream:
             events = collected
 
             # Should have at least a MANIFEST_LOADED event + start/complete pairs
-            manifest_events = [e for e in events if e.kind == ProgressEventKind.MANIFEST_LOADED]
+            manifest_events = [e for e in events if isinstance(e, ManifestLoadedEvent)]
             assert len(manifest_events) >= 1
 
-            started = [e for e in events if e.kind == ProgressEventKind.ACTION_STARTED]
-            completed = [e for e in events if e.kind == ProgressEventKind.ACTION_COMPLETED]
+            started = [e for e in events if isinstance(e, ActionStartedEvent)]
+            completed = [e for e in events if isinstance(e, ActionCompletedEvent)]
             assert len(started) == len(completed)
 
     @staticmethod

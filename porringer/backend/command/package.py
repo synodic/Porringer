@@ -20,6 +20,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from porringer.backend.builder import Builder
+from porringer.backend.command.core.action_builder import load_manifest
 from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins, discover_environments
 from porringer.backend.command.core.execution import execute_package, execute_uninstall
 from porringer.backend.command.core.resolution import (
@@ -43,6 +44,7 @@ from porringer.schema import (
     SetupActionResult,
     SyncStrategy,
 )
+from porringer.schema.plugin import ScopedPackage
 from porringer.utility.exception import PluginError, UpdateError
 
 logger = logging.getLogger(__name__)
@@ -248,7 +250,7 @@ class PackageCommands:
         *,
         project_path: Path | None = None,
         plugins: DiscoveredPlugins | None = None,
-    ) -> builtins.list[RuntimePackageResult]:
+    ) -> builtins.list[RuntimePackageResult] | None:
         """List packages for every installed runtime of a consumer plugin.
 
         Discovers all runtime tags, resolves each to an interpreter
@@ -262,11 +264,11 @@ class PackageCommands:
             plugins: Pre-discovered plugins.
 
         Returns:
-            One :class:`RuntimePackageResult` per queried runtime.
+            One :class:`RuntimePackageResult` per queried runtime,
+            or ``None`` if the plugin is not a :class:`RuntimeConsumer`.
 
         Raises:
-            PluginError: If the plugin is not found or is not a
-                :class:`RuntimeConsumer`.
+            PluginError: If the plugin is not found.
         """
         logger.debug('Listing packages by runtime for plugin: %s', plugin_name)
 
@@ -280,7 +282,7 @@ class PackageCommands:
         env = environments[key]
 
         if not isinstance(env, RuntimeConsumer):
-            raise PluginError(f"Plugin '{plugin_name}' is not a RuntimeConsumer and cannot be queried per-runtime")
+            return None
 
         consumed_kind = env.consumed_runtime_kind()
 
@@ -318,6 +320,118 @@ class PackageCommands:
             plugin_name,
         )
         return results
+
+    @staticmethod
+    async def list_all_scopes(
+        plugin_name: str,
+        directories: builtins.list[Path],
+        *,
+        skip_global: bool = False,
+        plugins: DiscoveredPlugins | None = None,
+        runtime_context: RuntimeContext | None = None,
+    ) -> builtins.list[ScopedPackage]:
+        """List packages across multiple scopes (global + per-directory).
+
+        Fans out :meth:`list` via a ``TaskGroup`` across the global
+        environment and each directory, returning a flat list of
+        :class:`ScopedPackage` entries tagged with their origin.
+
+        Args:
+            plugin_name: The canonical plugin name to query.
+            directories: Project directories to query.
+            skip_global: When ``True``, skip the global (``project_path=None``) scope.
+            plugins: Pre-discovered plugins.
+            runtime_context: Pre-resolved runtime context.
+
+        Returns:
+            A flat list of scoped packages across all queried scopes.
+        """
+        logger.debug(
+            'list_all_scopes: plugin=%s dirs=%d skip_global=%s',
+            plugin_name,
+            len(directories),
+            skip_global,
+        )
+
+        scoped: builtins.list[ScopedPackage] = []
+
+        async def _query_scope(
+            project_path: Path | None,
+            label: str,
+        ) -> builtins.list[ScopedPackage]:
+            pkgs = await PackageCommands.list(
+                plugin_name,
+                project_path=project_path,
+                plugins=plugins,
+                runtime_context=runtime_context,
+            )
+            return [
+                ScopedPackage(
+                    package=pkg,
+                    scope_label=label,
+                    scope_path=project_path,
+                    plugin_name=plugin_name,
+                )
+                for pkg in pkgs
+            ]
+
+        async with asyncio.TaskGroup() as tg:
+            tasks: builtins.list[asyncio.Task[builtins.list[ScopedPackage]]] = []
+            if not skip_global:
+                tasks.append(tg.create_task(_query_scope(None, 'global')))
+            for d in directories:
+                tasks.append(tg.create_task(_query_scope(d, d.name)))
+
+        for task in tasks:
+            scoped.extend(task.result())
+
+        logger.debug('list_all_scopes complete: %d scoped packages', len(scoped))
+        return scoped
+
+    @staticmethod
+    async def list_with_manifest(
+        plugin_name: str,
+        manifest_path: Path,
+        *,
+        project_path: Path | None = None,
+        plugins: DiscoveredPlugins | None = None,
+        runtime_context: RuntimeContext | None = None,
+    ) -> tuple[builtins.list[Package], set[str]]:
+        """List installed packages with manifest cross-referencing.
+
+        Loads a manifest, extracts the package names declared for the
+        given *plugin_name*, then lists installed packages.  Returns the
+        installed packages and the set of canonical names that appear in
+        the manifest so the caller can cross-reference.
+
+        Args:
+            plugin_name: The canonical plugin name to query.
+            manifest_path: Path to the manifest file or directory.
+            project_path: Path to the project directory.
+            plugins: Pre-discovered plugins.
+            runtime_context: Pre-resolved runtime context.
+
+        Returns:
+            A ``(packages, declared_names)`` tuple.  *declared_names*
+            contains canonical package names present in the manifest
+            for *plugin_name*.
+        """
+        logger.debug('list_with_manifest: plugin=%s manifest=%s', plugin_name, manifest_path)
+
+        preview = load_manifest(manifest_path)
+        declared_names: set[str] = set()
+        for action in preview.actions:
+            if action.installer == plugin_name and action.package is not None:
+                declared_names.add(str(canonicalize_name(action.package.name)))
+
+        installed = await PackageCommands.list(
+            plugin_name,
+            project_path=project_path,
+            plugins=plugins,
+            runtime_context=runtime_context,
+        )
+
+        return installed, declared_names
 
     # --- Imperative operations ---
 

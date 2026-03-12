@@ -13,8 +13,8 @@ import pytest
 
 from porringer.backend.command.sync import SyncCommands
 from porringer.schema import (
+    ManifestParsedEvent,
     ProgressEvent,
-    ProgressEventKind,
     SetupParameters,
 )
 
@@ -50,7 +50,7 @@ class TestEventLoopSafety:
                 events.append(event)
 
             # Sanity: we received at least one manifest event
-            assert any(e.kind == ProgressEventKind.MANIFEST_PARSED for e in events)
+            assert any(isinstance(e, ManifestParsedEvent) for e in events)
 
     @staticmethod
     async def test_concurrent_streams_on_shared_loop() -> None:
@@ -83,5 +83,5 @@ class TestEventLoopSafety:
         assert len(results['b']) > 0, 'Stream B produced no events'
 
         # Both had manifest-parsed events
-        assert any(e.kind == ProgressEventKind.MANIFEST_PARSED for e in results['a'])
-        assert any(e.kind == ProgressEventKind.MANIFEST_PARSED for e in results['b'])
+        assert any(isinstance(e, ManifestParsedEvent) for e in results['a'])
+        assert any(isinstance(e, ManifestParsedEvent) for e in results['b'])
