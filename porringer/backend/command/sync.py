@@ -14,22 +14,31 @@ in the sibling modules:
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+import shutil
+import tempfile
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from pathlib import Path
+from urllib.parse import urlparse
 
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.schema import (
+    ActionCompletedEvent,
     BatchSetupResults,
+    DownloadParameters,
+    DownloadResult,
+    ManifestFailedEvent,
+    ManifestLoadedEvent,
+    ManifestParsedEvent,
     ManifestValidationResult,
     ProgressEvent,
-    ProgressEventKind,
     SetupActionResult,
     SetupParameters,
     SetupResults,
     SyncStrategy,
 )
+from porringer.utility.download import download_file
 from porringer.utility.exception import ManifestError
 
 from .core.action_builder import (
@@ -185,31 +194,71 @@ class SyncCommands:
 
     # --- Path resolution ---
 
-    def _resolve_paths(self, parameters: SetupParameters) -> list[Path]:
-        """Resolve paths from parameters, using cache if needed.
-
-        Args:
-            parameters: The setup parameters.
+    @staticmethod
+    def _partition_paths(
+        paths: Path | Sequence[str | Path],
+    ) -> tuple[list[Path], list[str]]:
+        """Split *paths* into local filesystem paths and remote URLs.
 
         Returns:
-            List of paths to process.
+            ``(local, urls)`` — local paths and URL strings.
+        """
+        if isinstance(paths, Path):
+            return [paths], []
+        local: list[Path] = []
+        urls: list[str] = []
+        for p in paths:
+            if isinstance(p, str):
+                parsed = urlparse(p)
+                if parsed.scheme in {'http', 'https'}:
+                    urls.append(p)
+                    continue
+                local.append(Path(p))
+            else:
+                local.append(p)
+        return local, urls
+
+    def _resolve_paths(self, parameters: SetupParameters) -> tuple[list[Path], list[str]]:
+        """Resolve paths from parameters, using cache if needed.
+
+        Returns:
+            ``(local_paths, urls)`` — local paths to process and URLs
+            to download.
 
         Raises:
             ValueError: If no paths can be resolved.
         """
         if parameters.paths is not None:
-            if isinstance(parameters.paths, Path):
-                return [parameters.paths]
-            return list(parameters.paths)
+            return self._partition_paths(parameters.paths)
 
         if self._cache_manager is None:
-            return [Path('.')]
+            return [Path('.')], []
 
         paths = self._cache_manager.get_paths()
         if not paths:
             raise ValueError('No cached directories. Add directories first with "porringer cache add".')
 
-        return paths
+        return paths, []
+
+    @staticmethod
+    async def _download_urls(
+        urls: list[str],
+        tmp_dir: Path,
+    ) -> list[Path]:
+        """Download remote manifest URLs into *tmp_dir*.
+
+        Returns a list of local paths to the downloaded files.
+        """
+        downloaded: list[Path] = []
+        for i, url in enumerate(urls):
+            dest = tmp_dir / f'manifest_{i}.json'
+            result: DownloadResult = await download_file(
+                DownloadParameters(url=url, destination=dest),
+            )
+            if not result.success:
+                raise ValueError(f'Failed to download manifest from {url}: {result.message}')
+            downloaded.append(dest)
+        return downloaded
 
     # --- Manifest loading ---
 
@@ -225,7 +274,7 @@ class SyncCommands:
         Returns:
             A tuple of (loaded previews, failed paths).
         """
-        paths = self._resolve_paths(parameters)
+        paths, _urls = self._resolve_paths(parameters)
         logger.info(f'Processing {len(paths)} path(s) (dry_run={parameters.dry_run})')
 
         previews: list[SetupResults] = []
@@ -306,28 +355,32 @@ class SyncCommands:
             and sub-action update.
         """
         queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
+        tmp_dir: Path | None = None
 
         async def _run() -> None:
             """Load manifests, emit events, and execute."""
+            nonlocal tmp_dir
             try:
-                previews, failed = await asyncio.to_thread(self._load_manifests, parameters)
+                # Download remote URLs to a temp directory, then merge
+                # the downloaded paths into the parameters for manifest
+                # loading.
+                local_paths, urls = self._resolve_paths(parameters)
+                effective_params = parameters
+                if urls:
+                    tmp = tempfile.mkdtemp(prefix='porringer_')
+                    tmp_dir = Path(tmp)
+                    url_paths = await self._download_urls(urls, tmp_dir)
+                    all_paths = local_paths + url_paths
+                    effective_params = parameters.model_copy(update={'paths': all_paths})
+
+                previews, failed = await asyncio.to_thread(self._load_manifests, effective_params)
 
                 for path, error in failed:
-                    queue.put_nowait(
-                        ProgressEvent(
-                            kind=ProgressEventKind.MANIFEST_FAILED,
-                            failed_path=(path, error),
-                        )
-                    )
+                    queue.put_nowait(ManifestFailedEvent(failed_path=(path, error)))
 
                 for preview in previews:
                     # Stage 1: fast preview — cards can be shown immediately
-                    queue.put_nowait(
-                        ProgressEvent(
-                            kind=ProgressEventKind.MANIFEST_PARSED,
-                            manifest=preview,
-                        )
-                    )
+                    queue.put_nowait(ManifestParsedEvent(manifest=preview))
 
                 # Use pre-passed plugins when available; otherwise
                 # discover once for the entire batch.
@@ -380,6 +433,8 @@ class SyncCommands:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            if tmp_dir is not None:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
     async def run(self, parameters: SetupParameters, *, plugins: DiscoveredPlugins | None = None) -> BatchSetupResults:
         """Execute setup and return collected results.
@@ -401,11 +456,11 @@ class SyncCommands:
         failed_paths: list[tuple[Path, str]] = []
 
         async for event in self.execute_stream(parameters, plugins=plugins):
-            if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+            if isinstance(event, ManifestLoadedEvent):
                 manifests.append(event.manifest)
-            elif event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
+            elif isinstance(event, ManifestFailedEvent):
                 failed_paths.append(event.failed_path)
-            elif event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+            elif isinstance(event, ActionCompletedEvent):
                 collected.append(event.result)
 
         # Partition collected results by manifest based on action identity

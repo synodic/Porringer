@@ -2,23 +2,12 @@
 
 import asyncio
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from pathlib import Path
 from typing import Literal
 
+from porringer.core.schema import PluginKind
 from porringer.schema.execution import SetupAction, SetupActionResult, SetupResults
-
-
-class ProgressEventKind(Enum):
-    """The kind of progress event emitted during setup execution."""
-
-    MANIFEST_LOADED = auto()
-    MANIFEST_FAILED = auto()
-    PLUGINS_DISCOVERED = auto()
-    MANIFEST_PARSED = auto()
-    ACTION_STARTED = auto()
-    ACTION_COMPLETED = auto()
-    SUB_ACTION_PROGRESS = auto()
+from porringer.schema.plugin import PluginCapability
 
 
 @dataclass(slots=True)
@@ -45,36 +34,90 @@ class SubActionProgress:
     stream: Literal['stdout', 'stderr'] | None = None
 
 
-@dataclass(slots=True)
-class ProgressEvent:
-    """A single progress event from the setup execution stream.
-
-    Consumers iterate over `AsyncIterator[ProgressEvent]` to observe
-    action lifecycle and sub-action detail updates.
+@dataclass(slots=True, frozen=True)
+class DiscoveredPluginEntry:
+    """A single discovered plugin with availability and capabilities.
 
     Args:
-        kind: What this event represents.
-        action: The setup action this event relates to (``None`` for manifest-level events).
-        result: Action result (set only for ``ACTION_COMPLETED``).
-        sub_action: Sub-action detail (set only for ``SUB_ACTION_PROGRESS``).
-        manifest: Per-manifest preview (set for ``MANIFEST_LOADED`` and ``MANIFEST_PARSED``).
-        failed_path: Path and error message (set only for ``MANIFEST_FAILED``).
-        plugin_names: Discovered plugin names (set only for ``PLUGINS_DISCOVERED``).
-        plugin_availability: Plugin name → is-available mapping (set only
-            for ``PLUGINS_DISCOVERED``).  ``True`` means the tool binary
-            is on PATH; ``False`` means the plugin package is installed
-            but the tool is not found.
+        name: The canonical plugin name.
+        available: Whether the plugin's tool binary is on PATH.
+        capabilities: Protocol capabilities the plugin implements.
+        kind: The plugin kind (package, tool, runtime, etc.).
     """
 
-    kind: ProgressEventKind
-    action: SetupAction | None = None
-    result: SetupActionResult | None = None
-    sub_action: SubActionProgress | None = None
-    manifest: SetupResults | None = None
-    failed_path: tuple[Path, str] | None = None
-    plugin_names: list[str] | None = None
-    plugin_availability: dict[str, bool] | None = None
+    name: str
+    available: bool
+    capabilities: frozenset[PluginCapability]
+    kind: PluginKind
+
+
+# ---------------------------------------------------------------------------
+# Discriminated progress-event union
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class ManifestLoadedEvent:
+    """Emitted when a manifest has been fully resolved and is ready for execution."""
+
+    manifest: SetupResults
+
+
+@dataclass(slots=True)
+class ManifestFailedEvent:
+    """Emitted when a manifest path could not be loaded."""
+
+    failed_path: tuple[Path, str]
+
+
+@dataclass(slots=True)
+class PluginsDiscoveredEvent:
+    """Emitted once per batch with the full plugin availability map."""
+
+    discovered_plugins: tuple[DiscoveredPluginEntry, ...]
+
+
+@dataclass(slots=True)
+class ManifestParsedEvent:
+    """Emitted after a manifest is parsed but before execution (fast preview)."""
+
+    manifest: SetupResults
+
+
+@dataclass(slots=True)
+class ActionStartedEvent:
+    """Emitted when an action begins execution."""
+
+    action: SetupAction
     action_index: int | None = None
+
+
+@dataclass(slots=True)
+class ActionCompletedEvent:
+    """Emitted when an action finishes execution."""
+
+    action: SetupAction
+    result: SetupActionResult
+    action_index: int | None = None
+
+
+@dataclass(slots=True)
+class SubActionProgressEvent:
+    """Emitted for fine-grained progress within an action."""
+
+    action: SetupAction
+    sub_action: SubActionProgress
+
+
+type ProgressEvent = (
+    ManifestLoadedEvent
+    | ManifestFailedEvent
+    | PluginsDiscoveredEvent
+    | ManifestParsedEvent
+    | ActionStartedEvent
+    | ActionCompletedEvent
+    | SubActionProgressEvent
+)
 
 
 @dataclass(slots=True)

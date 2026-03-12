@@ -230,7 +230,7 @@ async def main():
 
     # Execute with streaming progress
     async for event in api.sync.execute_stream(SetupParameters(paths=project_path)):
-        print(event.kind, getattr(event.action, 'description', 'manifest loaded'))
+        print(type(event).__name__, getattr(event, 'action', None) and event.action.description or 'manifest')
 
 
 asyncio.run(main())

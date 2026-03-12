@@ -18,9 +18,11 @@ from porringer.backend.schema import GlobalConfiguration
 from porringer.console.schema import ConsoleConfiguration
 from porringer.core.schema import Package
 from porringer.schema import (
+    ActionCompletedEvent,
     BatchSetupResults,
     LocalConfiguration,
-    ProgressEventKind,
+    ManifestFailedEvent,
+    ManifestLoadedEvent,
     SetupActionResult,
     SetupParameters,
     SetupResults,
@@ -160,11 +162,11 @@ async def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupRes
     failed_paths: list[tuple[Path, str]] = []
 
     async for event in api.sync.execute_stream(params):
-        if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+        if isinstance(event, ManifestLoadedEvent):
             manifests.append(event.manifest)
-        elif event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
+        elif isinstance(event, ManifestFailedEvent):
             failed_paths.append(event.failed_path)
-        elif event.kind == ProgressEventKind.ACTION_COMPLETED and event.result:
+        elif isinstance(event, ActionCompletedEvent):
             collected.append(event.result)
 
     # Partition collected results by manifest based on action identity

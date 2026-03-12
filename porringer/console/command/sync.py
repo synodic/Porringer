@@ -12,14 +12,18 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
 from porringer.api import API
 from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
+    ActionCompletedEvent,
+    ActionStartedEvent,
     BatchSetupResults,
+    ManifestFailedEvent,
+    ManifestLoadedEvent,
     ProgressEvent,
-    ProgressEventKind,
     SetupAction,
     SetupActionResult,
     SetupParameters,
     SetupResults,
     SubActionProgress,
+    SubActionProgressEvent,
     SyncStrategy,
 )
 
@@ -147,17 +151,16 @@ class _ProgressTracker:
 
     def handle_progress_event(self, event: ProgressEvent, total_actions: int) -> None:
         """Dispatch a progress event to the appropriate handler."""
-        if event.action is None:
-            return
-        action_desc = _action_description(event.action)
-
-        if event.kind == ProgressEventKind.ACTION_STARTED:
+        if isinstance(event, ActionStartedEvent):
+            action_desc = _action_description(event.action)
             self.handle_action_started(action_desc, total_actions)
             return
-        if event.kind == ProgressEventKind.ACTION_COMPLETED:
+        if isinstance(event, ActionCompletedEvent):
+            action_desc = _action_description(event.action)
             self.handle_action_completed(action_desc, event.result, total_actions)
             return
-        if event.kind == ProgressEventKind.SUB_ACTION_PROGRESS:
+        if isinstance(event, SubActionProgressEvent):
+            action_desc = _action_description(event.action)
             self.handle_sub_action_progress(action_desc, event.sub_action)
 
 
@@ -169,7 +172,7 @@ async def _run_stream_with_progress(api: API, tracker: _ProgressTracker) -> None
         tracker: Progress tracker with state and display.
     """
     async for event in api.sync.execute_stream(tracker.setup_params):
-        if event.kind == ProgressEventKind.MANIFEST_LOADED and event.manifest:
+        if isinstance(event, ManifestLoadedEvent):
             tracker.state.manifests.append(event.manifest)
             total = sum(len(m.actions) for m in tracker.state.manifests)
             if tracker.state.overall_task is not None:
@@ -179,7 +182,7 @@ async def _run_stream_with_progress(api: API, tracker: _ProgressTracker) -> None
                     _progress_label(tracker.setup_params.strategy), total=total
                 )
             continue
-        if event.kind == ProgressEventKind.MANIFEST_FAILED and event.failed_path:
+        if isinstance(event, ManifestFailedEvent):
             tracker.state.failed_paths.append(event.failed_path)
             continue
         total_actions = sum(len(m.actions) for m in tracker.state.manifests)

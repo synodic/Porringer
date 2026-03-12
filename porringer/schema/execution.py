@@ -234,8 +234,13 @@ class SyncStrategy(Enum):
 class SetupParameters(BaseModel):
     """Parameters for the setup command."""
 
-    paths: Path | Sequence[Path] | None = Field(
-        default=None, description='Path(s) to manifest file(s) or directories. None uses all cached directories.'
+    paths: Path | Sequence[str | Path] | None = Field(
+        default=None,
+        description=(
+            'Path(s) to manifest file(s) or directories, or URL strings '
+            '(``http://`` / ``https://``) pointing to remote manifests. '
+            'None uses all cached directories.'
+        ),
     )
     project_directory: Path | Literal[False] | None = Field(
         default=None,

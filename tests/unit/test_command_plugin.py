@@ -1749,6 +1749,7 @@ class TestListPackagesByRuntime:
 
             results = await PackageCommands.list_by_runtime('pip')
 
+        assert results is not None
         assert len(results) == NUM_RESOLVED_TAGS
         assert results[0].tag == '3.14'
         assert results[0].provider == 'pim'
@@ -1781,20 +1782,19 @@ class TestListPackagesByRuntime:
 
             results = await PackageCommands.list_by_runtime('pip')
 
+        assert results is not None
         assert len(results) == 1
         assert results[0].tag == '3.14'
 
     @staticmethod
-    async def test_non_consumer_raises() -> None:
-        """A plugin that is not a RuntimeConsumer raises PluginError."""
+    async def test_non_consumer_returns_none() -> None:
+        """A plugin that is not a RuntimeConsumer returns None."""
         mock_env = MagicMock(spec=Environment)
         # Not a RuntimeConsumer — no consumed_runtime_kind
 
-        with (
-            patch('porringer.backend.command.package._discover_environments', return_value={'brew': mock_env}),
-            pytest.raises(PluginError, match='not a RuntimeConsumer'),
-        ):
-            await PackageCommands.list_by_runtime('brew')
+        with patch('porringer.backend.command.package._discover_environments', return_value={'brew': mock_env}):
+            result = await PackageCommands.list_by_runtime('brew')
+            assert result is None
 
     @staticmethod
     async def test_missing_plugin_raises() -> None:
@@ -1872,5 +1872,6 @@ class TestListPackagesByRuntime:
 
             results = await PackageCommands.list_by_runtime('pip')
 
+        assert results is not None
         assert len(results) == NUM_CONCURRENT_RUNTIMES
         assert mock_env.packages.call_count == NUM_CONCURRENT_RUNTIMES
