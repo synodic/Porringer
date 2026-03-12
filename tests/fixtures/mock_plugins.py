@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import override
 
+import pytest
 from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
@@ -32,6 +33,13 @@ RUNTIME_ACTION_TEMPLATE = {
 """Keyword arguments for constructing a ``SetupAction`` that installs
 a mock Python runtime.  Import and expand via
 ``SetupAction(**RUNTIME_ACTION_TEMPLATE)``."""
+
+environment_mode = pytest.mark.parametrize('is_frozen', [False, True], ids=['normal', 'frozen'])
+"""Parametrize decorator that runs a test in both normal and frozen modes.
+
+Test methods receive an ``is_frozen`` parameter.  Use
+``frozen_context`` from ``tests.conftest`` to activate the frozen
+environment when ``is_frozen is True``."""
 
 
 @contextmanager

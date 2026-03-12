@@ -457,6 +457,21 @@ async def resolve_runtime_tag_override(
     return None
 
 
+def forward_version_metadata(result: SetupActionResult, operation: Operation) -> None:
+    """Copy version fields from a resolved *operation* into *result*.
+
+    After a real install/upgrade/uninstall the low-level helpers return a
+    bare ``SetupActionResult`` without version information.  This merges
+    the metadata that was captured during resolution so that callers
+    always see it.
+    """
+    if isinstance(operation, Install | Upgrade):
+        result.installed_version = result.installed_version or getattr(operation, 'installed_version', None)
+        result.available_version = result.available_version or getattr(operation, 'available_version', None)
+    elif isinstance(operation, Uninstall):
+        result.installed_version = result.installed_version or getattr(operation, 'installed_version', None)
+
+
 async def execute_package(
     action: SetupAction,
     environments: dict[str, Environment],
@@ -532,13 +547,15 @@ async def execute_package(
 
     # --- Plugin-management actions ----------------------------------------
     if action.plugin_target is not None:
-        return await _attempt_plugin_operation(
+        result = await _attempt_plugin_operation(
             action,
             operation=resolved.operation,
             event_queue=event_queue,
             plugin_manager=resolved.plugin_manager,
             project_environments=ctx.project_environments,
         )
+        forward_version_metadata(result, resolved.operation)
+        return result
 
     # --- Normal package actions -------------------------------------------
     if action.installer not in environments:
@@ -554,9 +571,11 @@ async def execute_package(
         case _:
             verb = 'Upgrading'
     logger.info(f"{verb} '{action.package}' via {action.installer}")
-    return await _attempt_package_operation(
+    result = await _attempt_package_operation(
         action, environment, resolved.operation, event_queue, runtime_context=ctx.runtime_context
     )
+    forward_version_metadata(result, resolved.operation)
+    return result
 
 
 async def _attempt_package_operation(
@@ -651,18 +670,20 @@ async def execute_uninstall(
 
     # --- Plugin-management actions ----------------------------------------
     if action.plugin_target is not None:
-        return await _attempt_plugin_operation(
+        result = await _attempt_plugin_operation(
             action,
             operation=Uninstall(),
             event_queue=event_queue,
             plugin_manager=resolved.plugin_manager,
             project_environments=ctx.project_environments,
         )
+        forward_version_metadata(result, resolved.operation)
+        return result
 
     # --- Normal package actions -------------------------------------------
     environment = environments[action.installer]
     logger.info("Uninstalling '%s' via %s", action.package, action.installer)
-    return await _attempt_operation(
+    result = await _attempt_operation(
         action,
         spec=OperationSpec(
             execute=environment.uninstall,
@@ -672,6 +693,8 @@ async def execute_uninstall(
         event_queue=event_queue,
         runtime_context=ctx.runtime_context,
     )
+    forward_version_metadata(result, resolved.operation)
+    return result
 
 
 async def _attempt_plugin_operation(

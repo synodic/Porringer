@@ -10,10 +10,11 @@ import sys
 from unittest.mock import patch
 
 from porringer.core.plugin_schema.runtime import RuntimeContext
+from tests.conftest import frozen_context
 from tests.fixtures.mock_plugins import MOCK_DIST, MOCK_RUNTIME_EXE, MockPythonEnv
 
-_FROZEN_EXE = r'C:\app\synodic.exe'
 _SYSTEM_PYTHON = r'C:\Python314\python.exe'
+_FROZEN_EXE = r'C:\app\synodic.exe'  # matches frozen_context default
 
 
 # ---------------------------------------------------------------------------
@@ -30,11 +31,7 @@ class TestPythonCommandFrozenApp:
         env = MockPythonEnv(MOCK_DIST)
         empty_ctx = RuntimeContext()
 
-        with (
-            patch.object(sys, 'frozen', True, create=True),
-            patch.object(sys, 'executable', _FROZEN_EXE),
-            patch('porringer.core.plugin_schema.python_environment.shutil.which', return_value=_SYSTEM_PYTHON),
-        ):
+        with frozen_context(which_result=_SYSTEM_PYTHON):
             result = env.python_command(empty_ctx)
 
         assert result == _SYSTEM_PYTHON
@@ -45,10 +42,7 @@ class TestPythonCommandFrozenApp:
         env = MockPythonEnv(MOCK_DIST)
         rc = RuntimeContext(executables={'python': MOCK_RUNTIME_EXE})
 
-        with (
-            patch.object(sys, 'frozen', True, create=True),
-            patch.object(sys, 'executable', _FROZEN_EXE),
-        ):
+        with frozen_context():
             result = env.python_command(rc)
 
         assert result == str(MOCK_RUNTIME_EXE)
@@ -96,11 +90,7 @@ class TestPythonCommandFrozenApp:
         """With runtime_context=None (not just empty), still applies frozen fallback."""
         env = MockPythonEnv(MOCK_DIST)
 
-        with (
-            patch.object(sys, 'frozen', True, create=True),
-            patch.object(sys, 'executable', _FROZEN_EXE),
-            patch('porringer.core.plugin_schema.python_environment.shutil.which', return_value=_SYSTEM_PYTHON),
-        ):
+        with frozen_context(which_result=_SYSTEM_PYTHON):
             result = env.python_command(None)
 
         assert result == _SYSTEM_PYTHON

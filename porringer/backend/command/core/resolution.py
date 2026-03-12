@@ -11,6 +11,7 @@ helper used by resolution, dry-run, and execution paths.
 
 import asyncio
 import logging
+import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -90,7 +91,15 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
                 installed_version=iv,
                 available_version=av,
             )
-        case Install(installed_version=iv):
+        case Install(installed_version=iv, available_version=av):
+            return SetupActionResult(
+                action=resolved.action,
+                success=True,
+                message=resolved.message,
+                installed_version=iv,
+                available_version=av,
+            )
+        case Uninstall(installed_version=iv):
             return SetupActionResult(
                 action=resolved.action,
                 success=True,
@@ -294,7 +303,9 @@ async def _resolve_plugin_operation(
         # No PluginManager found — cannot determine presence, assume install
         return ResolvedOperation(
             action=action,
-            operation=Install(),
+            operation=Install(
+                available_version=action.package.constraint if action.package else None,
+            ),
             plugin_manager=None,
             message='PluginManager not available for query',
         )
@@ -384,6 +395,12 @@ async def _resolve_package_operation(
         )
         presence.is_installed = True
         presence.detail = 'found on PATH'
+        version = await probe_tool_version(action.package.name)
+        presence.matched = Package(name=action.package.name, version=version)
+        if version is None:
+            # Cannot compare versions — suppress update check to
+            # avoid false UPDATE_AVAILABLE results.
+            presence.env_for_updates = None
 
     return await _apply_strategy(
         action=action,
@@ -392,6 +409,37 @@ async def _resolve_package_operation(
         http_client=ctx.http_client,
         runtime_context=ctx.runtime_context,
     )
+
+
+_VERSION_PATTERN = re.compile(r'v?(\d+\.\d+(?:\.\d+)*)')
+
+
+async def probe_tool_version(name: str) -> str | None:
+    """Run ``<name> --version`` and extract a version string.
+
+    Uses the same regex pattern as
+    ``ToolBasedPlugin.tool_version()`` so that version output is
+    parsed consistently.
+
+    Returns the version string on success, or ``None`` when the
+    subprocess fails, times out, or the output cannot be parsed.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            name,
+            '--version',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=5)
+        output = (stdout_bytes or b'').decode('utf-8', errors='replace') + (stderr_bytes or b'').decode(
+            'utf-8', errors='replace'
+        )
+    except FileNotFoundError, OSError, TimeoutError:
+        return None
+
+    match = _VERSION_PATTERN.search(output)
+    return match.group(1) if match else None
 
 
 @dataclass(slots=True)
@@ -550,7 +598,9 @@ async def _apply_strategy(
         # Not installed → install
         return ResolvedOperation(
             action=action,
-            operation=Install(),
+            operation=Install(
+                available_version=action.package.constraint if action.package else None,
+            ),
             plugin_manager=plugin_manager,
         )
 
@@ -569,7 +619,9 @@ async def _apply_strategy(
     # Not installed under LATEST/EXACT → fall back to install
     return ResolvedOperation(
         action=action,
-        operation=Install(),
+        operation=Install(
+            available_version=action.package.constraint if action.package else None,
+        ),
         message='not installed, will install instead',
         plugin_manager=plugin_manager,
     )
