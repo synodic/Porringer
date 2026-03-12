@@ -61,7 +61,14 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         invalidate_plugin_cache()
 
 
-_FROZEN_EXE = r'C:\app\synodic.exe'
+FROZEN_EXE = r'C:\app\synodic.exe'
+
+environment_mode = pytest.mark.parametrize('is_frozen', [False, True], ids=['normal', 'frozen'])
+"""Parametrize decorator that runs a test in both normal and frozen modes.
+
+Test methods receive an ``is_frozen`` parameter.  Use
+``frozen_context`` to activate the frozen environment when
+``is_frozen is True``."""
 
 
 @contextmanager
@@ -77,7 +84,7 @@ def frozen_context(*, which_result: str | None = None) -> Iterator[None]:
     """
     patches = [
         patch.object(sys, 'frozen', True, create=True),
-        patch.object(sys, 'executable', _FROZEN_EXE),
+        patch.object(sys, 'executable', FROZEN_EXE),
     ]
     if which_result is not None:
         patches.append(

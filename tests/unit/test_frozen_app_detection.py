@@ -10,11 +10,10 @@ import sys
 from unittest.mock import patch
 
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from tests.conftest import frozen_context
+from tests.conftest import FROZEN_EXE, frozen_context
 from tests.fixtures.mock_plugins import MOCK_DIST, MOCK_RUNTIME_EXE, MockPythonEnv
 
 _SYSTEM_PYTHON = r'C:\Python314\python.exe'
-_FROZEN_EXE = r'C:\app\synodic.exe'  # matches frozen_context default
 
 
 # ---------------------------------------------------------------------------
@@ -55,12 +54,12 @@ class TestPythonCommandFrozenApp:
 
         with (
             patch.object(sys, 'frozen', True, create=True),
-            patch.object(sys, 'executable', _FROZEN_EXE),
+            patch.object(sys, 'executable', FROZEN_EXE),
             patch('porringer.core.plugin_schema.python_environment.shutil.which', return_value=None),
         ):
             result = env.python_command(empty_ctx)
 
-        assert result == _FROZEN_EXE
+        assert result == FROZEN_EXE
 
     @staticmethod
     def test_not_frozen_ignores_which() -> None:

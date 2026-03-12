@@ -465,11 +465,10 @@ def forward_version_metadata(result: SetupActionResult, operation: Operation) ->
     the metadata that was captured during resolution so that callers
     always see it.
     """
+    if isinstance(operation, Install | Upgrade | Uninstall):
+        result.installed_version = result.installed_version or operation.installed_version
     if isinstance(operation, Install | Upgrade):
-        result.installed_version = result.installed_version or getattr(operation, 'installed_version', None)
-        result.available_version = result.available_version or getattr(operation, 'available_version', None)
-    elif isinstance(operation, Uninstall):
-        result.installed_version = result.installed_version or getattr(operation, 'installed_version', None)
+        result.available_version = result.available_version or operation.available_version
 
 
 async def execute_package(
@@ -508,13 +507,7 @@ async def execute_package(
     ctx = context or ResolutionContext()
     # Merge caller-provided cache into the context for resolution
     if package_cache is not None:
-        ctx = ResolutionContext(
-            project_path=ctx.project_path,
-            project_environments=ctx.project_environments,
-            http_client=ctx.http_client,
-            package_cache=package_cache,
-            runtime_context=ctx.runtime_context,
-        )
+        ctx = replace(ctx, package_cache=package_cache)
 
     # --- Per-action runtime override --------------------------------------
     if action.runtime_tag is not None:
@@ -525,13 +518,7 @@ async def execute_package(
                 success=False,
                 message=(f"Could not resolve runtime tag '{action.runtime_tag}' for ecosystem '{action.ecosystem}'"),
             )
-        ctx = ResolutionContext(
-            project_path=ctx.project_path,
-            project_environments=ctx.project_environments,
-            http_client=ctx.http_client,
-            package_cache=ctx.package_cache,
-            runtime_context=override_ctx,
-        )
+        ctx = replace(ctx, runtime_context=override_ctx)
 
     resolved = await resolve_operation(
         action,
@@ -649,13 +636,7 @@ async def execute_uninstall(
     ctx = context or ResolutionContext()
     # Merge caller-provided cache into the context for resolution
     if package_cache is not None:
-        ctx = ResolutionContext(
-            project_path=ctx.project_path,
-            project_environments=ctx.project_environments,
-            http_client=ctx.http_client,
-            package_cache=package_cache,
-            runtime_context=ctx.runtime_context,
-        )
+        ctx = replace(ctx, package_cache=package_cache)
 
     resolved = await resolve_uninstall_operation(
         action,

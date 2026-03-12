@@ -83,15 +83,7 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
                 installed_version=iv,
                 available_version=av,
             )
-        case Upgrade(installed_version=iv, available_version=av):
-            return SetupActionResult(
-                action=resolved.action,
-                success=True,
-                message=resolved.message,
-                installed_version=iv,
-                available_version=av,
-            )
-        case Install(installed_version=iv, available_version=av):
+        case Install(installed_version=iv, available_version=av) | Upgrade(installed_version=iv, available_version=av):
             return SetupActionResult(
                 action=resolved.action,
                 success=True,
@@ -106,12 +98,9 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
                 message=resolved.message,
                 installed_version=iv,
             )
-        case _:
-            return SetupActionResult(
-                action=resolved.action,
-                success=True,
-                message=resolved.message,
-            )
+
+    # Operation is a closed union — this is unreachable.
+    raise AssertionError(f'unhandled operation type: {type(resolved.operation)}')
 
 
 class PackageCache:
@@ -304,7 +293,7 @@ async def _resolve_plugin_operation(
         return ResolvedOperation(
             action=action,
             operation=Install(
-                available_version=action.package.constraint if action.package else None,
+                available_version=action.package.constraint,
             ),
             plugin_manager=None,
             message='PluginManager not available for query',
@@ -543,7 +532,8 @@ async def _apply_strategy(
     callers receive populated version metadata.
     """
     installed_ver = presence.matched.version if presence.matched else None
-    has_extras = action.package is not None and bool(action.package.extras)
+    assert action.package is not None
+    has_extras = bool(action.package.extras)
 
     if strategy == SyncStrategy.MINIMAL:
         if presence.is_installed:
@@ -599,7 +589,7 @@ async def _apply_strategy(
         return ResolvedOperation(
             action=action,
             operation=Install(
-                available_version=action.package.constraint if action.package else None,
+                available_version=action.package.constraint,
             ),
             plugin_manager=plugin_manager,
         )
@@ -620,7 +610,7 @@ async def _apply_strategy(
     return ResolvedOperation(
         action=action,
         operation=Install(
-            available_version=action.package.constraint if action.package else None,
+            available_version=action.package.constraint,
         ),
         message='not installed, will install instead',
         plugin_manager=plugin_manager,

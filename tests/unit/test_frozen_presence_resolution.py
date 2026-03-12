@@ -33,7 +33,7 @@ from porringer.schema import (
     Upgrade,
 )
 from porringer.test.mock.subprocess import fake_proc
-from tests.fixtures.mock_plugins import environment_mode
+from tests.conftest import environment_mode
 
 _RESOLUTION_MODULE = 'porringer.backend.command.core.resolution'
 
@@ -41,6 +41,15 @@ _RESOLUTION_MODULE = 'porringer.backend.command.core.resolution'
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _make_mock_env(packages: list[Any] | None = None) -> MagicMock:
+    """Build a minimal mock ``Environment`` with the given installed packages."""
+    env = MagicMock()
+    env.packages = AsyncMock(return_value=packages if packages is not None else [])
+    env.package_name_validator = MagicMock(return_value=None)
+    type(env).package_name_validator = classmethod(lambda cls: None)
+    return env
 
 
 def _make_action(
@@ -145,10 +154,7 @@ class TestPathFallbackFrozenResolution:
     async def test_frozen_path_fallback_marks_installed_with_version() -> None:
         """Tool on PATH with a parseable version resolves to Skip(ALREADY_INSTALLED)."""
         action = _make_action('pipx')
-        mock_env = MagicMock()
-        mock_env.packages = AsyncMock(return_value=[])
-        mock_env.package_name_validator = MagicMock(return_value=None)
-        type(mock_env).package_name_validator = classmethod(lambda cls: None)
+        mock_env = _make_mock_env()
 
         proc = fake_proc(stdout='pipx 1.7.1')
 
@@ -172,10 +178,7 @@ class TestPathFallbackFrozenResolution:
     async def test_frozen_path_fallback_no_version_suppresses_update() -> None:
         """Tool on PATH but unparseable version suppresses update detection."""
         action = _make_action('custom-tool')
-        mock_env = MagicMock()
-        mock_env.packages = AsyncMock(return_value=[])
-        mock_env.package_name_validator = MagicMock(return_value=None)
-        type(mock_env).package_name_validator = classmethod(lambda cls: None)
+        mock_env = _make_mock_env()
 
         proc = fake_proc(stdout='no version here')
 
@@ -200,10 +203,7 @@ class TestPathFallbackFrozenResolution:
     async def test_non_frozen_does_not_use_path_fallback() -> None:
         """Outside a frozen app a missing package stays not-installed."""
         action = _make_action('pipx')
-        mock_env = MagicMock()
-        mock_env.packages = AsyncMock(return_value=[])
-        mock_env.package_name_validator = MagicMock(return_value=None)
-        type(mock_env).package_name_validator = classmethod(lambda cls: None)
+        mock_env = _make_mock_env()
 
         # Ensure sys.frozen is absent (normal environment)
         with (
@@ -366,10 +366,7 @@ class TestResolutionEnvironmentMatrix:
     async def test_installed_package_skips_in_both_modes(is_frozen: bool) -> None:
         """A present package is always skipped under MINIMAL, regardless of frozen state."""
         action = _make_action('pipx')
-        mock_env = MagicMock()
-        mock_env.packages = AsyncMock(return_value=[Package(name='pipx', version='1.7.0')])
-        mock_env.package_name_validator = MagicMock(return_value=None)
-        type(mock_env).package_name_validator = classmethod(lambda cls: None)
+        mock_env = _make_mock_env([Package(name='pipx', version='1.7.0')])
 
         # Suppress update check for simplicity
         mock_env.check_updates = AsyncMock(return_value=None)
@@ -401,10 +398,7 @@ class TestResolutionEnvironmentMatrix:
     async def test_missing_package_installs_in_normal_mode(is_frozen: bool) -> None:
         """A missing package triggers Install when not rescued by PATH fallback."""
         action = _make_action('ruff')
-        mock_env = MagicMock()
-        mock_env.packages = AsyncMock(return_value=[])
-        mock_env.package_name_validator = MagicMock(return_value=None)
-        type(mock_env).package_name_validator = classmethod(lambda cls: None)
+        mock_env = _make_mock_env()
 
         patches: list[Any] = []
         if is_frozen:
@@ -443,10 +437,7 @@ class TestInstallConstraintPopulation:
     async def test_minimal_not_installed_carries_constraint() -> None:
         """MINIMAL strategy populates ``available_version`` from the constraint."""
         action = _make_action('ruff', constraint='>=0.8.0')
-        mock_env = MagicMock()
-        mock_env.packages = AsyncMock(return_value=[])
-        mock_env.package_name_validator = MagicMock(return_value=None)
-        type(mock_env).package_name_validator = classmethod(lambda cls: None)
+        mock_env = _make_mock_env()
 
         with patch.object(sys, 'frozen', False, create=True):
             resolved = await resolve_operation(
@@ -463,10 +454,7 @@ class TestInstallConstraintPopulation:
     async def test_latest_not_installed_carries_constraint() -> None:
         """LATEST strategy populates ``available_version`` from the constraint."""
         action = _make_action('ruff', constraint='>=0.8.0')
-        mock_env = MagicMock()
-        mock_env.packages = AsyncMock(return_value=[])
-        mock_env.package_name_validator = MagicMock(return_value=None)
-        type(mock_env).package_name_validator = classmethod(lambda cls: None)
+        mock_env = _make_mock_env()
 
         with patch.object(sys, 'frozen', False, create=True):
             resolved = await resolve_operation(
@@ -483,10 +471,7 @@ class TestInstallConstraintPopulation:
     async def test_no_constraint_yields_none() -> None:
         """A bare package name without constraint yields ``None``."""
         action = _make_action('ruff', constraint=None)
-        mock_env = MagicMock()
-        mock_env.packages = AsyncMock(return_value=[])
-        mock_env.package_name_validator = MagicMock(return_value=None)
-        type(mock_env).package_name_validator = classmethod(lambda cls: None)
+        mock_env = _make_mock_env()
 
         with patch.object(sys, 'frozen', False, create=True):
             resolved = await resolve_operation(
