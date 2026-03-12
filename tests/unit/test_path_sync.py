@@ -1,14 +1,16 @@
 """Tests for :mod:`porringer.core.path` — system PATH synchronization."""
 
 import os
-import sys
 import threading
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-if sys.platform == 'win32':
+try:
     import winreg
+except ImportError:  # not on Windows
+    winreg: Any = None
 
 from porringer.core.path import (
     ensure_system_path,

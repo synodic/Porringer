@@ -20,9 +20,12 @@ import os
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
-if sys.platform == 'win32':
+try:
     import winreg
+except ImportError:  # not on Windows
+    winreg: Any = None
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,9 @@
 """Shared pytest configuration and fixtures."""
 
+import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -46,12 +49,57 @@ def pytest_configure(config: pytest.Config) -> None:
         'markers',
         'mock_packages: use a cached package list instead of real subprocess calls',
     )
+    config.addinivalue_line(
+        'markers',
+        'frozen_app: simulate a frozen (PyInstaller) application environment',
+    )
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
     """Invalidate the plugin cache only for tests marked ``@pytest.mark.fresh_plugins``."""
     if item.get_closest_marker('fresh_plugins'):
         invalidate_plugin_cache()
+
+
+FROZEN_EXE = r'C:\app\synodic.exe'
+
+environment_mode = pytest.mark.parametrize('is_frozen', [False, True], ids=['normal', 'frozen'])
+"""Parametrize decorator that runs a test in both normal and frozen modes.
+
+Test methods receive an ``is_frozen`` parameter.  Use
+``frozen_context`` to activate the frozen environment when
+``is_frozen is True``."""
+
+
+@contextmanager
+def frozen_context(*, which_result: str | None = None) -> Iterator[None]:
+    """Context manager that simulates a frozen (PyInstaller) environment.
+
+    Patches ``sys.frozen``, ``sys.executable``, and optionally
+    ``shutil.which`` in the modules that check them.
+
+    Args:
+        which_result: Value returned by ``shutil.which``.  When
+            ``None``, ``shutil.which`` is not patched.
+    """
+    patches = [
+        patch.object(sys, 'frozen', True, create=True),
+        patch.object(sys, 'executable', FROZEN_EXE),
+    ]
+    if which_result is not None:
+        patches.append(
+            patch(
+                'porringer.core.plugin_schema.python_environment.shutil.which',
+                return_value=which_result,
+            )
+        )
+    for p in patches:
+        p.start()
+    try:
+        yield
+    finally:
+        for p in reversed(patches):
+            p.stop()
 
 
 @pytest.fixture(autouse=True)

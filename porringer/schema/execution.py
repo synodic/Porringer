@@ -35,10 +35,15 @@ class Install:
 
     ``installed_version`` is populated when ``reason`` is
     ``ENSURE_EXTRAS`` — the package is already present.
+
+    ``available_version`` carries the manifest constraint string
+    (e.g. ``'>=1.0'``) so downstream clients can display the
+    version requirement even before installation.
     """
 
     reason: InstallReason = InstallReason.NOT_INSTALLED
     installed_version: str | None = None
+    available_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
