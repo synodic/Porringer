@@ -2,7 +2,7 @@
 
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -72,7 +72,7 @@ Test methods receive an ``is_frozen`` parameter.  Use
 
 
 @contextmanager
-def frozen_context(*, which_result: str | None = None) -> Iterator[None]:
+def frozen_context(*, which_result: str | None = None) -> Generator[None]:
     """Context manager that simulates a frozen (PyInstaller) environment.
 
     Patches ``sys.frozen``, ``sys.executable``, and optionally

@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import override
@@ -38,7 +38,7 @@ _RUNTIME_ACTION = SetupAction(
 
 
 @contextmanager
-def _preserve_path() -> Iterator[None]:
+def _preserve_path() -> Generator[None]:
     """Save and restore the PATH environment variable."""
     original = os.environ.get('PATH', '')
     try:

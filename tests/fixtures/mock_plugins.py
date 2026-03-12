@@ -7,7 +7,7 @@ duplication and ensures consistent test behaviour.
 """
 
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import override
@@ -35,7 +35,7 @@ a mock Python runtime.  Import and expand via
 
 
 @contextmanager
-def preserve_path() -> Iterator[None]:
+def preserve_path() -> Generator[None]:
     """Save and restore the PATH environment variable."""
     original = os.environ.get('PATH', '')
     try:
