@@ -10,6 +10,10 @@ import pytest
 if sys.platform == 'win32':
     import winreg
 
+    _REG_EXPAND_SZ = winreg.REG_EXPAND_SZ
+else:
+    _REG_EXPAND_SZ = 2  # value of REG_EXPAND_SZ on Windows
+
 from porringer.core.path import (
     ensure_system_path,
     probe_unix_paths,
@@ -84,17 +88,14 @@ class TestWindowsRegistry:
     @pytest.mark.skipif(os.name != 'nt', reason='Windows-only test')
     def test_reads_system_and_user_path() -> None:
         """Both HKLM (system) and HKCU (user) entries are returned."""
-        if sys.platform != 'win32':
-            return
-
         system_path = r'C:\Program Files\nodejs;C:\Windows\system32'
         user_path = r'%APPDATA%\npm'
 
         def fake_query(key, name):
             # Return the raw value and a dummy type
             if key == 'system_key':
-                return (system_path, winreg.REG_EXPAND_SZ)
-            return (user_path, winreg.REG_EXPAND_SZ)
+                return (system_path, _REG_EXPAND_SZ)
+            return (user_path, _REG_EXPAND_SZ)
 
         keys = iter(['system_key', 'user_key'])
 
