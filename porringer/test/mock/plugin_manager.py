@@ -91,3 +91,8 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
     async def plugin_remove(self, params: PackageParameters) -> Package | None:
         self.operations.append(('remove', params.package))
         return Package(name=params.package.name, version=None)
+
+    @override
+    def tool_python(self) -> str | None:
+        """Mock has no real interpreter."""
+        return None

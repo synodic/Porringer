@@ -13,8 +13,12 @@ plugin management is available.
 
 import asyncio
 import logging
+import re
+import shutil
+import sys
 from abc import abstractmethod
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from porringer.core.plugin_schema.environment import PackageParameters
@@ -262,6 +266,27 @@ class PluginManager(Protocol):
             return None
         return Package(name=params.package.name, version=None)
 
+    def tool_python(self) -> str | None:
+        """Return the Python interpreter for this tool's own environment.
+
+        Plugin managers wrap tools (PDM, Poetry, etc.) that maintain
+        their own site-packages — separate from both the project
+        venv and the installer's Python.  This method returns the
+        path to that interpreter so that ``importlib.metadata`` can
+        be queried for plugin dependency metadata.
+
+        The default implementation delegates to
+        :func:`find_tool_python` which locates the interpreter via
+        venv discovery and shebang parsing.  Subclasses may override
+        this if the tool exposes its interpreter through a more
+        direct mechanism.
+
+        Returns:
+            Absolute path to the tool's Python interpreter, or
+            ``None`` when it cannot be determined.
+        """
+        return find_tool_python(self.tool_name())
+
 
 def find_plugin_manager(
     tool_name: str,
@@ -290,4 +315,68 @@ def find_plugin_manager(
     for proj_env in project_environments.values():
         if isinstance(proj_env, PluginManager) and proj_env.tool_name() == tool_name and proj_env.is_available():
             return proj_env
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Tool interpreter discovery
+# ---------------------------------------------------------------------------
+
+
+def find_tool_python(tool_name: str) -> str | None:
+    """Find the Python interpreter inside a CLI tool's own environment.
+
+    Works for tools installed via pipx, uv tool, or pip by inspecting
+    the tool's executable:
+
+    1. If the executable lives inside a virtual environment (has a
+       ``pyvenv.cfg`` ancestor), the venv's ``python`` is returned.
+    2. Otherwise, the executable (or binary launcher) is read and a
+       ``#!`` shebang line is extracted to locate the interpreter.
+
+    Returns ``None`` when the interpreter cannot be determined.
+    """
+    tool_path = shutil.which(tool_name)
+    if tool_path is None:
+        return None
+
+    tool_exe = Path(tool_path).resolve()
+
+    # Check if the tool itself lives inside a venv
+    for parent in tool_exe.parents:
+        if (parent / 'pyvenv.cfg').exists():
+            python = parent / 'Scripts' / 'python.exe' if sys.platform == 'win32' else parent / 'bin' / 'python'
+            if python.is_file():
+                return str(python)
+            break
+
+    # Parse the executable for an embedded interpreter path (shebang)
+    try:
+        raw = tool_exe.read_bytes()
+    except OSError:
+        return None
+
+    text = raw.decode('utf-8', errors='replace')
+    match = re.search(r'#!([^\r\n]*[Pp]ython[^\r\n]*)', text)
+    if not match:
+        return None
+
+    return _resolve_shebang(match.group(1).strip())
+
+
+def _resolve_shebang(shebang: str) -> str | None:
+    """Resolve a shebang string to a Python interpreter path."""
+    # Handle "#!/usr/bin/env python3"
+    if '/env ' in shebang or '\\env ' in shebang:
+        return shutil.which(shebang.rsplit(maxsplit=1)[-1])
+
+    # Direct path — try as-is, then with .exe suffix on Windows
+    candidate = Path(shebang)
+    if candidate.is_file():
+        return str(candidate)
+    if sys.platform == 'win32' and not shebang.lower().endswith('.exe'):
+        candidate = candidate.with_suffix('.exe')
+        if candidate.is_file():
+            return str(candidate)
+
     return None

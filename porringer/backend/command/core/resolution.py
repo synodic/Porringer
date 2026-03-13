@@ -309,6 +309,7 @@ async def _resolve_plugin_operation(
     # Query installed plugins — use cache when available
     presence = _PresenceResult(
         env_for_updates=environments.get(action.installer) if action.installer else None,
+        introspection_python=manager.tool_python(),
     )
     try:
         if ctx.package_cache is not None:
@@ -349,7 +350,11 @@ async def _resolve_package_operation(
     environment = environments[action.installer]
     validator = type(environment).package_name_validator()
 
-    presence = _PresenceResult(env_for_updates=environment)
+    introspection_python: str | None = None
+    if isinstance(environment, PythonEnvironment):
+        introspection_python = environment.python_command(ctx.runtime_context)
+
+    presence = _PresenceResult(env_for_updates=environment, introspection_python=introspection_python)
     try:
         if ctx.package_cache is not None:
             installed_packages = await ctx.package_cache.get_packages(
@@ -451,6 +456,41 @@ _REQUIRES_SCRIPT = (
 """Subprocess one-liner (stdlib only) that emits a package's
 ``Requires-Dist`` entries as a JSON list of strings."""
 
+_PLUGIN_EXTRAS_SCRIPT = (
+    'import importlib.metadata, json, sys; '
+    'd = importlib.metadata.distribution(sys.argv[1]); '
+    'ns = [d.metadata["Name"] for d in importlib.metadata.distributions()]; '
+    'json.dump({"requires": d.requires or [], "installed": ns}, sys.stdout)'
+)
+"""Subprocess one-liner that returns *both* the ``Requires-Dist`` entries
+for a specific package **and** the names of every installed distribution.
+
+Used for plugin-target extras checks where the host process does not
+have access to the tool's own package list."""
+
+
+async def _run_metadata_script(python: str, script: str, package_name: str, *, timeout: int = 10) -> bytes | None:
+    """Run a metadata-introspection one-liner in *python* and return stdout.
+
+    Returns raw stdout bytes on success, or ``None`` when the
+    subprocess fails, times out, or cannot be started.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            python,
+            '-c',
+            script,
+            package_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0:
+            return None
+        return stdout_bytes or b''
+    except FileNotFoundError, OSError, TimeoutError:
+        return None
+
 
 async def fetch_package_requires(
     python: str,
@@ -462,20 +502,12 @@ async def fetch_package_requires(
     the standard library.  Returns the raw requirement strings on
     success or ``None`` when introspection fails for any reason.
     """
+    raw = await _run_metadata_script(python, _REQUIRES_SCRIPT, package_name)
+    if raw is None:
+        return None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            python,
-            '-c',
-            _REQUIRES_SCRIPT,
-            package_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        if proc.returncode != 0:
-            return None
-        return json.loads(stdout_bytes or b'[]')
-    except FileNotFoundError, OSError, TimeoutError, ValueError:
+        return json.loads(raw)
+    except ValueError:
         return None
 
 
@@ -535,28 +567,92 @@ async def check_extras_installed(
     return extras_satisfied(raw_requires, extras, installed_names)
 
 
+_PLUGIN_EXTRAS_SCRIPT = (
+    'import importlib.metadata, json, sys; '
+    'd = importlib.metadata.distribution(sys.argv[1]); '
+    'ns = [d.metadata["Name"] for d in importlib.metadata.distributions()]; '
+    'json.dump({"requires": d.requires or [], "installed": ns}, sys.stdout)'
+)
+"""Subprocess one-liner that returns *both* the ``Requires-Dist`` entries
+for a specific package **and** the names of every installed distribution.
+
+Used for plugin-target extras checks where the host process does not
+have access to the tool's own package list."""
+
+
+async def fetch_plugin_extras_context(
+    python: str,
+    package_name: str,
+) -> tuple[list[str], frozenset[str]] | None:
+    """Fetch ``Requires-Dist`` and installed names from a tool's own env.
+
+    Runs a single subprocess in *python* that returns both the
+    requirement strings for *package_name* and the complete list of
+    installed distribution names.
+
+    Returns ``(requires, installed_names)`` on success, or ``None``
+    when introspection fails.
+    """
+    raw = await _run_metadata_script(python, _PLUGIN_EXTRAS_SCRIPT, package_name, timeout=15)
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    requires: list[str] = data.get('requires', [])
+    installed = frozenset(canonicalize_name(n) for n in data.get('installed', []))
+    return requires, installed
+
+
 async def _extras_need_install(
     action: SetupAction,
     presence: _PresenceResult,
-    runtime_context: RuntimeContext | None,
 ) -> bool:
     """Return ``True`` when the action requests extras that are not satisfied.
 
     Extras are a PEP 508 concept — only Python environments can be
-    introspected via ``importlib.metadata``.  For non-Python
-    environments (or when the action has no extras) this returns
-    ``False`` immediately.
+    introspected via ``importlib.metadata``.  When
+    ``presence.introspection_python`` is ``None``:
+
+    * For **plugin-target** actions this means the tool's interpreter
+      could not be discovered — return ``True`` conservatively so the
+      underlying plugin manager re-runs the install.
+    * For **normal package** actions this means the installer is not
+      Python-based — return ``False`` (extras don't apply).
+
+    For plugin-target actions the package metadata lives in the
+    *tool's own* environment (e.g. PDM's pipx venv), not the
+    installer's.  :func:`fetch_plugin_extras_context` retrieves
+    both the ``Requires-Dist`` entries and the full set of
+    installed distribution names in a single subprocess call.
+
+    For normal package actions, ``installed_names`` is already
+    populated on ``presence`` so only the ``Requires-Dist``
+    entries need fetching.
 
     When introspection fails the result is conservatively ``True``
     (re-install to ensure the extras are present).
     """
     if not action.package or not action.package.extras:
         return False
-    if not isinstance(presence.env_for_updates, PythonEnvironment):
-        return False
-    python = presence.env_for_updates.python_command(runtime_context)
+
+    if presence.introspection_python is None:
+        # Plugin-target with no discoverable Python → conservative
+        # Normal package with non-Python installer → not applicable
+        return action.plugin_target is not None
+
+    # --- Plugin-target actions: fetch both requires + installed names --
+    if action.plugin_target is not None:
+        context = await fetch_plugin_extras_context(presence.introspection_python, action.package.name)
+        if context is None:
+            return True  # subprocess failed → conservative
+        requires, installed_names = context
+        return not extras_satisfied(requires, action.package.extras, installed_names)
+
+    # --- Normal package actions: installed_names already on presence ---
     result = await check_extras_installed(
-        python,
+        presence.introspection_python,
         action.package.name,
         action.package.extras,
         presence.installed_names,
@@ -575,6 +671,13 @@ class _PresenceResult:
     """Environment plugin to use for upstream update checks."""
     installed_names: frozenset[str] = frozenset()
     """Canonicalised names of all installed packages (for extras checks)."""
+    introspection_python: str | None = None
+    """Python interpreter to use for ``importlib.metadata`` introspection.
+
+    For normal packages this is the installer's Python (from
+    ``PythonEnvironment.python_command``).  For plugin-target actions
+    this is the tool's own Python (from ``PluginManager.tool_python``).
+    ``None`` means extras introspection is not available."""
 
 
 async def _resolve_latest_installed(
@@ -616,7 +719,7 @@ async def _resolve_latest_installed(
                     plugin_manager=plugin_manager,
                 )
             # Version is latest — check whether extras still need ensuring.
-            if await _extras_need_install(action, presence, runtime_context):
+            if await _extras_need_install(action, presence):
                 return ResolvedOperation(
                     action=action,
                     operation=Install(
@@ -676,7 +779,7 @@ async def _apply_strategy(
             # are satisfied.  When they are not (or introspection
             # fails) re-run the install so the underlying tool ensures
             # them.
-            if await _extras_need_install(action, presence, runtime_context):
+            if await _extras_need_install(action, presence):
                 return ResolvedOperation(
                     action=action,
                     operation=Install(
