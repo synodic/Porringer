@@ -169,6 +169,26 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         return sys.executable
 
     @staticmethod
+    def package_python(package_name: str) -> str | None:
+        """Return the Python interpreter for a specific installed package.
+
+        Environments that install each package into its own isolated
+        venv (e.g. pipx) should override this to return the interpreter
+        from within *that package's* venv.  The default returns
+        ``None``, meaning the caller should fall back to
+        :meth:`python_command`.
+
+        Args:
+            package_name: The name of the installed CLI tool / package.
+
+        Returns:
+            Path to the package-specific Python interpreter, or
+            ``None`` when this environment does not use per-package
+            venvs.
+        """
+        return None
+
+    @staticmethod
     def _discover_venv_python(project_path: Path) -> Path | None:
         """Discover the Python interpreter inside a project's virtual environment.
 
