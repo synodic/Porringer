@@ -152,7 +152,10 @@ class TestCheckForNewerVersion:
         """When include_prereleases=False and the plugin leaks a prerelease, filter it out."""
         env = _make_env(updates=[Package(name='cppython', version='0.9.15.dev3')])
         result = await check_for_newer_version(
-            env, PackageRef.model_validate('cppython'), '0.9.14', include_prereleases=False
+            env,
+            PackageRef.model_validate('cppython'),
+            '0.9.14',
+            include_prereleases=False,
         )
         assert result is None
 
@@ -507,7 +510,11 @@ class TestDryRunActionDispatch:
     @staticmethod
     async def test_project_action_ignores_parameters() -> None:
         """PROJECT actions always return success regardless of parameters."""
-        action = SetupAction(description='Sync project', kind=PluginKind.PROJECT, ecosystem=Ecosystem('python'))
+        action = SetupAction(
+            description='Sync project',
+            kind=PluginKind.PROJECT,
+            ecosystem=Ecosystem('python'),
+        )
         params = SetupParameters(dry_run=True)
         result = await dry_run_action(action, {}, parameters=params)
         assert result.success is True
@@ -834,8 +841,8 @@ class TestUpgradeVersionFields:
         assert result.available_version == '0.9.0'
 
     @staticmethod
-    async def test_ensure_extras_has_installed_version() -> None:
-        """Install(ENSURE_EXTRAS) result carries installed_version."""
+    async def test_extras_installed_skips_under_minimal() -> None:
+        """Installed package with extras is skipped under MINIMAL strategy."""
         action = _make_action(name='ruff[extra1]')
         env = _make_env(
             installed=[Package(name='ruff', version='0.8.0')],
@@ -845,7 +852,7 @@ class TestUpgradeVersionFields:
 
         result = await dry_run_action(action, envs, parameters=params)
 
-        assert result.skipped is False
+        assert result.skipped is True
         assert result.success is True
         assert result.installed_version == '0.8.0'
 

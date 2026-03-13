@@ -10,21 +10,28 @@ helper used by resolution, dry-run, and execution paths.
 """
 
 import asyncio
+import json
 import logging
 import re
 import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import httpx
+from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
-from porringer.core.plugin_schema.plugin_manager import PluginManager, find_plugin_manager
+from porringer.core.plugin_schema.plugin_manager import (
+    PluginManager,
+    find_plugin_manager,
+)
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PluginKind
 from porringer.schema import (
@@ -355,6 +362,7 @@ async def _resolve_package_operation(
         presence.is_installed, presence.detail, presence.matched = is_package_installed(
             action.package, installed_packages, validator, action.kind
         )
+        presence.installed_names = frozenset(canonicalize_name(p.name) for p in installed_packages)
     except PluginError as e:
         logger.debug('Plugin error checking packages for %s: %s', action.installer, e)
     except Exception as e:
@@ -431,6 +439,131 @@ async def probe_tool_version(name: str) -> str | None:
     return match.group(1) if match else None
 
 
+# ---------------------------------------------------------------------------
+# Extras introspection
+# ---------------------------------------------------------------------------
+
+_REQUIRES_SCRIPT = (
+    'import importlib.metadata, json, sys; '
+    'd = importlib.metadata.distribution(sys.argv[1]); '
+    'json.dump(d.requires or [], sys.stdout)'
+)
+"""Subprocess one-liner (stdlib only) that emits a package's
+``Requires-Dist`` entries as a JSON list of strings."""
+
+
+async def fetch_package_requires(
+    python: str,
+    package_name: str,
+) -> list[str] | None:
+    """Fetch the ``Requires-Dist`` metadata for *package_name*.
+
+    Runs a subprocess in the target *python* interpreter using only
+    the standard library.  Returns the raw requirement strings on
+    success or ``None`` when introspection fails for any reason.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            python,
+            '-c',
+            _REQUIRES_SCRIPT,
+            package_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode != 0:
+            return None
+        return json.loads(stdout_bytes or b'[]')
+    except FileNotFoundError, OSError, TimeoutError, ValueError:
+        return None
+
+
+def extras_satisfied(
+    requires: list[str],
+    requested_extras: tuple[str, ...],
+    installed_names: frozenset[str],
+) -> bool:
+    """Check whether all dependencies for *requested_extras* are present.
+
+    For each ``Requires-Dist`` entry whose environment marker matches
+    one of the *requested_extras*, verify that the dependency's
+    canonicalised name exists in *installed_names*.
+
+    Returns ``True`` when every conditional dependency for the
+    requested extras is already installed.
+    """
+    if not requested_extras:
+        return True
+
+    base_env = cast(dict[str, str], default_environment())
+
+    for extra in requested_extras:
+        eval_env = {**base_env, 'extra': extra}
+        for raw in requires:
+            try:
+                req = Requirement(raw)
+            except InvalidRequirement:
+                continue
+            if req.marker is None:
+                continue  # unconditional dep — always present
+            if not req.marker.evaluate(eval_env):
+                continue  # not relevant for this extra
+            if canonicalize_name(req.name) not in installed_names:
+                return False
+    return True
+
+
+async def check_extras_installed(
+    python: str,
+    package_name: str,
+    extras: tuple[str, ...],
+    installed_names: frozenset[str],
+) -> bool | None:
+    """Determine whether a package's extras dependencies are satisfied.
+
+    Combines :func:`fetch_package_requires` (subprocess in target
+    env) with :func:`extras_satisfied` (marker evaluation in host
+    process).
+
+    Returns ``True`` / ``False`` when introspection succeeds, or
+    ``None`` when it cannot be determined (subprocess failure, etc.).
+    """
+    raw_requires = await fetch_package_requires(python, package_name)
+    if raw_requires is None:
+        return None
+    return extras_satisfied(raw_requires, extras, installed_names)
+
+
+async def _extras_need_install(
+    action: SetupAction,
+    presence: _PresenceResult,
+    runtime_context: RuntimeContext | None,
+) -> bool:
+    """Return ``True`` when the action requests extras that are not satisfied.
+
+    Extras are a PEP 508 concept — only Python environments can be
+    introspected via ``importlib.metadata``.  For non-Python
+    environments (or when the action has no extras) this returns
+    ``False`` immediately.
+
+    When introspection fails the result is conservatively ``True``
+    (re-install to ensure the extras are present).
+    """
+    if not action.package or not action.package.extras:
+        return False
+    if not isinstance(presence.env_for_updates, PythonEnvironment):
+        return False
+    python = presence.env_for_updates.python_command(runtime_context)
+    result = await check_extras_installed(
+        python,
+        action.package.name,
+        action.package.extras,
+        presence.installed_names,
+    )
+    return result is not True  # False or None (failure) → need install
+
+
 @dataclass(slots=True)
 class _PresenceResult:
     """Result of querying whether a package/plugin is installed."""
@@ -440,6 +573,8 @@ class _PresenceResult:
     matched: Package | None = None
     env_for_updates: Environment | None = None
     """Environment plugin to use for upstream update checks."""
+    installed_names: frozenset[str] = frozenset()
+    """Canonicalised names of all installed packages (for extras checks)."""
 
 
 async def _resolve_latest_installed(
@@ -447,7 +582,6 @@ async def _resolve_latest_installed(
     action: SetupAction,
     presence: _PresenceResult,
     installed_ver: str | None,
-    has_extras: bool,
     plugin_manager: PluginManager | None,
     http_client: httpx.AsyncClient | None,
     runtime_context: RuntimeContext | None,
@@ -481,8 +615,8 @@ async def _resolve_latest_installed(
                     message=f'{pkg_name} {installed_ver} → {newer}',
                     plugin_manager=plugin_manager,
                 )
-            # Version is latest but extras may have changed.
-            if has_extras:
+            # Version is latest — check whether extras still need ensuring.
+            if await _extras_need_install(action, presence, runtime_context):
                 return ResolvedOperation(
                     action=action,
                     operation=Install(
@@ -533,14 +667,16 @@ async def _apply_strategy(
     """
     installed_ver = presence.matched.version if presence.matched else None
     assert action.package is not None
-    has_extras = bool(action.package.extras)
 
     if strategy == SyncStrategy.MINIMAL:
         if presence.is_installed:
-            # Extras cannot be introspected from installed state — always
-            # re-run the install command so the underlying tool ensures
-            # the requested extras/features are satisfied.
-            if has_extras:
+            # Extras cannot be introspected from the installed-packages
+            # list alone.  Query the target environment's metadata to
+            # determine whether the requested extras' conditional deps
+            # are satisfied.  When they are not (or introspection
+            # fails) re-run the install so the underlying tool ensures
+            # them.
+            if await _extras_need_install(action, presence, runtime_context):
                 return ResolvedOperation(
                     action=action,
                     operation=Install(
@@ -600,7 +736,6 @@ async def _apply_strategy(
             action=action,
             presence=presence,
             installed_ver=installed_ver,
-            has_extras=has_extras,
             plugin_manager=plugin_manager,
             http_client=http_client,
             runtime_context=runtime_context,
@@ -673,7 +808,11 @@ async def resolve_uninstall_operation(
             installed_packages = await environment.packages(
                 project_path=ctx.project_path, runtime_context=ctx.runtime_context
             )
-        logger.debug('packages query for %s returned %d entries', action.installer, len(installed_packages))
+        logger.debug(
+            'packages query for %s returned %d entries',
+            action.installer,
+            len(installed_packages),
+        )
         is_installed, detail, matched = is_package_installed(action.package, installed_packages, validator, action.kind)
         logger.debug(
             "is_package_installed('%s'): found=%s matched=%s",
@@ -869,19 +1008,31 @@ def is_package_installed(
 
         # Name matched
         if not package.constraint:
-            return True, f'{installed.name}=={installed.version} already installed', installed
+            return (
+                True,
+                f'{installed.name}=={installed.version} already installed',
+                installed,
+            )
 
         if installed.version is not None:
             if is_pep440:
                 try:
                     req = Requirement(str(package))
                     if Version(installed.version) in req.specifier:
-                        return True, f'{installed.name}=={installed.version} satisfies {package}', installed
+                        return (
+                            True,
+                            f'{installed.name}=={installed.version} satisfies {package}',
+                            installed,
+                        )
                 except InvalidVersion, InvalidRequirement:
                     pass
             else:
                 # Non-PEP-440: installed means installed; constraint
                 # satisfaction is left to the underlying tool.
-                return True, f'{installed.name}=={installed.version} already installed', installed
+                return (
+                    True,
+                    f'{installed.name}=={installed.version} already installed',
+                    installed,
+                )
 
     return False, None, None
