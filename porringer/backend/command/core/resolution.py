@@ -23,7 +23,10 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
-from porringer.core.plugin_schema.plugin_manager import PluginManager, find_plugin_manager
+from porringer.core.plugin_schema.plugin_manager import (
+    PluginManager,
+    find_plugin_manager,
+)
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PluginKind
@@ -73,7 +76,9 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
     """
     match resolved.operation:
         case Skip(reason=reason, installed_version=iv, available_version=av):
-            logger.debug('resolved to skip: reason=%s message=%s', reason, resolved.message)
+            logger.debug(
+                "resolved to skip: reason=%s message=%s", reason, resolved.message
+            )
             return SetupActionResult(
                 action=resolved.action,
                 success=True,
@@ -83,7 +88,10 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
                 installed_version=iv,
                 available_version=av,
             )
-        case Install(installed_version=iv, available_version=av) | Upgrade(installed_version=iv, available_version=av):
+        case (
+            Install(installed_version=iv, available_version=av)
+            | Upgrade(installed_version=iv, available_version=av)
+        ):
             return SetupActionResult(
                 action=resolved.action,
                 success=True,
@@ -100,7 +108,7 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
             )
 
     # Operation is a closed union — this is unreachable.
-    raise AssertionError(f'unhandled operation type: {type(resolved.operation)}')
+    raise AssertionError(f"unhandled operation type: {type(resolved.operation)}")
 
 
 class PackageCache:
@@ -147,7 +155,7 @@ class PackageCache:
         Returns:
             The list of installed packages.
         """
-        key = f'pkg:{installer}:{project_path}'
+        key = f"pkg:{installer}:{project_path}"
         async with self._lock_for(key):
             if key not in self._packages:
                 self._packages[key] = await environment.packages(
@@ -169,13 +177,15 @@ class PackageCache:
         Returns:
             The list of installed plugin packages.
         """
-        key = f'plg:{tool_name}'
+        key = f"plg:{tool_name}"
         async with self._lock_for(key):
             if key not in self._plugins:
                 self._plugins[key] = await manager.installed_plugins()
             return self._plugins[key]
 
-    def invalidate_packages(self, installer: str, project_path: Path | None = None) -> None:
+    def invalidate_packages(
+        self, installer: str, project_path: Path | None = None
+    ) -> None:
         """Remove cached packages for an installer so next access re-queries.
 
         Call this after a successful install/upgrade so subsequent
@@ -185,7 +195,7 @@ class PackageCache:
             installer: The installer/plugin name.
             project_path: Optional project directory scope.
         """
-        key = f'pkg:{installer}:{project_path}'
+        key = f"pkg:{installer}:{project_path}"
         self._packages.pop(key, None)
 
     def invalidate_plugins(self, tool_name: str) -> None:
@@ -194,7 +204,7 @@ class PackageCache:
         Args:
             tool_name: The host tool name.
         """
-        key = f'plg:{tool_name}'
+        key = f"plg:{tool_name}"
         self._plugins.pop(key, None)
 
     def invalidate_all(self) -> None:
@@ -266,7 +276,7 @@ async def resolve_operation(
         return ResolvedOperation(
             action=action,
             operation=Skip(),
-            message='Installer or package not specified',
+            message="Installer or package not specified",
         )
 
     # --- Plugin-management actions -----------------------------------------
@@ -296,21 +306,29 @@ async def _resolve_plugin_operation(
                 available_version=action.package.constraint,
             ),
             plugin_manager=None,
-            message='PluginManager not available for query',
+            message="PluginManager not available for query",
         )
 
     # Query installed plugins — use cache when available
     presence = _PresenceResult(
-        env_for_updates=environments.get(action.installer) if action.installer else None,
+        env_for_updates=environments.get(action.installer)
+        if action.installer
+        else None,
     )
     try:
         if ctx.package_cache is not None:
-            installed = await ctx.package_cache.get_plugins(action.plugin_target.name, manager)
+            installed = await ctx.package_cache.get_plugins(
+                action.plugin_target.name, manager
+            )
         else:
             installed = await manager.installed_plugins()
-        presence.is_installed, presence.detail, presence.matched = is_package_installed(action.package, installed)
+        presence.is_installed, presence.detail, presence.matched = is_package_installed(
+            action.package, installed
+        )
     except Exception as e:
-        logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
+        logger.debug(
+            "Could not check installed plugins for %s: %s", action.plugin_target.name, e
+        )
 
     return await _apply_strategy(
         action=action,
@@ -356,9 +374,11 @@ async def _resolve_package_operation(
             action.package, installed_packages, validator, action.kind
         )
     except PluginError as e:
-        logger.debug('Plugin error checking packages for %s: %s', action.installer, e)
+        logger.debug("Plugin error checking packages for %s: %s", action.installer, e)
     except Exception as e:
-        logger.debug('Could not check installed packages for %s: %s', action.installer, e)
+        logger.debug(
+            "Could not check installed packages for %s: %s", action.installer, e
+        )
 
     # Secondary detection: if the package was not found via the
     # environment's package list and we are running in a frozen
@@ -372,18 +392,18 @@ async def _resolve_package_operation(
     # installed" results during normal development / CI.
     if (
         not presence.is_installed
-        and getattr(sys, 'frozen', False)
+        and getattr(sys, "frozen", False)
         and action.kind in {PluginKind.PACKAGE, PluginKind.TOOL}
         and action.package is not None
         and shutil.which(action.package.name) is not None
     ):
         logger.debug(
-            'Package %s not found via %s but available on PATH; treating as installed',
+            "Package %s not found via %s but available on PATH; treating as installed",
             action.package.name,
             action.installer,
         )
         presence.is_installed = True
-        presence.detail = 'found on PATH'
+        presence.detail = "found on PATH"
         version = await probe_tool_version(action.package.name)
         presence.matched = Package(name=action.package.name, version=version)
         if version is None:
@@ -400,7 +420,7 @@ async def _resolve_package_operation(
     )
 
 
-_VERSION_PATTERN = re.compile(r'v?(\d+\.\d+(?:\.\d+)*)')
+_VERSION_PATTERN = re.compile(r"v?(\d+\.\d+(?:\.\d+)*)")
 
 
 async def probe_tool_version(name: str) -> str | None:
@@ -416,14 +436,16 @@ async def probe_tool_version(name: str) -> str | None:
     try:
         proc = await asyncio.create_subprocess_exec(
             name,
-            '--version',
+            "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=5)
-        output = (stdout_bytes or b'').decode('utf-8', errors='replace') + (stderr_bytes or b'').decode(
-            'utf-8', errors='replace'
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=5
         )
+        output = (stdout_bytes or b"").decode("utf-8", errors="replace") + (
+            stderr_bytes or b""
+        ).decode("utf-8", errors="replace")
     except FileNotFoundError, OSError, TimeoutError:
         return None
 
@@ -471,14 +493,14 @@ async def _resolve_latest_installed(
             pass  # Fall through to unconditional upgrade
         else:
             if newer is not None:
-                pkg_name = action.package.name if action.package else ''
+                pkg_name = action.package.name if action.package else ""
                 return ResolvedOperation(
                     action=action,
                     operation=Upgrade(
                         installed_version=installed_ver,
                         available_version=newer,
                     ),
-                    message=f'{pkg_name} {installed_ver} → {newer}',
+                    message=f"{pkg_name} {installed_ver} → {newer}",
                     plugin_manager=plugin_manager,
                 )
             # Version is latest but extras may have changed.
@@ -489,7 +511,7 @@ async def _resolve_latest_installed(
                         reason=InstallReason.ENSURE_EXTRAS,
                         installed_version=installed_ver,
                     ),
-                    message='ensuring extras',
+                    message="ensuring extras",
                     plugin_manager=plugin_manager,
                 )
             return ResolvedOperation(
@@ -537,20 +559,6 @@ async def _apply_strategy(
 
     if strategy == SyncStrategy.MINIMAL:
         if presence.is_installed:
-            # Extras cannot be introspected from installed state — always
-            # re-run the install command so the underlying tool ensures
-            # the requested extras/features are satisfied.
-            if has_extras:
-                return ResolvedOperation(
-                    action=action,
-                    operation=Install(
-                        reason=InstallReason.ENSURE_EXTRAS,
-                        installed_version=installed_ver,
-                    ),
-                    message='ensuring extras',
-                    plugin_manager=plugin_manager,
-                )
-
             # Always check for updates so version metadata is populated
             skip_reason = SkipReason.ALREADY_INSTALLED
             available_ver: str | None = None
@@ -572,8 +580,8 @@ async def _apply_strategy(
                 if newer is not None:
                     skip_reason = SkipReason.UPDATE_AVAILABLE
                     available_ver = newer
-                    pkg_name = action.package.name if action.package else ''
-                    msg = f'{pkg_name} {installed_ver} → {available_ver}'
+                    pkg_name = action.package.name if action.package else ""
+                    msg = f"{pkg_name} {installed_ver} → {available_ver}"
 
             return ResolvedOperation(
                 action=action,
@@ -612,7 +620,7 @@ async def _apply_strategy(
         operation=Install(
             available_version=action.package.constraint,
         ),
-        message='not installed, will install instead',
+        message="not installed, will install instead",
         plugin_manager=plugin_manager,
     )
 
@@ -646,7 +654,7 @@ async def resolve_uninstall_operation(
         return ResolvedOperation(
             action=action,
             operation=Skip(),
-            message='Installer or package not specified',
+            message="Installer or package not specified",
         )
 
     # --- Plugin-management actions -----------------------------------------
@@ -673,8 +681,14 @@ async def resolve_uninstall_operation(
             installed_packages = await environment.packages(
                 project_path=ctx.project_path, runtime_context=ctx.runtime_context
             )
-        logger.debug('packages query for %s returned %d entries', action.installer, len(installed_packages))
-        is_installed, detail, matched = is_package_installed(action.package, installed_packages, validator, action.kind)
+        logger.debug(
+            "packages query for %s returned %d entries",
+            action.installer,
+            len(installed_packages),
+        )
+        is_installed, detail, matched = is_package_installed(
+            action.package, installed_packages, validator, action.kind
+        )
         logger.debug(
             "is_package_installed('%s'): found=%s matched=%s",
             action.package.name,
@@ -682,7 +696,9 @@ async def resolve_uninstall_operation(
             matched.name if matched else None,
         )
     except Exception as e:
-        logger.debug('Could not check installed packages for %s: %s', action.installer, e)
+        logger.debug(
+            "Could not check installed packages for %s: %s", action.installer, e
+        )
         is_installed, detail, matched = False, None, None
 
     if not is_installed:
@@ -725,12 +741,16 @@ async def _resolve_plugin_uninstall(
 
     try:
         if ctx.package_cache is not None:
-            installed = await ctx.package_cache.get_plugins(action.plugin_target.name, manager)
+            installed = await ctx.package_cache.get_plugins(
+                action.plugin_target.name, manager
+            )
         else:
             installed = await manager.installed_plugins()
         is_installed, detail, matched = is_package_installed(action.package, installed)
     except Exception as e:
-        logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
+        logger.debug(
+            "Could not check installed plugins for %s: %s", action.plugin_target.name, e
+        )
         is_installed, detail, matched = False, None, None
 
     if not is_installed:
@@ -780,7 +800,7 @@ async def check_for_newer_version(
             error, missing package, etc.).
     """
     if package is None:
-        raise UpdateCheckError('no package reference')
+        raise UpdateCheckError("no package reference")
 
     try:
         params = CheckUpdatesParameters(
@@ -791,7 +811,9 @@ async def check_for_newer_version(
         )
         updates = await env.check_updates(params)
     except Exception as e:
-        logger.debug('check_updates failed for %s via %s: %s', package, env.tool_name(), e)
+        logger.debug(
+            "check_updates failed for %s via %s: %s", package, env.tool_name(), e
+        )
         raise UpdateCheckError(str(e)) from e
 
     if not updates or updates[0].version is None:
@@ -853,7 +875,7 @@ def is_package_installed(
         ``matched_package`` is the ``Package`` object that matched,
         or ``None`` when the package is not installed.
     """
-    is_pep440 = name_validator == 'pep440'
+    is_pep440 = name_validator == "pep440"
     is_runtime = kind == PluginKind.RUNTIME
 
     for installed in installed_packages:
@@ -869,19 +891,31 @@ def is_package_installed(
 
         # Name matched
         if not package.constraint:
-            return True, f'{installed.name}=={installed.version} already installed', installed
+            return (
+                True,
+                f"{installed.name}=={installed.version} already installed",
+                installed,
+            )
 
         if installed.version is not None:
             if is_pep440:
                 try:
                     req = Requirement(str(package))
                     if Version(installed.version) in req.specifier:
-                        return True, f'{installed.name}=={installed.version} satisfies {package}', installed
+                        return (
+                            True,
+                            f"{installed.name}=={installed.version} satisfies {package}",
+                            installed,
+                        )
                 except InvalidVersion, InvalidRequirement:
                     pass
             else:
                 # Non-PEP-440: installed means installed; constraint
                 # satisfaction is left to the underlying tool.
-                return True, f'{installed.name}=={installed.version} already installed', installed
+                return (
+                    True,
+                    f"{installed.name}=={installed.version} already installed",
+                    installed,
+                )
 
     return False, None, None
