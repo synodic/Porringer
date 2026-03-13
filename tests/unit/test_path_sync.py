@@ -1,16 +1,14 @@
 """Tests for :mod:`porringer.core.path` — system PATH synchronization."""
 
 import os
+import sys
 import threading
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-try:
+if sys.platform == 'win32':
     import winreg
-except ImportError:  # not on Windows
-    winreg: Any = None
 
 from porringer.core.path import (
     ensure_system_path,
@@ -86,6 +84,9 @@ class TestWindowsRegistry:
     @pytest.mark.skipif(os.name != 'nt', reason='Windows-only test')
     def test_reads_system_and_user_path() -> None:
         """Both HKLM (system) and HKCU (user) entries are returned."""
+        if sys.platform != 'win32':
+            return
+
         system_path = r'C:\Program Files\nodejs;C:\Windows\system32'
         user_path = r'%APPDATA%\npm'
 

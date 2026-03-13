@@ -20,12 +20,9 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Any
 
-try:
+if sys.platform == 'win32':
     import winreg
-except ImportError:  # not on Windows
-    winreg: Any = None
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +42,9 @@ def read_registry_path() -> list[str]:
     Entries containing unexpanded ``%VAR%`` references are expanded
     via :func:`os.path.expandvars`.
     """
+    if sys.platform != 'win32':
+        return []
+
     entries: list[str] = []
 
     # System PATH
