@@ -318,12 +318,10 @@ class TestFetchPluginExtrasContext:
     @staticmethod
     async def test_success() -> None:
         """Successful subprocess → (requires, installed_names)."""
-        payload = json.dumps(
-            {
-                'requires': ['dep-a>=1', 'dep-b ; extra == "x"'],
-                'installed': ['dep-a', 'dep-b', 'My-Package'],
-            }
-        ).encode()
+        payload = json.dumps({
+            'requires': ['dep-a>=1', 'dep-b ; extra == "x"'],
+            'installed': ['dep-a', 'dep-b', 'My-Package'],
+        }).encode()
 
         mock_proc = AsyncMock()
         mock_proc.returncode = 0

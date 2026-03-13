@@ -20,12 +20,6 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Any
-
-try:
-    import winreg
-except ImportError:  # not on Windows
-    winreg: Any = None
 
 logger = logging.getLogger(__name__)
 
@@ -37,43 +31,51 @@ _state = {'synced': False}
 # Windows: read the authoritative PATH from the registry
 # ---------------------------------------------------------------------------
 
+if sys.platform == 'win32':
+    import winreg
 
-def read_registry_path() -> list[str]:
-    """Read and expand both system and user ``PATH`` from the Windows registry.
+    def read_registry_path() -> list[str]:
+        """Read and expand both system and user ``PATH`` from the Windows registry.
 
-    Returns a combined list of directories (system first, then user).
-    Entries containing unexpanded ``%VAR%`` references are expanded
-    via :func:`os.path.expandvars`.
-    """
-    entries: list[str] = []
+        Returns a combined list of directories (system first, then user).
+        Entries containing unexpanded ``%VAR%`` references are expanded
+        via :func:`os.path.expandvars`.
+        """
+        entries: list[str] = []
 
-    # System PATH
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
-            0,
-            winreg.KEY_READ,
-        ) as key:
-            raw, _ = winreg.QueryValueEx(key, 'Path')
-            entries.extend(os.path.expandvars(raw).split(os.pathsep))
-    except OSError:
-        logger.debug('Could not read system PATH from registry')
+        # System PATH
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
+                0,
+                winreg.KEY_READ,
+            ) as key:
+                raw, _ = winreg.QueryValueEx(key, 'Path')
+                entries.extend(os.path.expandvars(raw).split(os.pathsep))
+        except OSError:
+            logger.debug('Could not read system PATH from registry')
 
-    # User PATH
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            'Environment',
-            0,
-            winreg.KEY_READ,
-        ) as key:
-            raw, _ = winreg.QueryValueEx(key, 'Path')
-            entries.extend(os.path.expandvars(raw).split(os.pathsep))
-    except OSError:
-        logger.debug('Could not read user PATH from registry')
+        # User PATH
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                'Environment',
+                0,
+                winreg.KEY_READ,
+            ) as key:
+                raw, _ = winreg.QueryValueEx(key, 'Path')
+                entries.extend(os.path.expandvars(raw).split(os.pathsep))
+        except OSError:
+            logger.debug('Could not read user PATH from registry')
 
-    return [e for e in entries if e]
+        return [e for e in entries if e]
+
+else:
+
+    def read_registry_path() -> list[str]:
+        """Non-Windows stub — returns an empty list."""
+        return []
 
 
 # ---------------------------------------------------------------------------

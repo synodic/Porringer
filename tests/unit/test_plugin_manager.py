@@ -1114,6 +1114,7 @@ class TestExtrasReinstall:
         env.check_updates.return_value = []
         env.tool_name.return_value = 'pipx'
         env.python_command.return_value = 'python'
+        env.package_python.return_value = None  # default: no per-package venv
         type(env).package_name_validator = MagicMock(return_value='pep440')
         return {'pipx': env}
 

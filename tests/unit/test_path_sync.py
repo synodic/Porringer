@@ -1,16 +1,18 @@
 """Tests for :mod:`porringer.core.path` — system PATH synchronization."""
 
 import os
+import sys
 import threading
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-try:
+if sys.platform == 'win32':
     import winreg
-except ImportError:  # not on Windows
-    winreg: Any = None
+
+    _REG_EXPAND_SZ = winreg.REG_EXPAND_SZ
+else:
+    _REG_EXPAND_SZ = 2  # value of REG_EXPAND_SZ on Windows
 
 from porringer.core.path import (
     ensure_system_path,
@@ -92,8 +94,8 @@ class TestWindowsRegistry:
         def fake_query(key, name):
             # Return the raw value and a dummy type
             if key == 'system_key':
-                return (system_path, winreg.REG_EXPAND_SZ)
-            return (user_path, winreg.REG_EXPAND_SZ)
+                return (system_path, _REG_EXPAND_SZ)
+            return (user_path, _REG_EXPAND_SZ)
 
         keys = iter(['system_key', 'user_key'])
 

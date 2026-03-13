@@ -352,7 +352,13 @@ async def _resolve_package_operation(
 
     introspection_python: str | None = None
     if isinstance(environment, PythonEnvironment):
-        introspection_python = environment.python_command(ctx.runtime_context)
+        # For environments that install each package into its own isolated
+        # venv (e.g. pipx), prefer the package-specific interpreter so
+        # that extras introspection queries the correct environment.
+        # Falls back to the environment's shared python_command when the
+        # package-specific lookup returns None.
+        pkg_python = environment.package_python(action.package.name) if action.package else None
+        introspection_python = pkg_python if pkg_python is not None else environment.python_command(ctx.runtime_context)
 
     presence = _PresenceResult(env_for_updates=environment, introspection_python=introspection_python)
     try:

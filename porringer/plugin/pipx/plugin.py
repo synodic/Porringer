@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import override
 
+from porringer.core.plugin_schema.plugin_manager import find_tool_python
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind, PluginKind
@@ -109,6 +110,27 @@ class PIPXEnvironment(PythonEnvironment):
         affect whether pipx itself is installed.
         """
         return cls.is_available()
+
+    @staticmethod
+    @override
+    def package_python(package_name: str) -> str | None:
+        """Return the Python interpreter from a package's own pipx venv.
+
+        Each pipx-installed tool lives in its own isolated venv.  To
+        introspect a package's extras we must query *that* venv's
+        Python, not the calling process's ``sys.executable``.
+
+        Uses :func:`find_tool_python` to locate the interpreter by
+        inspecting the tool's executable on PATH.
+
+        Args:
+            package_name: The name of the pipx-installed tool.
+
+        Returns:
+            Path to the tool's venv Python, or ``None`` when it
+            cannot be determined.
+        """
+        return find_tool_python(package_name)
 
     @override
     def install_command(
