@@ -529,7 +529,7 @@ class TestDryRunPluginPresence:
             parameters=params,
         )
 
-        # LATEST + installed + no newer version → skip (ALREADY_LATEST)
+        # LATEST + installed + no newer version â†’ skip (ALREADY_LATEST)
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_LATEST
 
@@ -637,7 +637,7 @@ class TestPluginUpdateCommand:
 
         Without --pip-args=--upgrade, ``pdm self add <pkg>`` delegates to
         ``pip install <pkg>`` which is a no-op when the package is already
-        installed â€” pip sees the requirement satisfied and skips the upgrade.
+        installed Ã¢â‚¬â€ pip sees the requirement satisfied and skips the upgrade.
         This test reproduces the bug where ``pdm self add cppython`` reported
         success but left the old version in place.
         """
@@ -745,7 +745,7 @@ class TestAsyncPluginUpdate:
 
 
 # ---------------------------------------------------------------------------
-# resolve_operation â€” unified resolution tests
+# resolve_operation Ã¢â‚¬â€ unified resolution tests
 # ---------------------------------------------------------------------------
 
 
@@ -783,7 +783,7 @@ class TestResolveOperation:
     # --- Normal package resolution ---
 
     async def test_minimal_installed_skips(self) -> None:
-        """MINIMAL + installed → SKIP."""
+        """MINIMAL + installed â†’ SKIP."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -792,7 +792,7 @@ class TestResolveOperation:
         assert resolved.operation.reason == SkipReason.ALREADY_INSTALLED
 
     async def test_minimal_not_installed_installs(self) -> None:
-        """MINIMAL + not installed → INSTALL."""
+        """MINIMAL + not installed â†’ INSTALL."""
         action = self._make_action()
         envs = self._make_envs(installed=[])
 
@@ -800,7 +800,7 @@ class TestResolveOperation:
         assert isinstance(resolved.operation, Install)
 
     async def test_latest_installed_upgrades(self) -> None:
-        """LATEST + installed + no newer version → SKIP (ALREADY_LATEST)."""
+        """LATEST + installed + no newer version â†’ SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -809,7 +809,7 @@ class TestResolveOperation:
         assert resolved.operation.reason == SkipReason.ALREADY_LATEST
 
     async def test_latest_not_installed_installs(self) -> None:
-        """LATEST + not installed → INSTALL (fallback)."""
+        """LATEST + not installed â†’ INSTALL (fallback)."""
         action = self._make_action()
         envs = self._make_envs(installed=[])
 
@@ -817,7 +817,7 @@ class TestResolveOperation:
         assert isinstance(resolved.operation, Install)
 
     async def test_exact_installed_upgrades(self) -> None:
-        """EXACT + installed + no newer version → SKIP (ALREADY_LATEST)."""
+        """EXACT + installed + no newer version â†’ SKIP (ALREADY_LATEST)."""
         action = self._make_action()
         envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
 
@@ -828,7 +828,7 @@ class TestResolveOperation:
     # --- Plugin-management resolution ---
 
     async def test_plugin_minimal_installed_skips(self) -> None:
-        """Plugin: MINIMAL + installed → SKIP."""
+        """Plugin: MINIMAL + installed â†’ SKIP."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -845,7 +845,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     async def test_plugin_minimal_not_installed_installs(self) -> None:
-        """Plugin: MINIMAL + not installed → INSTALL."""
+        """Plugin: MINIMAL + not installed â†’ INSTALL."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -861,7 +861,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     async def test_plugin_latest_installed_upgrades(self) -> None:
-        """Plugin: LATEST + installed → UPGRADE."""
+        """Plugin: LATEST + installed â†’ UPGRADE."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -877,7 +877,7 @@ class TestResolveOperation:
         assert resolved.plugin_manager is mock_pm
 
     async def test_plugin_latest_not_installed_installs(self) -> None:
-        """Plugin: LATEST + not installed → INSTALL (fallback)."""
+        """Plugin: LATEST + not installed â†’ INSTALL (fallback)."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -892,7 +892,7 @@ class TestResolveOperation:
         assert isinstance(resolved.operation, Install)
 
     async def test_plugin_no_manager_defaults_to_install(self) -> None:
-        """Plugin: no PluginManager → INSTALL."""
+        """Plugin: no PluginManager â†’ INSTALL."""
         action = self._make_action(plugin_target='mock-pm')
 
         resolved = await resolve_operation(action, {}, SyncStrategy.MINIMAL)
@@ -911,7 +911,7 @@ class TestResolveOperation:
 
     @staticmethod
     async def test_missing_installer_skips() -> None:
-        """Action with no installer/package → SKIP."""
+        """Action with no installer/package â†’ SKIP."""
         action = SetupAction(
             description='Bad action',
             kind=PluginKind.TOOL,
@@ -1057,7 +1057,7 @@ class TestCliCommandUpgradePreview:
                 SyncStrategy.LATEST,
             )
 
-        # Poetry delegates update to add â€” verify via protocol method
+        # Poetry delegates update to add Ã¢â‚¬â€ verify via protocol method
         assert cmd == tuple(poetry_env.plugin_update_command(ref))
         assert cmd == tuple(poetry_env.plugin_add_command(ref))
 
@@ -1073,7 +1073,7 @@ class TestExtrasReinstall:
     Non-Python environments (``MagicMock(spec=Environment)``) skip the
     extras introspection entirely and behave as before.
     Python environments (``MagicMock(spec=PythonEnvironment)``) trigger
-    ``check_extras_installed`` — the subprocess is mocked here.
+    ``check_extras_installed`` â€” the subprocess is mocked here.
     """
 
     @staticmethod
@@ -1235,10 +1235,10 @@ class TestExtrasReinstall:
 
     # --- Plugin resolution ---
 
-    async def test_plugin_minimal_extras_skips(self) -> None:
-        """Plugin: MINIMAL + installed + extras -> SKIP (plugin env, no introspection)."""
+    async def test_plugin_minimal_no_extras_skips(self) -> None:
+        """Plugin: MINIMAL + installed + no extras -> SKIP."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        action = self._make_action(plugin_target='mock-pm')
+        action = self._make_action(name='cppython', plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_operation(
@@ -1252,16 +1252,81 @@ class TestExtrasReinstall:
         assert resolved.operation.reason == SkipReason.ALREADY_INSTALLED
         assert resolved.plugin_manager is mock_pm
 
+    async def test_plugin_minimal_extras_satisfied_skips(self) -> None:
+        """Plugin: MINIMAL + installed + extras + introspection satisfied -> SKIP."""
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
+        action = self._make_action(plugin_target='mock-pm')
+        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+
+        with patch(
+            'porringer.backend.command.core.resolution.fetch_plugin_extras_context',
+            return_value=([], frozenset()),
+        ):
+            resolved = await resolve_operation(
+                action,
+                {},
+                SyncStrategy.MINIMAL,
+                ResolutionContext(project_environments=proj_envs),
+            )
+
+        assert isinstance(resolved.operation, Skip)
+        assert resolved.operation.reason == SkipReason.ALREADY_INSTALLED
+        assert resolved.plugin_manager is mock_pm
+
+    async def test_plugin_minimal_extras_not_satisfied_reinstalls(self) -> None:
+        """Plugin: MINIMAL + installed + extras not satisfied -> ENSURE_EXTRAS."""
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
+        action = self._make_action(plugin_target='mock-pm')
+        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+
+        with patch(
+            'porringer.backend.command.core.resolution.fetch_plugin_extras_context',
+            return_value=(['dep-a ; extra == "cmake"'], frozenset()),
+        ):
+            resolved = await resolve_operation(
+                action,
+                {},
+                SyncStrategy.MINIMAL,
+                ResolutionContext(project_environments=proj_envs),
+            )
+
+        assert isinstance(resolved.operation, Install)
+        assert resolved.operation.reason == InstallReason.ENSURE_EXTRAS
+
+    async def test_plugin_minimal_extras_tool_python_not_found_reinstalls(self) -> None:
+        """Plugin: MINIMAL + installed + extras + tool_python() returns None -> ENSURE_EXTRAS."""
+        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        # tool_python() returns None by default on MockPluginManager
+        action = self._make_action(plugin_target='mock-pm')
+        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+
+        resolved = await resolve_operation(
+            action,
+            {},
+            SyncStrategy.MINIMAL,
+            ResolutionContext(project_environments=proj_envs),
+        )
+
+        assert isinstance(resolved.operation, Install)
+        assert resolved.operation.reason == InstallReason.ENSURE_EXTRAS
+
     # --- Execution routing ---
 
     async def test_execute_minimal_extras_skips(self) -> None:
-        """execute_package under MINIMAL with extras skips execution."""
+        """execute_package under MINIMAL with extras skips when satisfied."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=proj_envs)
 
-        result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
+        with patch(
+            'porringer.backend.command.core.resolution.fetch_plugin_extras_context',
+            return_value=([], frozenset()),
+        ):
+            result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
         assert result.success is True
         assert result.skipped is True
         assert len(mock_pm.operations) == 0

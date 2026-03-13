@@ -1,11 +1,15 @@
 """Tests for extras introspection utilities in resolution.py.
 
 Verifies that ``extras_satisfied()`` correctly evaluates PEP 508
-conditional dependencies and that ``check_extras_installed()``
-combines subprocess metadata collection with host-side evaluation.
+conditional dependencies, that ``check_extras_installed()``
+combines subprocess metadata collection with host-side evaluation,
+and that the plugin-environment helpers (``find_tool_python``,
+``fetch_plugin_extras_context``) work correctly.
 """
 
 import json
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from packaging.markers import default_environment
@@ -14,7 +18,9 @@ from packaging.utils import canonicalize_name
 from porringer.backend.command.core.resolution import (
     check_extras_installed,
     extras_satisfied,
+    fetch_plugin_extras_context,
 )
+from porringer.core.plugin_schema.plugin_manager import find_tool_python
 
 # ---------------------------------------------------------------------------
 # Sample Requires-Dist data (matches real-world patterns)
@@ -181,4 +187,181 @@ class TestCheckExtrasInstalled:
 
         with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
             result = await check_extras_installed('python', 'requests', ('security',), frozenset())
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _find_tool_python
+# ---------------------------------------------------------------------------
+
+
+class TestFindToolPython:
+    """Tests for extracting a tool's own Python from its executable."""
+
+    @staticmethod
+    def test_tool_not_found_returns_none() -> None:
+        """Tool not on PATH → None."""
+        with patch('shutil.which', return_value=None):
+            assert find_tool_python('no-such-tool') is None
+
+    @staticmethod
+    def test_exe_inside_venv(tmp_path: Path) -> None:
+        """Executable that lives inside a venv → venv's Python."""
+        # Build a minimal venv structure
+        (tmp_path / 'pyvenv.cfg').touch()
+        if sys.platform == 'win32':
+            scripts = tmp_path / 'Scripts'
+            scripts.mkdir()
+            python = scripts / 'python.exe'
+            python.touch()
+            tool = scripts / 'pdm.exe'
+            tool.touch()
+        else:
+            bin_dir = tmp_path / 'bin'
+            bin_dir.mkdir()
+            python = bin_dir / 'python'
+            python.touch()
+            tool = bin_dir / 'pdm'
+            tool.touch()
+
+        with patch('shutil.which', return_value=str(tool)):
+            result = find_tool_python('pdm')
+        assert result == str(python)
+
+    @staticmethod
+    def test_shebang_in_binary(tmp_path: Path) -> None:
+        """Binary launcher with embedded #! shebang → extracted Python path."""
+        # Simulate a distlib launcher with embedded shebang
+        python_dir = tmp_path / 'venv'
+        python_dir.mkdir()
+        if sys.platform == 'win32':
+            python_path = python_dir / 'Scripts' / 'python.exe'
+            python_path.parent.mkdir()
+            python_path.touch()
+            shebang = f'#!{python_path!s}\r\n'.encode()
+        else:
+            python_path = python_dir / 'bin' / 'python'
+            python_path.parent.mkdir()
+            python_path.touch()
+            shebang = f'#!{python_path!s}\n'.encode()
+
+        launcher = tmp_path / ('tool.exe' if sys.platform == 'win32' else 'tool')
+        launcher.write_bytes(b'\x00' * 64 + shebang + b'import sys\n')
+
+        with patch('shutil.which', return_value=str(launcher)):
+            result = find_tool_python('tool')
+        assert result == str(python_path)
+
+    @staticmethod
+    def test_shebang_without_exe_suffix_windows(tmp_path: Path) -> None:
+        """Windows binary with shebang missing .exe suffix → appends it."""
+        if sys.platform != 'win32':
+            return  # Windows-only test
+
+        python_path = tmp_path / 'Scripts' / 'python.exe'
+        python_path.parent.mkdir(parents=True)
+        python_path.touch()
+        # Shebang without .exe
+        bare_path = str(python_path).removesuffix('.exe')
+        shebang = f'#!{bare_path}\r\n'.encode()
+        launcher = tmp_path / 'tool.exe'
+        launcher.write_bytes(b'\x00' * 64 + shebang)
+
+        with patch('shutil.which', return_value=str(launcher)):
+            result = find_tool_python('tool')
+        assert result == str(python_path)
+
+    @staticmethod
+    def test_env_shebang(tmp_path: Path) -> None:
+        """Shebang with ``/usr/bin/env python3`` → resolve via which."""
+        launcher = tmp_path / 'tool'
+        launcher.write_bytes(b'#!/usr/bin/env python3\nimport sys\n')
+
+        with (
+            patch('shutil.which', side_effect=lambda name: str(launcher) if name == 'tool' else '/usr/bin/python3'),
+        ):
+            result = find_tool_python('tool')
+        assert result == '/usr/bin/python3'
+
+    @staticmethod
+    def test_unreadable_exe_returns_none(tmp_path: Path) -> None:
+        """OSError when reading the executable → None."""
+        fake_exe = tmp_path / 'tool'
+        fake_exe.touch()
+
+        with (
+            patch('shutil.which', return_value=str(fake_exe)),
+            patch.object(Path, 'read_bytes', side_effect=OSError),
+        ):
+            result = find_tool_python('tool')
+        assert result is None
+
+    @staticmethod
+    def test_no_shebang_returns_none(tmp_path: Path) -> None:
+        """Binary with no #! → None."""
+        fake_exe = tmp_path / 'tool'
+        fake_exe.write_bytes(b'\x00' * 128)
+
+        with patch('shutil.which', return_value=str(fake_exe)):
+            result = find_tool_python('tool')
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# fetch_plugin_extras_context
+# ---------------------------------------------------------------------------
+
+
+class TestFetchPluginExtrasContext:
+    """Tests for the combined requires + installed names subprocess."""
+
+    @staticmethod
+    async def test_success() -> None:
+        """Successful subprocess → (requires, installed_names)."""
+        payload = json.dumps(
+            {
+                'requires': ['dep-a>=1', 'dep-b ; extra == "x"'],
+                'installed': ['dep-a', 'dep-b', 'My-Package'],
+            }
+        ).encode()
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(payload, b''))
+
+        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
+            result = await fetch_plugin_extras_context('python', 'my-package')
+
+        assert result is not None
+        requires, installed = result
+        assert requires == ['dep-a>=1', 'dep-b ; extra == "x"']
+        assert 'my-package' in installed  # canonicalised
+        assert 'dep-a' in installed
+
+    @staticmethod
+    async def test_subprocess_failure() -> None:
+        """Non-zero exit → None."""
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(return_value=(b'', b'err'))
+
+        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
+            result = await fetch_plugin_extras_context('python', 'missing')
+        assert result is None
+
+    @staticmethod
+    async def test_file_not_found() -> None:
+        """Python not found → None."""
+        with patch('asyncio.create_subprocess_exec', side_effect=FileNotFoundError):
+            result = await fetch_plugin_extras_context('/no/python', 'pkg')
+        assert result is None
+
+    @staticmethod
+    async def test_timeout() -> None:
+        """Subprocess timeout → None."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(side_effect=TimeoutError)
+
+        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
+            result = await fetch_plugin_extras_context('python', 'pkg')
         assert result is None
