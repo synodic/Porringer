@@ -28,7 +28,9 @@ from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
-def _pick_highest_version(releases: dict[str, object], *, stable_only: bool) -> Version | None:
+def _pick_highest_version(
+    releases: dict[str, object], *, stable_only: bool
+) -> Version | None:
     """Return the highest ``Version`` from *releases* keys, or ``None``.
 
     Args:
@@ -63,17 +65,17 @@ class PythonEnvironment(Environment, RuntimeConsumer):
     @staticmethod
     def ecosystem() -> Ecosystem:
         """Python-ecosystem plugins all share the `'python'` ecosystem."""
-        return Ecosystem('python')
+        return Ecosystem("python")
 
     @staticmethod
     def package_name_validator() -> str:
         """Python packages use PEP 440 validation."""
-        return 'pep440'
+        return "pep440"
 
     @classmethod
     def consumed_runtime_kind(cls) -> str:
         """Python environment plugins consume a Python runtime."""
-        return 'python'
+        return "python"
 
     @classmethod
     def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
@@ -124,7 +126,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         """
         try:
             result = subprocess.run(
-                [python, '-c', f'import {module}'],
+                [python, "-c", f"import {module}"],
                 capture_output=True,
                 timeout=10,
                 check=False,
@@ -144,32 +146,41 @@ class PythonEnvironment(Environment, RuntimeConsumer):
             runtime_context: Resolved runtime paths for this execution
                 run.  ``None`` means use the current process interpreter.
         """
-        _logger = logging.getLogger('porringer.python_environment')
+        _logger = logging.getLogger("porringer.python_environment")
         kind = self.consumed_runtime_kind()
         if runtime_context is not None:
             exe = runtime_context.get(kind)
             if exe is not None:
-                _logger.debug('python_command: using runtime override %s for kind=%s', exe, kind)
+                _logger.debug(
+                    "python_command: using runtime override %s for kind=%s", exe, kind
+                )
                 return str(exe)
-            _logger.debug('python_command: runtime_context present but no entry for kind=%s', kind)
+            _logger.debug(
+                "python_command: runtime_context present but no entry for kind=%s", kind
+            )
         else:
-            _logger.debug('python_command: no runtime_context supplied, falling back to sys.executable')
+            _logger.debug(
+                "python_command: no runtime_context supplied, falling back to sys.executable"
+            )
 
         # In frozen applications (e.g. PyInstaller), sys.executable is
         # the packaged binary — not a Python interpreter.  Attempt to
         # find a real Python on PATH before falling back.
-        if getattr(sys, 'frozen', False):
-            _logger.debug('python_command: frozen application detected, trying shutil.which')
-            which_python = shutil.which('python')
+        if getattr(sys, "frozen", False):
+            _logger.debug(
+                "python_command: frozen application detected, trying shutil.which"
+            )
+            which_python = shutil.which("python")
             if which_python is not None:
-                _logger.debug('python_command: using PATH python %s', which_python)
+                _logger.debug("python_command: using PATH python %s", which_python)
                 return which_python
-            _logger.debug('python_command: shutil.which found no python, falling back to sys.executable')
+            _logger.debug(
+                "python_command: shutil.which found no python, falling back to sys.executable"
+            )
 
         return sys.executable
 
-    @staticmethod
-    def package_python(package_name: str) -> str | None:
+    def package_python(self, package_name: str) -> str | None:
         """Return the Python interpreter for a specific installed package.
 
         Environments that install each package into its own isolated
@@ -201,18 +212,20 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         Returns:
             Path to the venv Python, or `None` if no venv is found.
         """
-        venv_dir = project_path / '.venv'
+        venv_dir = project_path / ".venv"
         if not venv_dir.is_dir():
             return None
 
-        if sys.platform == 'win32':
-            python = venv_dir / 'Scripts' / 'python.exe'
+        if sys.platform == "win32":
+            python = venv_dir / "Scripts" / "python.exe"
         else:
-            python = venv_dir / 'bin' / 'python'
+            python = venv_dir / "bin" / "python"
 
         return python if python.is_file() else None
 
-    async def _check_pypi_updates(self, params: CheckUpdatesParameters) -> list[Package]:
+    async def _check_pypi_updates(
+        self, params: CheckUpdatesParameters
+    ) -> list[Package]:
         """Query the PyPI JSON API for newer versions of the requested packages.
 
         For each package in *params.packages*, fetches
@@ -235,7 +248,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
             A list of packages with their ``version`` set to the latest
             available on PyPI.
         """
-        logger = logging.getLogger(f'porringer.{self.tool_name()}.check_pypi')
+        logger = logging.getLogger(f"porringer.{self.tool_name()}.check_pypi")
         results: list[Package] = []
 
         shared = params.http_client
@@ -243,7 +256,9 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         async def _run(client: httpx.AsyncClient) -> list[Package]:
             inner: list[Package] = []
             for pkg_ref in params.packages:
-                pkg = await self._check_single_pypi_package(client, pkg_ref, params.include_prereleases, logger)
+                pkg = await self._check_single_pypi_package(
+                    client, pkg_ref, params.include_prereleases, logger
+                )
                 if pkg is not None:
                     inner.append(pkg)
             return inner
@@ -265,19 +280,23 @@ class PythonEnvironment(Environment, RuntimeConsumer):
     ) -> Package | None:
         """Fetch one package from PyPI and return the latest version, or ``None``."""
         try:
-            response = await client.get(f'https://pypi.org/pypi/{pkg_ref.name}/json')
+            response = await client.get(f"https://pypi.org/pypi/{pkg_ref.name}/json")
             response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, ValueError, KeyError) as exc:
-            logger.debug('PyPI query failed for %s: %s', pkg_ref.name, exc)
+            logger.debug("PyPI query failed for %s: %s", pkg_ref.name, exc)
             return None
 
         if include_prereleases:
-            best = _pick_highest_version(data.get('releases', {}), stable_only=False)
-            return Package(name=pkg_ref.name, version=str(best)) if best is not None else None
+            best = _pick_highest_version(data.get("releases", {}), stable_only=False)
+            return (
+                Package(name=pkg_ref.name, version=str(best))
+                if best is not None
+                else None
+            )
 
         # Stable-only: prefer info.version when it is itself stable.
-        version_str = data.get('info', {}).get('version')
+        version_str = data.get("info", {}).get("version")
         if version_str:
             try:
                 if not Version(version_str).is_prerelease:
@@ -286,7 +305,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
                 return Package(name=pkg_ref.name, version=version_str)
 
         # info.version was a pre-release or missing — scan releases.
-        best_stable = _pick_highest_version(data.get('releases', {}), stable_only=True)
+        best_stable = _pick_highest_version(data.get("releases", {}), stable_only=True)
         if best_stable is not None:
             return Package(name=pkg_ref.name, version=str(best_stable))
         return None
