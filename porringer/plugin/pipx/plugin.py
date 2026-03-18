@@ -9,13 +9,7 @@ from typing import override
 from porringer.core.plugin_schema.plugin_manager import find_tool_python
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from porringer.core.schema import (
-    Package,
-    PackageRef,
-    PackageRelation,
-    PackageRelationKind,
-    PluginKind,
-)
+from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind, PluginKind
 
 
 def _get_pipx_venvs_dir() -> Path:
@@ -27,16 +21,16 @@ def _get_pipx_venvs_dir() -> Path:
     Returns:
         Path to the pipx venvs directory.
     """
-    pipx_home = os.environ.get("PIPX_HOME")
+    pipx_home = os.environ.get('PIPX_HOME')
     if pipx_home:
-        return Path(pipx_home) / "venvs"
+        return Path(pipx_home) / 'venvs'
 
     # Default pipx home location (not platformdirs)
     # On Windows: ~/pipx, on Unix: ~/.local/pipx
-    if os.name == "nt":
-        return Path.home() / "pipx" / "venvs"
+    if os.name == 'nt':
+        return Path.home() / 'pipx' / 'venvs'
     else:
-        return Path.home() / ".local" / "pipx" / "venvs"
+        return Path.home() / '.local' / 'pipx' / 'venvs'
 
 
 def _read_venv_packages_sync(venv_dir: Path) -> list[Package]:
@@ -52,7 +46,7 @@ def _read_venv_packages_sync(venv_dir: Path) -> list[Package]:
     Returns:
         A list of packages found in the venv.
     """
-    metadata_file = venv_dir / "pipx_metadata.json"
+    metadata_file = venv_dir / 'pipx_metadata.json'
     if not metadata_file.exists():
         return []
 
@@ -62,24 +56,22 @@ def _read_venv_packages_sync(venv_dir: Path) -> list[Package]:
         return []
 
     packages: list[Package] = []
-    main_package = metadata.get("main_package", {})
-    name = main_package.get("package")
-    version = main_package.get("package_version")
+    main_package = metadata.get('main_package', {})
+    name = main_package.get('package')
+    version = main_package.get('package_version')
     if name:
         packages.append(Package(name=name, version=version))
 
         # Injected packages carry a relation back to the host tool
-        for _key, injected in metadata.get("injected_packages", {}).items():
-            inj_name = injected.get("package")
-            inj_version = injected.get("package_version")
+        for _key, injected in metadata.get('injected_packages', {}).items():
+            inj_name = injected.get('package')
+            inj_version = injected.get('package_version')
             if inj_name:
                 packages.append(
                     Package(
                         name=inj_name,
                         version=inj_version,
-                        relation=PackageRelation(
-                            host=name, kind=PackageRelationKind.INJECTED
-                        ),
+                        relation=PackageRelation(host=name, kind=PackageRelationKind.INJECTED),
                     )
                 )
 
@@ -106,21 +98,11 @@ class PIPXEnvironment(PythonEnvironment):
     @override
     def tool_name(cls) -> str:
         """Pipx wraps the `pipx` CLI."""
-        return "pipx"
+        return 'pipx'
 
-    @classmethod
+    @staticmethod
     @override
-    def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
-        """Pipx is a standalone binary — availability is PATH-based only.
-
-        Unlike ``pip`` (which runs as ``python -m pip``), pipx is
-        always invoked directly.  A resolved Python runtime does not
-        affect whether pipx itself is installed.
-        """
-        return cls.is_available()
-
-    @override
-    def package_python(self, package_name: str) -> str | None:
+    def package_python(package_name: str) -> str | None:
         """Return the Python interpreter from a package's own pipx venv.
 
         Each pipx-installed tool lives in its own isolated venv.  To
@@ -141,45 +123,32 @@ class PIPXEnvironment(PythonEnvironment):
 
     @override
     def install_command(
-        self,
-        package: PackageRef,
-        *,
-        include_prereleases: bool = False,
-        runtime_context: RuntimeContext | None = None,
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to install a package via pipx."""
-        cmd = ["pipx", "install", package.specifier]
+        cmd = [self.python_command(runtime_context), '-m', 'pipx', 'install', package.specifier]
         if include_prereleases:
-            cmd.extend(["--pip-args=--pre"])
+            cmd.extend(['--pip-args=--pre'])
         return cmd
 
     @override
     def upgrade_command(
-        self,
-        package: PackageRef,
-        *,
-        include_prereleases: bool = False,
-        runtime_context: RuntimeContext | None = None,
+        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to upgrade a package via pipx."""
-        cmd = ["pipx", "upgrade", package.specifier]
+        cmd = [self.python_command(runtime_context), '-m', 'pipx', 'upgrade', package.specifier]
         if include_prereleases:
-            cmd.extend(["--pip-args=--pre"])
+            cmd.extend(['--pip-args=--pre'])
         return cmd
 
     @override
-    def uninstall_command(
-        self, package: PackageRef, *, runtime_context: RuntimeContext | None = None
-    ) -> list[str]:
+    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a package via pipx."""
-        return ["pipx", "uninstall", package.name]
+        return [self.python_command(runtime_context), '-m', 'pipx', 'uninstall', package.name]
 
     @override
     async def packages(
-        self,
-        *,
-        project_path: Path | None = None,
-        runtime_context: RuntimeContext | None = None,
+        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
     ) -> list[Package]:
         """Gathers installed packages in the given environment.
 
@@ -209,9 +178,7 @@ class PIPXEnvironment(PythonEnvironment):
             return []
 
         # Fan out per-venv reads in parallel, each offloaded to a thread
-        results = await asyncio.gather(
-            *[asyncio.to_thread(_read_venv_packages_sync, d) for d in venv_dirs]
-        )
+        results = await asyncio.gather(*[asyncio.to_thread(_read_venv_packages_sync, d) for d in venv_dirs])
 
         # Flatten the per-venv lists into a single list
         packages: list[Package] = []
