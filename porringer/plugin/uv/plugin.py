@@ -35,14 +35,9 @@ class UvEnvironment(PythonEnvironment):
 
     @classmethod
     @override
-    def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
-        """UV is a standalone binary — availability is PATH-based only.
-
-        Unlike ``pip`` (which runs as ``python -m pip``), uv is
-        always invoked directly.  A resolved Python runtime does not
-        affect whether uv itself is installed.
-        """
-        return cls.is_available()
+    def standalone_binary(cls) -> bool:
+        """UV is a standalone Rust binary, not a Python module."""
+        return True
 
     @override
     def install_command(

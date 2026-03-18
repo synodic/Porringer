@@ -76,24 +76,39 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         return 'python'
 
     @classmethod
+    def standalone_binary(cls) -> bool:
+        """Whether this plugin wraps a standalone binary rather than a Python module.
+
+        When ``True``, availability is determined solely by
+        ``is_available()`` (PATH-based ``shutil.which``).  When
+        ``False`` (the default), ``is_available_for()`` probes the
+        resolved interpreter via ``python -c "import <tool>"``.
+
+        Subclasses that wrap a non-Python binary (e.g. ``uv``) should
+        override this to return ``True``.
+        """
+        return False
+
+    @classmethod
     def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
         """Check whether this plugin can operate with the given runtime.
 
-        Determines the target Python interpreter from *runtime_context*
-        (falling back to ``sys.executable``) and verifies that the
-        plugin's underlying tool is importable in that interpreter.
+        For standalone binaries (``standalone_binary() is True``),
+        delegates directly to ``is_available()``.
 
-        Subclasses that wrap a standalone binary (e.g. ``uv``) rather
-        than a Python module should override this to delegate to
-        ``is_available()`` instead.
+        For Python modules (the default), determines the target Python
+        interpreter from *runtime_context* (falling back to
+        ``sys.executable``) and verifies that the plugin's underlying
+        tool is importable in that interpreter.
 
         Args:
             runtime_context: Resolved runtime paths for this execution.
 
         Returns:
-            ``True`` if the tool module (identified by ``tool_name()``)
-            is importable in the target interpreter.
+            ``True`` if the plugin can operate in the given context.
         """
+        if cls.standalone_binary():
+            return cls.is_available()
         tool = cls.tool_name()
         if tool is None:
             return True

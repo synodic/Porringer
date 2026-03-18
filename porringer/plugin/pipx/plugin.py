@@ -100,17 +100,6 @@ class PIPXEnvironment(PythonEnvironment):
         """Pipx wraps the `pipx` CLI."""
         return 'pipx'
 
-    @classmethod
-    @override
-    def is_available_for(cls, runtime_context: RuntimeContext) -> bool:
-        """Pipx is a standalone binary — availability is PATH-based only.
-
-        Unlike ``pip`` (which runs as ``python -m pip``), pipx is
-        always invoked directly.  A resolved Python runtime does not
-        affect whether pipx itself is installed.
-        """
-        return cls.is_available()
-
     @staticmethod
     @override
     def package_python(package_name: str) -> str | None:
@@ -137,7 +126,7 @@ class PIPXEnvironment(PythonEnvironment):
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to install a package via pipx."""
-        cmd = ['pipx', 'install', package.specifier]
+        cmd = [self.python_command(runtime_context), '-m', 'pipx', 'install', package.specifier]
         if include_prereleases:
             cmd.extend(['--pip-args=--pre'])
         return cmd
@@ -147,7 +136,7 @@ class PIPXEnvironment(PythonEnvironment):
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to upgrade a package via pipx."""
-        cmd = ['pipx', 'upgrade', package.specifier]
+        cmd = [self.python_command(runtime_context), '-m', 'pipx', 'upgrade', package.specifier]
         if include_prereleases:
             cmd.extend(['--pip-args=--pre'])
         return cmd
@@ -155,7 +144,7 @@ class PIPXEnvironment(PythonEnvironment):
     @override
     def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Returns the CLI command to uninstall a package via pipx."""
-        return ['pipx', 'uninstall', package.name]
+        return [self.python_command(runtime_context), '-m', 'pipx', 'uninstall', package.name]
 
     @override
     async def packages(

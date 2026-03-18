@@ -4,7 +4,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from packaging.version import Version
-
 from porringer.backend.command.core.action_builder import get_cli_command
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.core.execution import execute_package
@@ -39,8 +38,8 @@ from porringer.schema import (
 )
 from porringer.test.mock.plugin_manager import MockPluginManager
 
-_PY = Ecosystem('python')
-_MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+_PY = Ecosystem("python")
+_MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version("0.0.0")))
 
 
 def _make_plugins(
@@ -88,7 +87,7 @@ class TestPluginAddCommand:
     def test_pdm_plugin_add_command_bare() -> None:
         """PDM plugin_add_command for a bare package name."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         cmd = plugin.plugin_add_command(ref)
         assert cmd[0] == plugin.tool_name()
         assert ref.specifier in cmd
@@ -97,7 +96,7 @@ class TestPluginAddCommand:
     def test_pdm_plugin_add_command_with_constraint() -> None:
         """PDM plugin_add_command includes version constraint."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython>=0.5')
+        ref = PackageRef.model_validate("cppython>=0.5")
         cmd = plugin.plugin_add_command(ref)
         assert cmd[0] == plugin.tool_name()
         assert ref.specifier in cmd
@@ -106,7 +105,7 @@ class TestPluginAddCommand:
     def test_poetry_plugin_add_command_bare() -> None:
         """Poetry plugin_add_command for a bare package name."""
         plugin = PoetryEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('poetry-plugin-export')
+        ref = PackageRef.model_validate("poetry-plugin-export")
         cmd = plugin.plugin_add_command(ref)
         assert cmd[0] == plugin.tool_name()
         assert ref.specifier in cmd
@@ -115,7 +114,7 @@ class TestPluginAddCommand:
     def test_poetry_plugin_add_command_with_constraint() -> None:
         """Poetry plugin_add_command includes version constraint."""
         plugin = PoetryEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('poetry-plugin-export>=1.0,<2.0')
+        ref = PackageRef.model_validate("poetry-plugin-export>=1.0,<2.0")
         cmd = plugin.plugin_add_command(ref)
         assert cmd[0] == plugin.tool_name()
         assert ref.specifier in cmd
@@ -133,37 +132,37 @@ class TestAsyncPluginAdd:
     async def test_async_plugin_add_success() -> None:
         """plugin_add returns Package on success."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         params = PackageParameters(package=ref)
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = 'Added cppython'
-        mock_result.stderr = ''
+        mock_result.stdout = "Added cppython"
+        mock_result.stderr = ""
 
         with patch(
-            'porringer.core.plugin_schema.plugin_manager.run_command',
+            "porringer.core.plugin_schema.plugin_manager.run_command",
             new_callable=AsyncMock,
         ) as mock_cmd:
             mock_cmd.return_value = mock_result
             result = await plugin.plugin_add(params)
         assert result is not None
-        assert result.name == 'cppython'
+        assert result.name == "cppython"
 
     @staticmethod
     async def test_async_plugin_add_failure() -> None:
         """plugin_add returns None on non-zero exit."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         params = PackageParameters(package=ref)
 
         mock_result = MagicMock()
         mock_result.returncode = 1
-        mock_result.stdout = ''
-        mock_result.stderr = 'Error: package not found'
+        mock_result.stdout = ""
+        mock_result.stderr = "Error: package not found"
 
         with patch(
-            'porringer.core.plugin_schema.plugin_manager.run_command',
+            "porringer.core.plugin_schema.plugin_manager.run_command",
             new_callable=AsyncMock,
         ) as mock_cmd:
             mock_cmd.return_value = mock_result
@@ -174,11 +173,11 @@ class TestAsyncPluginAdd:
     async def test_async_plugin_add_file_not_found() -> None:
         """plugin_add returns None when tool is not on PATH."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         params = PackageParameters(package=ref)
 
         with patch(
-            'porringer.core.plugin_schema.plugin_manager.run_command',
+            "porringer.core.plugin_schema.plugin_manager.run_command",
             new_callable=AsyncMock,
             side_effect=FileNotFoundError,
         ):
@@ -201,20 +200,20 @@ class TestCliCommandPreview:
     def test_native_command_when_plugin_manager_available(self) -> None:
         """get_cli_command returns native command when PluginManager is on PATH."""
         mock_pm = self._make_mock_pm()
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
-        ref = PackageRef.model_validate('cppython')
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
+        ref = PackageRef.model_validate("cppython")
 
         action = SetupAction(
             description="Add 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
-            installer='pipx',
+            installer="pipx",
             package=ref,
-            plugin_target=PackageRef.model_validate('mock-pm'),
+            plugin_target=PackageRef.model_validate("mock-pm"),
         )
 
         mock_env = MagicMock(spec=Environment)
-        environments: dict[str, Environment] = {'pipx': mock_env}
+        environments: dict[str, Environment] = {"pipx": mock_env}
 
         cmd = get_cli_command(
             action,
@@ -227,21 +226,21 @@ class TestCliCommandPreview:
     def test_empty_command_when_plugin_manager_unavailable() -> None:
         """get_cli_command returns empty tuple when PluginManager tool is not on PATH."""
         pdm_env = PDMEnvironment(_MOCK_PARAMS)
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        project_environments: dict[str, ProjectEnvironment] = {"pdmproject": pdm_env}
 
         action = SetupAction(
             description="Add 'cppython' to 'pdm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
-            installer='pipx',
-            package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('pdm'),
+            installer="pipx",
+            package=PackageRef.model_validate("cppython"),
+            plugin_target=PackageRef.model_validate("pdm"),
         )
 
         mock_env = MagicMock(spec=Environment)
-        environments: dict[str, Environment] = {'pipx': mock_env}
+        environments: dict[str, Environment] = {"pipx": mock_env}
 
-        with patch.object(type(pdm_env), 'is_available', return_value=False):
+        with patch.object(type(pdm_env), "is_available", return_value=False):
             cmd = get_cli_command(
                 action,
                 _make_plugins(environments, project_environments),
@@ -257,13 +256,13 @@ class TestCliCommandPreview:
             description="Add 'cppython' to 'pdm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
-            installer='pipx',
-            package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('pdm'),
+            installer="pipx",
+            package=PackageRef.model_validate("cppython"),
+            plugin_target=PackageRef.model_validate("pdm"),
         )
 
         mock_env = MagicMock(spec=Environment)
-        environments: dict[str, Environment] = {'pipx': mock_env}
+        environments: dict[str, Environment] = {"pipx": mock_env}
 
         cmd = get_cli_command(action, _make_plugins(environments), SyncStrategy.MINIMAL)
         assert cmd == ()
@@ -286,20 +285,22 @@ class TestPluginAddRouting:
             description="Add 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
-            installer='pipx',
-            package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('mock-pm'),
+            installer="pipx",
+            package=PackageRef.model_validate("cppython"),
+            plugin_target=PackageRef.model_validate("mock-pm"),
         )
 
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
+        result = await execute_package(
+            action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context
+        )
         assert result.success is True
         assert result.message is not None
-        assert 'native' in result.message.lower()
+        assert "native" in result.message.lower()
         assert len(mock_pm.operations) == 1
-        assert mock_pm.operations[0][0] == 'add'
+        assert mock_pm.operations[0][0] == "add"
 
     @staticmethod
     async def test_fails_when_no_plugin_manager() -> None:
@@ -308,15 +309,17 @@ class TestPluginAddRouting:
             description="Add 'cppython' to 'pdm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
-            installer='pipx',
-            package=PackageRef.model_validate('cppython'),
-            plugin_target=PackageRef.model_validate('pdm'),
+            installer="pipx",
+            package=PackageRef.model_validate("cppython"),
+            plugin_target=PackageRef.model_validate("pdm"),
         )
 
-        result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue())
+        result = await execute_package(
+            action, {}, SyncStrategy.MINIMAL, asyncio.Queue()
+        )
         assert result.success is False
         assert result.message is not None
-        assert 'No PluginManager found' in result.message
+        assert "No PluginManager found" in result.message
 
 
 # ---------------------------------------------------------------------------
@@ -351,54 +354,54 @@ class TestParsePluginList:
     def test_pdm_parse_with_version_and_description() -> None:
         """PDM parser extracts name and version from tabular output."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        stdout = 'cppython  0.9.14  A Python management solution for C++\n'
+        stdout = "cppython  0.9.14  A Python management solution for C++\n"
         result = plugin.parse_plugin_list(stdout)
         assert len(result) == 1
-        assert result[0].name == 'cppython'
-        assert result[0].version == '0.9.14'
+        assert result[0].name == "cppython"
+        assert result[0].version == "0.9.14"
 
     @staticmethod
     def test_pdm_parse_multiple_plugins() -> None:
         """PDM parser handles multiple lines."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        stdout = 'cppython 0.9.14 desc\npoetry-plugin 1.0.0 other\n'
+        stdout = "cppython 0.9.14 desc\npoetry-plugin 1.0.0 other\n"
         result = plugin.parse_plugin_list(stdout)
         expected_plugin_count = 2
         assert len(result) == expected_plugin_count
-        assert result[0].name == 'cppython'
-        assert result[1].name == 'poetry-plugin'
+        assert result[0].name == "cppython"
+        assert result[1].name == "poetry-plugin"
 
     @staticmethod
     def test_pdm_parse_empty_output() -> None:
         """PDM parser returns empty list for empty output."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        assert plugin.parse_plugin_list('') == []
-        assert plugin.parse_plugin_list('\n') == []
+        assert plugin.parse_plugin_list("") == []
+        assert plugin.parse_plugin_list("\n") == []
 
     @staticmethod
     def test_poetry_parse_plugin_line() -> None:
         """Poetry parser extracts name and version from indented lines."""
         plugin = PoetryEnvironment(_MOCK_PARAMS)
-        stdout = '  - poetry-plugin-export (1.6.0) Poetry plugin\n'
+        stdout = "  - poetry-plugin-export (1.6.0) Poetry plugin\n"
         result = plugin.parse_plugin_list(stdout)
         assert len(result) == 1
-        assert result[0].name == 'poetry-plugin-export'
-        assert result[0].version == '1.6.0'
+        assert result[0].name == "poetry-plugin-export"
+        assert result[0].version == "1.6.0"
 
     @staticmethod
     def test_poetry_parse_ignores_non_plugin_lines() -> None:
         """Poetry parser skips header/dependency lines."""
         plugin = PoetryEnvironment(_MOCK_PARAMS)
         stdout = (
-            'Installed plugins:\n'
-            '  - poetry-plugin-export (1.6.0) Poetry plugin\n'
-            '\n'
-            '    Dependencies:\n'
-            '      - foo (>=1.0)\n'
+            "Installed plugins:\n"
+            "  - poetry-plugin-export (1.6.0) Poetry plugin\n"
+            "\n"
+            "    Dependencies:\n"
+            "      - foo (>=1.0)\n"
         )
         result = plugin.parse_plugin_list(stdout)
         assert len(result) == 1
-        assert result[0].name == 'poetry-plugin-export'
+        assert result[0].name == "poetry-plugin-export"
 
 
 class TestInstalledPlugins:
@@ -410,13 +413,13 @@ class TestInstalledPlugins:
         plugin = PDMEnvironment(_MOCK_PARAMS)
         mock_proc = AsyncMock()
         mock_proc.returncode = 0
-        mock_proc.communicate = AsyncMock(return_value=(b'cppython 0.9.14 desc\n', b''))
+        mock_proc.communicate = AsyncMock(return_value=(b"cppython 0.9.14 desc\n", b""))
 
-        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await plugin.installed_plugins()
 
         assert len(result) == 1
-        assert result[0].name == 'cppython'
+        assert result[0].name == "cppython"
 
     @staticmethod
     async def test_installed_plugins_failure_returns_empty() -> None:
@@ -424,9 +427,9 @@ class TestInstalledPlugins:
         plugin = PDMEnvironment(_MOCK_PARAMS)
         mock_proc = AsyncMock()
         mock_proc.returncode = 1
-        mock_proc.communicate = AsyncMock(return_value=(b'', b'error'))
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"error"))
 
-        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await plugin.installed_plugins()
 
         assert result == []
@@ -437,7 +440,7 @@ class TestInstalledPlugins:
         plugin = PDMEnvironment(_MOCK_PARAMS)
 
         with patch(
-            'asyncio.create_subprocess_exec',
+            "asyncio.create_subprocess_exec",
             side_effect=FileNotFoundError,
         ):
             result = await plugin.installed_plugins()
@@ -453,9 +456,9 @@ _PLUGIN_ACTION = SetupAction(
     description="Add 'cppython' to 'mock-pm'",
     kind=PluginKind.TOOL,
     ecosystem=_PY,
-    installer='pipx',
-    package=PackageRef.model_validate('cppython'),
-    plugin_target=PackageRef.model_validate('mock-pm'),
+    installer="pipx",
+    package=PackageRef.model_validate("cppython"),
+    plugin_target=PackageRef.model_validate("mock-pm"),
 )
 
 
@@ -466,20 +469,22 @@ class TestDryRunPluginPresence:
     def _make_envs(
         *,
         installed: list[Package] | None = None,
-    ) -> tuple[MockPluginManager, dict[str, Environment], dict[str, ProjectEnvironment]]:
+    ) -> tuple[
+        MockPluginManager, dict[str, Environment], dict[str, ProjectEnvironment]
+    ]:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=installed)
         mock_pipx = MagicMock(spec=Environment)
         mock_pipx.packages.return_value = []
         mock_pipx.check_updates.return_value = []
-        mock_pipx.tool_name.return_value = 'pipx'
-        environments: dict[str, Environment] = {'pipx': mock_pipx}
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pipx.tool_name.return_value = "pipx"
+        environments: dict[str, Environment] = {"pipx": mock_pipx}
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
         return mock_pm, environments, project_environments
 
     async def test_skips_when_plugin_installed(self) -> None:
         """dry_run_action skips plugin-target action when plugin is already installed."""
         _, environments, project_environments = self._make_envs(
-            installed=[Package(name='cppython', version='0.9.14')],
+            installed=[Package(name="cppython", version="0.9.14")],
         )
 
         result = await dry_run_action(
@@ -518,7 +523,7 @@ class TestDryRunPluginPresence:
     async def test_upgrade_when_plugin_installed_latest_strategy(self) -> None:
         """dry_run_action skips plugin when LATEST strategy and no newer version exists."""
         _, environments, project_environments = self._make_envs(
-            installed=[Package(name='cppython', version='0.9.14')],
+            installed=[Package(name="cppython", version="0.9.14")],
         )
         params = SetupParameters(strategy=SyncStrategy.LATEST)
 
@@ -560,11 +565,15 @@ class TestExecutePackagePluginPresence:
     @staticmethod
     async def test_skips_installed_plugin_on_minimal() -> None:
         """execute_package skips plugin-target action when already installed."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
+        result = await execute_package(
+            _PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context
+        )
         assert result.success is True
         assert result.skipped is True
         assert result.skip_reason == SkipReason.ALREADY_INSTALLED
@@ -574,14 +583,16 @@ class TestExecutePackagePluginPresence:
     async def test_installs_missing_plugin_on_minimal() -> None:
         """execute_package installs plugin when not already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
+        result = await execute_package(
+            _PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context
+        )
         assert result.success is True
         assert result.skipped is not True
         assert len(mock_pm.operations) == 1
-        assert mock_pm.operations[0][0] == 'add'
+        assert mock_pm.operations[0][0] == "add"
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +607,7 @@ class TestPluginUpdateCommand:
     def test_pdm_plugin_update_command_bare() -> None:
         """PDM plugin_update_command starts with tool name and includes the package."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         cmd = plugin.plugin_update_command(ref)
         assert cmd[0] == plugin.tool_name()
         assert ref.specifier in cmd
@@ -607,7 +618,7 @@ class TestPluginUpdateCommand:
     def test_pdm_plugin_update_command_with_constraint() -> None:
         """PDM plugin_update_command includes version constraint."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython>=0.5')
+        ref = PackageRef.model_validate("cppython>=0.5")
         cmd = plugin.plugin_update_command(ref)
         assert cmd[0] == plugin.tool_name()
         assert ref.specifier in cmd
@@ -617,7 +628,7 @@ class TestPluginUpdateCommand:
     def test_poetry_plugin_update_delegates_to_add() -> None:
         """Poetry plugin_update_command delegates to plugin_add_command."""
         plugin = PoetryEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('poetry-plugin-export')
+        ref = PackageRef.model_validate("poetry-plugin-export")
         update_cmd = plugin.plugin_update_command(ref)
         add_cmd = plugin.plugin_add_command(ref)
         assert update_cmd == add_cmd
@@ -626,7 +637,7 @@ class TestPluginUpdateCommand:
     def test_poetry_plugin_update_with_constraint() -> None:
         """Poetry plugin_update_command with constraint delegates to add."""
         plugin = PoetryEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('poetry-plugin-export>=1.0')
+        ref = PackageRef.model_validate("poetry-plugin-export>=1.0")
         update_cmd = plugin.plugin_update_command(ref)
         add_cmd = plugin.plugin_add_command(ref)
         assert update_cmd == add_cmd
@@ -642,16 +653,16 @@ class TestPluginUpdateCommand:
         success but left the old version in place.
         """
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
 
         add_cmd = plugin.plugin_add_command(ref)
         update_cmd = plugin.plugin_update_command(ref)
 
         # add intentionally omits the upgrade flag (first install)
-        assert not any('--pip-args' in arg for arg in add_cmd)
+        assert not any("--pip-args" in arg for arg in add_cmd)
 
         # update MUST include --pip-args=--upgrade so pip pulls a newer version
-        assert any('--pip-args' in arg and '--upgrade' in arg for arg in update_cmd)
+        assert any("--pip-args" in arg and "--upgrade" in arg for arg in update_cmd)
 
         # The two commands must not be identical
         assert add_cmd != update_cmd
@@ -669,37 +680,37 @@ class TestAsyncPluginUpdate:
     async def test_async_plugin_update_success() -> None:
         """plugin_update returns Package on success."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         params = PackageParameters(package=ref)
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = 'Updated cppython'
-        mock_result.stderr = ''
+        mock_result.stdout = "Updated cppython"
+        mock_result.stderr = ""
 
         with patch(
-            'porringer.core.plugin_schema.plugin_manager.run_command',
+            "porringer.core.plugin_schema.plugin_manager.run_command",
             new_callable=AsyncMock,
         ) as mock_cmd:
             mock_cmd.return_value = mock_result
             result = await plugin.plugin_update(params)
         assert result is not None
-        assert result.name == 'cppython'
+        assert result.name == "cppython"
 
     @staticmethod
     async def test_async_plugin_update_failure() -> None:
         """plugin_update returns None on non-zero exit."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         params = PackageParameters(package=ref)
 
         mock_result = MagicMock()
         mock_result.returncode = 1
-        mock_result.stdout = ''
-        mock_result.stderr = 'Error: no such plugin'
+        mock_result.stdout = ""
+        mock_result.stderr = "Error: no such plugin"
 
         with patch(
-            'porringer.core.plugin_schema.plugin_manager.run_command',
+            "porringer.core.plugin_schema.plugin_manager.run_command",
             new_callable=AsyncMock,
         ) as mock_cmd:
             mock_cmd.return_value = mock_result
@@ -710,11 +721,11 @@ class TestAsyncPluginUpdate:
     async def test_async_plugin_update_file_not_found() -> None:
         """plugin_update returns None when tool is not on PATH."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         params = PackageParameters(package=ref)
 
         with patch(
-            'porringer.core.plugin_schema.plugin_manager.run_command',
+            "porringer.core.plugin_schema.plugin_manager.run_command",
             new_callable=AsyncMock,
             side_effect=FileNotFoundError,
         ):
@@ -725,16 +736,16 @@ class TestAsyncPluginUpdate:
     async def test_async_plugin_update_uses_update_command() -> None:
         """plugin_update delegates to plugin_update_command."""
         plugin = PDMEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('cppython')
+        ref = PackageRef.model_validate("cppython")
         params = PackageParameters(package=ref)
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = 'Updated cppython'
-        mock_result.stderr = ''
+        mock_result.stdout = "Updated cppython"
+        mock_result.stderr = ""
 
         with patch(
-            'porringer.core.plugin_schema.plugin_manager.run_command',
+            "porringer.core.plugin_schema.plugin_manager.run_command",
             new_callable=AsyncMock,
         ) as mock_cmd:
             mock_cmd.return_value = mock_result
@@ -755,8 +766,8 @@ class TestResolveOperation:
     @staticmethod
     def _make_action(
         plugin_target: str | None = None,
-        name: str = 'cppython',
-        installer: str = 'pipx',
+        name: str = "cppython",
+        installer: str = "pipx",
     ) -> SetupAction:
         pkg = PackageRef.model_validate(name)
         target = PackageRef.model_validate(plugin_target) if plugin_target else None
@@ -776,16 +787,16 @@ class TestResolveOperation:
         env = MagicMock(spec=Environment)
         env.packages.return_value = installed or []
         env.check_updates.return_value = []
-        env.tool_name.return_value = 'pipx'
-        type(env).package_name_validator = MagicMock(return_value='pep440')
-        return {'pipx': env}
+        env.tool_name.return_value = "pipx"
+        type(env).package_name_validator = MagicMock(return_value="pep440")
+        return {"pipx": env}
 
     # --- Normal package resolution ---
 
     async def test_minimal_installed_skips(self) -> None:
         """MINIMAL + installed â†’ SKIP."""
         action = self._make_action()
-        envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_envs(installed=[Package(name="cppython", version="1.0.0")])
 
         resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
         assert isinstance(resolved.operation, Skip)
@@ -802,7 +813,7 @@ class TestResolveOperation:
     async def test_latest_installed_upgrades(self) -> None:
         """LATEST + installed + no newer version â†’ SKIP (ALREADY_LATEST)."""
         action = self._make_action()
-        envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_envs(installed=[Package(name="cppython", version="1.0.0")])
 
         resolved = await resolve_operation(action, envs, SyncStrategy.LATEST)
         assert isinstance(resolved.operation, Skip)
@@ -819,7 +830,7 @@ class TestResolveOperation:
     async def test_exact_installed_upgrades(self) -> None:
         """EXACT + installed + no newer version â†’ SKIP (ALREADY_LATEST)."""
         action = self._make_action()
-        envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_envs(installed=[Package(name="cppython", version="1.0.0")])
 
         resolved = await resolve_operation(action, envs, SyncStrategy.EXACT)
         assert isinstance(resolved.operation, Skip)
@@ -829,9 +840,11 @@ class TestResolveOperation:
 
     async def test_plugin_minimal_installed_skips(self) -> None:
         """Plugin: MINIMAL + installed â†’ SKIP."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
+        action = self._make_action(plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -847,8 +860,8 @@ class TestResolveOperation:
     async def test_plugin_minimal_not_installed_installs(self) -> None:
         """Plugin: MINIMAL + not installed â†’ INSTALL."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
-        action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        action = self._make_action(plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -862,9 +875,11 @@ class TestResolveOperation:
 
     async def test_plugin_latest_installed_upgrades(self) -> None:
         """Plugin: LATEST + installed â†’ UPGRADE."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
+        action = self._make_action(plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -879,8 +894,8 @@ class TestResolveOperation:
     async def test_plugin_latest_not_installed_installs(self) -> None:
         """Plugin: LATEST + not installed â†’ INSTALL (fallback)."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
-        action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        action = self._make_action(plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -893,7 +908,7 @@ class TestResolveOperation:
 
     async def test_plugin_no_manager_defaults_to_install(self) -> None:
         """Plugin: no PluginManager â†’ INSTALL."""
-        action = self._make_action(plugin_target='mock-pm')
+        action = self._make_action(plugin_target="mock-pm")
 
         resolved = await resolve_operation(action, {}, SyncStrategy.MINIMAL)
 
@@ -903,17 +918,17 @@ class TestResolveOperation:
     async def test_skip_returns_installed_version(self) -> None:
         """SKIP result carries installed_version metadata."""
         action = self._make_action()
-        envs = self._make_envs(installed=[Package(name='cppython', version='2.3.1')])
+        envs = self._make_envs(installed=[Package(name="cppython", version="2.3.1")])
 
         resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
         assert isinstance(resolved.operation, Skip)
-        assert resolved.operation.installed_version == '2.3.1'
+        assert resolved.operation.installed_version == "2.3.1"
 
     @staticmethod
     async def test_missing_installer_skips() -> None:
         """Action with no installer/package â†’ SKIP."""
         action = SetupAction(
-            description='Bad action',
+            description="Bad action",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
             installer=None,
@@ -934,39 +949,47 @@ class TestPluginUpgradeRouting:
     @staticmethod
     async def test_latest_routes_to_update() -> None:
         """execute_package with LATEST calls plugin_update for installed plugin."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context)
+        result = await execute_package(
+            _PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context
+        )
         assert result.success is True
         assert len(mock_pm.operations) == 1
-        assert mock_pm.operations[0][0] == 'update'
-        assert mock_pm.operations[0][1].name == 'cppython'
+        assert mock_pm.operations[0][0] == "update"
+        assert mock_pm.operations[0][1].name == "cppython"
 
     @staticmethod
     async def test_latest_installs_when_not_present() -> None:
         """execute_package with LATEST calls plugin_add for missing plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context)
+        result = await execute_package(
+            _PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context
+        )
         assert result.success is True
         assert len(mock_pm.operations) == 1
-        assert mock_pm.operations[0][0] == 'add'
+        assert mock_pm.operations[0][0] == "add"
 
     @staticmethod
     async def test_minimal_always_uses_add() -> None:
         """execute_package with MINIMAL uses plugin_add for new plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
-        result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
+        result = await execute_package(
+            _PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context
+        )
         assert result.success is True
         assert len(mock_pm.operations) == 1
-        assert mock_pm.operations[0][0] == 'add'
+        assert mock_pm.operations[0][0] == "add"
 
 
 # ---------------------------------------------------------------------------
@@ -984,20 +1007,20 @@ class TestCliCommandUpgradePreview:
     def test_latest_returns_update_command(self) -> None:
         """get_cli_command returns plugin_update_command for LATEST strategy."""
         mock_pm = self._make_mock_pm()
-        ref = PackageRef.model_validate('cppython')
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        ref = PackageRef.model_validate("cppython")
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         action = SetupAction(
             description="Upgrade plugin 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
-            installer='pipx',
+            installer="pipx",
             package=ref,
-            plugin_target=PackageRef.model_validate('mock-pm'),
+            plugin_target=PackageRef.model_validate("mock-pm"),
         )
 
         mock_env = MagicMock(spec=Environment)
-        environments: dict[str, Environment] = {'pipx': mock_env}
+        environments: dict[str, Environment] = {"pipx": mock_env}
 
         cmd = get_cli_command(
             action,
@@ -1009,20 +1032,20 @@ class TestCliCommandUpgradePreview:
     def test_minimal_returns_add_command(self) -> None:
         """get_cli_command returns plugin_add_command for MINIMAL strategy."""
         mock_pm = self._make_mock_pm()
-        ref = PackageRef.model_validate('cppython')
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        ref = PackageRef.model_validate("cppython")
+        project_environments: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         action = SetupAction(
             description="Install plugin 'cppython' to 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
-            installer='pipx',
+            installer="pipx",
             package=ref,
-            plugin_target=PackageRef.model_validate('mock-pm'),
+            plugin_target=PackageRef.model_validate("mock-pm"),
         )
 
         mock_env = MagicMock(spec=Environment)
-        environments: dict[str, Environment] = {'pipx': mock_env}
+        environments: dict[str, Environment] = {"pipx": mock_env}
 
         cmd = get_cli_command(
             action,
@@ -1035,22 +1058,24 @@ class TestCliCommandUpgradePreview:
     def test_poetry_latest_delegates_update_to_add() -> None:
         """Poetry: LATEST returns same as add (Poetry update delegates to add)."""
         poetry_env = PoetryEnvironment(_MOCK_PARAMS)
-        ref = PackageRef.model_validate('poetry-plugin-export')
-        project_environments: dict[str, ProjectEnvironment] = {'poetryproject': poetry_env}
+        ref = PackageRef.model_validate("poetry-plugin-export")
+        project_environments: dict[str, ProjectEnvironment] = {
+            "poetryproject": poetry_env
+        }
 
         action = SetupAction(
             description="Upgrade plugin 'poetry-plugin-export' to 'poetry'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
-            installer='pipx',
+            installer="pipx",
             package=ref,
-            plugin_target=PackageRef.model_validate('poetry'),
+            plugin_target=PackageRef.model_validate("poetry"),
         )
 
         mock_env = MagicMock(spec=Environment)
-        environments: dict[str, Environment] = {'pipx': mock_env}
+        environments: dict[str, Environment] = {"pipx": mock_env}
 
-        with patch.object(type(poetry_env), 'is_available', return_value=True):
+        with patch.object(type(poetry_env), "is_available", return_value=True):
             cmd = get_cli_command(
                 action,
                 _make_plugins(environments, project_environments),
@@ -1078,9 +1103,9 @@ class TestExtrasReinstall:
 
     @staticmethod
     def _make_action(
-        name: str = 'cppython[cmake,conan,git]',
+        name: str = "cppython[cmake,conan,git]",
         plugin_target: str | None = None,
-        installer: str = 'pipx',
+        installer: str = "pipx",
     ) -> SetupAction:
         pkg = PackageRef.model_validate(name)
         target = PackageRef.model_validate(plugin_target) if plugin_target else None
@@ -1100,9 +1125,9 @@ class TestExtrasReinstall:
         env = MagicMock(spec=Environment)
         env.packages.return_value = installed or []
         env.check_updates.return_value = []
-        env.tool_name.return_value = 'pipx'
-        type(env).package_name_validator = MagicMock(return_value='pep440')
-        return {'pipx': env}
+        env.tool_name.return_value = "pipx"
+        type(env).package_name_validator = MagicMock(return_value="pep440")
+        return {"pipx": env}
 
     @staticmethod
     def _make_python_envs(
@@ -1112,18 +1137,18 @@ class TestExtrasReinstall:
         env = MagicMock(spec=PythonEnvironment)
         env.packages.return_value = installed or []
         env.check_updates.return_value = []
-        env.tool_name.return_value = 'pipx'
-        env.python_command.return_value = 'python'
+        env.tool_name.return_value = "pipx"
+        env.python_command.return_value = "python"
         env.package_python.return_value = None  # default: no per-package venv
-        type(env).package_name_validator = MagicMock(return_value='pep440')
-        return {'pipx': env}
+        type(env).package_name_validator = MagicMock(return_value="pep440")
+        return {"pipx": env}
 
     # --- MINIMAL: non-Python env (no introspection) ---
 
     async def test_minimal_extras_non_python_env_skips(self) -> None:
         """MINIMAL + installed + extras + non-Python env -> SKIP."""
         action = self._make_action()
-        envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_envs(installed=[Package(name="cppython", version="1.0.0")])
 
         resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
         assert isinstance(resolved.operation, Skip)
@@ -1131,8 +1156,8 @@ class TestExtrasReinstall:
 
     async def test_minimal_no_extras_installed_skips(self) -> None:
         """MINIMAL + installed + no extras -> SKIP (unchanged behaviour)."""
-        action = self._make_action(name='cppython')
-        envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
+        action = self._make_action(name="cppython")
+        envs = self._make_envs(installed=[Package(name="cppython", version="1.0.0")])
 
         resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
         assert isinstance(resolved.operation, Skip)
@@ -1151,10 +1176,12 @@ class TestExtrasReinstall:
     async def test_minimal_extras_satisfied_skips(self) -> None:
         """MINIMAL + Python env + extras satisfied -> SKIP."""
         action = self._make_action()
-        envs = self._make_python_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_python_envs(
+            installed=[Package(name="cppython", version="1.0.0")]
+        )
 
         with patch(
-            'porringer.backend.command.core.resolution.check_extras_installed',
+            "porringer.backend.command.core.resolution.check_extras_installed",
             return_value=True,
         ):
             resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
@@ -1164,24 +1191,28 @@ class TestExtrasReinstall:
     async def test_minimal_extras_not_satisfied_reinstalls(self) -> None:
         """MINIMAL + Python env + extras not satisfied -> ENSURE_EXTRAS."""
         action = self._make_action()
-        envs = self._make_python_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_python_envs(
+            installed=[Package(name="cppython", version="1.0.0")]
+        )
 
         with patch(
-            'porringer.backend.command.core.resolution.check_extras_installed',
+            "porringer.backend.command.core.resolution.check_extras_installed",
             return_value=False,
         ):
             resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
         assert isinstance(resolved.operation, Install)
         assert resolved.operation.reason == InstallReason.ENSURE_EXTRAS
-        assert resolved.message == 'ensuring extras'
+        assert resolved.message == "ensuring extras"
 
     async def test_minimal_extras_introspection_fails_reinstalls(self) -> None:
         """MINIMAL + Python env + introspection fails -> ENSURE_EXTRAS (conservative)."""
         action = self._make_action()
-        envs = self._make_python_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_python_envs(
+            installed=[Package(name="cppython", version="1.0.0")]
+        )
 
         with patch(
-            'porringer.backend.command.core.resolution.check_extras_installed',
+            "porringer.backend.command.core.resolution.check_extras_installed",
             return_value=None,
         ):
             resolved = await resolve_operation(action, envs, SyncStrategy.MINIMAL)
@@ -1193,7 +1224,7 @@ class TestExtrasReinstall:
     async def test_latest_extras_non_python_env_skips(self) -> None:
         """LATEST + non-Python env + extras -> SKIP (extras are PEP 508 only)."""
         action = self._make_action()
-        envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_envs(installed=[Package(name="cppython", version="1.0.0")])
 
         resolved = await resolve_operation(action, envs, SyncStrategy.LATEST)
         assert isinstance(resolved.operation, Skip)
@@ -1202,10 +1233,12 @@ class TestExtrasReinstall:
     async def test_latest_extras_satisfied_skips(self) -> None:
         """LATEST + Python env + extras satisfied -> SKIP(ALREADY_LATEST)."""
         action = self._make_action()
-        envs = self._make_python_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_python_envs(
+            installed=[Package(name="cppython", version="1.0.0")]
+        )
 
         with patch(
-            'porringer.backend.command.core.resolution.check_extras_installed',
+            "porringer.backend.command.core.resolution.check_extras_installed",
             return_value=True,
         ):
             resolved = await resolve_operation(action, envs, SyncStrategy.LATEST)
@@ -1215,10 +1248,12 @@ class TestExtrasReinstall:
     async def test_latest_extras_not_satisfied_reinstalls(self) -> None:
         """LATEST + Python env + extras not satisfied -> ENSURE_EXTRAS."""
         action = self._make_action()
-        envs = self._make_python_envs(installed=[Package(name='cppython', version='1.0.0')])
+        envs = self._make_python_envs(
+            installed=[Package(name="cppython", version="1.0.0")]
+        )
 
         with patch(
-            'porringer.backend.command.core.resolution.check_extras_installed',
+            "porringer.backend.command.core.resolution.check_extras_installed",
             return_value=False,
         ):
             resolved = await resolve_operation(action, envs, SyncStrategy.LATEST)
@@ -1227,8 +1262,8 @@ class TestExtrasReinstall:
 
     async def test_latest_no_extras_at_latest_skips(self) -> None:
         """LATEST + installed at latest + no extras -> SKIP (unchanged)."""
-        action = self._make_action(name='cppython')
-        envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
+        action = self._make_action(name="cppython")
+        envs = self._make_envs(installed=[Package(name="cppython", version="1.0.0")])
 
         resolved = await resolve_operation(action, envs, SyncStrategy.LATEST)
         assert isinstance(resolved.operation, Skip)
@@ -1238,9 +1273,11 @@ class TestExtrasReinstall:
 
     async def test_plugin_minimal_no_extras_skips(self) -> None:
         """Plugin: MINIMAL + installed + no extras -> SKIP."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        action = self._make_action(name='cppython', plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
+        action = self._make_action(name="cppython", plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -1255,13 +1292,15 @@ class TestExtrasReinstall:
 
     async def test_plugin_minimal_extras_satisfied_skips(self) -> None:
         """Plugin: MINIMAL + installed + extras + introspection satisfied -> SKIP."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
-        action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
+        mock_pm.tool_python = MagicMock(return_value="/usr/bin/python")  # type: ignore[method-assign]
+        action = self._make_action(plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         with patch(
-            'porringer.backend.command.core.resolution.fetch_plugin_extras_context',
+            "porringer.backend.command.core.resolution.fetch_plugin_extras_context",
             return_value=([], frozenset()),
         ):
             resolved = await resolve_operation(
@@ -1277,13 +1316,15 @@ class TestExtrasReinstall:
 
     async def test_plugin_minimal_extras_not_satisfied_reinstalls(self) -> None:
         """Plugin: MINIMAL + installed + extras not satisfied -> ENSURE_EXTRAS."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
-        action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
+        mock_pm.tool_python = MagicMock(return_value="/usr/bin/python")  # type: ignore[method-assign]
+        action = self._make_action(plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         with patch(
-            'porringer.backend.command.core.resolution.fetch_plugin_extras_context',
+            "porringer.backend.command.core.resolution.fetch_plugin_extras_context",
             return_value=(['dep-a ; extra == "cmake"'], frozenset()),
         ):
             resolved = await resolve_operation(
@@ -1298,10 +1339,12 @@ class TestExtrasReinstall:
 
     async def test_plugin_minimal_extras_tool_python_not_found_reinstalls(self) -> None:
         """Plugin: MINIMAL + installed + extras + tool_python() returns None -> ENSURE_EXTRAS."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
         # tool_python() returns None by default on MockPluginManager
-        action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        action = self._make_action(plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -1317,17 +1360,21 @@ class TestExtrasReinstall:
 
     async def test_execute_minimal_extras_skips(self) -> None:
         """execute_package under MINIMAL with extras skips when satisfied."""
-        mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
-        action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        mock_pm = MockPluginManager(
+            _MOCK_PARAMS, installed=[Package(name="cppython", version="0.9.14")]
+        )
+        mock_pm.tool_python = MagicMock(return_value="/usr/bin/python")  # type: ignore[method-assign]
+        action = self._make_action(plugin_target="mock-pm")
+        proj_envs: dict[str, ProjectEnvironment] = {"mockpmproject": mock_pm}
         context = ResolutionContext(project_environments=proj_envs)
 
         with patch(
-            'porringer.backend.command.core.resolution.fetch_plugin_extras_context',
+            "porringer.backend.command.core.resolution.fetch_plugin_extras_context",
             return_value=([], frozenset()),
         ):
-            result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
+            result = await execute_package(
+                action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context
+            )
         assert result.success is True
         assert result.skipped is True
         assert len(mock_pm.operations) == 0
