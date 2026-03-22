@@ -20,14 +20,14 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.path import ensure_system_path
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
-from porringer.core.schema import Plugin
-from porringer.core.transport import LocalTransport
+from porringer.core.schema import Plugin, PluginParameters
+from porringer.core.transport import LocalTransport, Transport
 
 
 class ToolBasedPlugin(Plugin):
@@ -38,6 +38,11 @@ class ToolBasedPlugin(Plugin):
     Subclasses with `tool_name() → None` (the default) are always
     considered available.
     """
+
+    def with_transport(self, transport: Transport) -> Self:
+        """Create a new instance of this plugin using a different transport."""
+        parameters = PluginParameters(distribution=self._distribution, transport=transport)
+        return type(self)(parameters)
 
     @classmethod
     def tool_name(cls) -> str | None:
@@ -144,7 +149,7 @@ class ToolBasedPlugin(Plugin):
                 check=False,
             )
             output = result.stdout + result.stderr
-        except (OSError, subprocess.SubprocessError):
+        except OSError, subprocess.SubprocessError:
             return None
 
         match = re.search(r'v?\d+\.\d+(?:\.\d+)*', output)

@@ -79,7 +79,7 @@ def available_distros() -> list[str]:
         # wsl --list outputs UTF-16-LE on Windows
         text = result.stdout.decode('utf-16-le', errors='replace')
         return [line.strip() for line in text.splitlines() if line.strip()]
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         return []
 
 
@@ -97,7 +97,7 @@ def wsl_which(distro: str, tool_name: str) -> bool:
             check=False,
         )
         return result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         return False
 
 
@@ -117,6 +117,6 @@ def windows_to_wsl_path(distro: str, windows_path: Path) -> str | None:
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         pass
     return None

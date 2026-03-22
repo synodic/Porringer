@@ -130,6 +130,45 @@ class PackageSpec(PlatformScoped):
         return data
 
 
+class WslDistroManifest(PorringerModel):
+    """Package/runtime/project/scm sections for a single WSL2 distribution.
+
+    Mirrors the kind-grouped sections of :class:`SetupManifest` so
+    users can declare per-distro packages using the same syntax::
+
+        "wsl2": {
+            "Ubuntu-22.04": {
+                "packages": {"apt": ["curl", "build-essential"]},
+                "runtimes": {"python": ["3.12"]}
+            }
+        }
+    """
+
+    packages: dict[Ecosystem, list[PackageSpec]] = Field(
+        default_factory=dict, description='Packages to install per ecosystem'
+    )
+    tools: dict[Ecosystem, list[PackageSpec]] = Field(
+        default_factory=dict, description='CLI tools to install per ecosystem'
+    )
+    projects: dict[Ecosystem, list[PackageSpec]] = Field(
+        default_factory=dict, description='Project sync targets per ecosystem'
+    )
+    runtimes: dict[Ecosystem, list[PackageSpec]] = Field(
+        default_factory=dict, description='Language runtimes to install per ecosystem'
+    )
+    scm: dict[Ecosystem, list[PackageSpec]] = Field(
+        default_factory=dict, description='SCM repositories to clone per ecosystem'
+    )
+    preferences: dict[Ecosystem, str] = Field(default_factory=dict, description='Preferred installer per ecosystem')
+
+    def iter_sections(self) -> Iterator[tuple[PluginKind, Ecosystem, list[PackageSpec]]]:
+        """Yield `(kind, ecosystem, packages)` for every non-empty section."""
+        for kind in PluginKind:
+            section: dict[Ecosystem, list[PackageSpec]] = getattr(self, kind.value, {})
+            for ecosystem, packages in section.items():
+                yield kind, ecosystem, packages
+
+
 class SetupManifest(PorringerModel):
     """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer].
 
@@ -173,7 +212,7 @@ class SetupManifest(PorringerModel):
         description='Paths to other manifests whose state is merged (base layers)',
     )
     post_sync: list[str] = Field(default_factory=list, description='Commands to run after state synchronisation')
-    wsl2: dict[str, 'WslDistroManifest'] = Field(
+    wsl2: dict[str, WslDistroManifest] = Field(
         default_factory=dict,
         description=(
             'Per-distro WSL2 package/runtime/project/scm sections. '
@@ -218,51 +257,6 @@ class SetupManifest(PorringerModel):
                 section: dict[Ecosystem, list[PackageSpec]] = getattr(distro_manifest, kind.value, {})
                 for ecosystem, packages in section.items():
                     yield distro, kind, ecosystem, packages
-
-
-class WslDistroManifest(PorringerModel):
-    """Package/runtime/project/scm sections for a single WSL2 distribution.
-
-    Mirrors the kind-grouped sections of :class:`SetupManifest` so
-    users can declare per-distro packages using the same syntax::
-
-        "wsl2": {
-            "Ubuntu-22.04": {
-                "packages": {"apt": ["curl", "build-essential"]},
-                "runtimes": {"python": ["3.12"]}
-            }
-        }
-    """
-
-    packages: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='Packages to install per ecosystem'
-    )
-    tools: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='CLI tools to install per ecosystem'
-    )
-    projects: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='Project sync targets per ecosystem'
-    )
-    runtimes: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='Language runtimes to install per ecosystem'
-    )
-    scm: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='SCM repositories to clone per ecosystem'
-    )
-    preferences: dict[Ecosystem, str] = Field(
-        default_factory=dict, description='Preferred installer per ecosystem'
-    )
-
-    def iter_sections(self) -> Iterator[tuple[PluginKind, Ecosystem, list[PackageSpec]]]:
-        """Yield `(kind, ecosystem, packages)` for every non-empty section."""
-        for kind in PluginKind:
-            section: dict[Ecosystem, list[PackageSpec]] = getattr(self, kind.value, {})
-            for ecosystem, packages in section.items():
-                yield kind, ecosystem, packages
-
-
-# Resolve the forward reference now that WslDistroManifest is defined.
-SetupManifest.model_rebuild()
 
 
 @dataclass(slots=True)

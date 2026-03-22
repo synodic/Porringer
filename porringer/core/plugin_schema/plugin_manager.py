@@ -23,6 +23,7 @@ from typing import Protocol, runtime_checkable
 
 from porringer.core.plugin_schema.environment import PackageParameters
 from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind
+from porringer.core.transport import Transport
 from porringer.utility.utility import run_command
 
 
@@ -39,6 +40,8 @@ class PluginManager(Protocol):
     ``ToolBasedPlugin``) which is used to match the ``plugin_target``
     on a ``SetupAction``.
     """
+
+    _transport: Transport
 
     @classmethod
     @abstractmethod

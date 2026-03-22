@@ -4,24 +4,29 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from porringer.backend.command.core.action_builder import build_actions
-from porringer.backend.command.core.execution import _overlay_wsl_plugin, _wsl_transport_for
+from porringer.backend.command.core.execution import ExecutionState
+from porringer.backend.command.core.resolution import ResolutionContext
+from porringer.backend.command.core.wsl_overlay import overlay_wsl_plugin, wsl_transport_for
+from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from porringer.core.schema import Distribution, Ecosystem, PluginKind, PluginParameters
+from porringer.core.schema import Ecosystem, PluginKind
 from porringer.core.transport import LocalTransport, Transport
 from porringer.plugin.wsl.transport import WslTransport
 from porringer.plugin.wsl.utility import is_inside_wsl, is_wsl_host, native_distro
 from porringer.schema import PackageSpec, SetupManifest, SyncStrategy
 from porringer.schema.manifest import WslDistroManifest
-
 from tests.fixtures.mock_plugins import MOCK_DIST, MockPythonEnv, MockRuntimeProvider
 
 _PY = Ecosystem('python')
 _SYS = Ecosystem('system')
+
+_EXPECTED_PACKAGE_PAIR = 2
+_EXPECTED_DISTRO_PAIR = 2
+_EXPECTED_SECTION_PAIR = 2
+_EXPECTED_WSL_ACTIONS = 2
 
 
 # ---------------------------------------------------------------------------
@@ -34,23 +39,27 @@ class TestLocalTransport:
 
     @staticmethod
     def test_transform_args_identity() -> None:
+        """Args are returned unchanged."""
         t = LocalTransport()
         args = ['pip', 'install', 'requests']
         assert t.transform_args(args) is args
 
     @staticmethod
     def test_transform_cwd_identity() -> None:
+        """Working directory is returned unchanged."""
         t = LocalTransport()
         cwd = Path('/some/path')
         assert t.transform_cwd(cwd) is cwd
 
     @staticmethod
     def test_transform_cwd_none() -> None:
+        """None cwd passes through."""
         t = LocalTransport()
         assert t.transform_cwd(None) is None
 
     @staticmethod
     def test_check_tool_delegates_to_which() -> None:
+        """Tool check delegates to shutil.which."""
         t = LocalTransport()
         with patch('porringer.core.transport.shutil.which', return_value='/usr/bin/git'):
             assert t.check_tool('git') is True
@@ -59,6 +68,7 @@ class TestLocalTransport:
 
     @staticmethod
     def test_is_transport_protocol() -> None:
+        """LocalTransport satisfies the Transport protocol."""
         assert isinstance(LocalTransport(), Transport)
 
 
@@ -67,28 +77,33 @@ class TestWslTransport:
 
     @staticmethod
     def test_transform_args_prepends_wsl() -> None:
+        """Command args are prefixed with wsl invocation."""
         t = WslTransport('Ubuntu-22.04')
         result = t.transform_args(['apt', 'install', 'curl'])
         assert result == ['wsl', '--exec', '-d', 'Ubuntu-22.04', 'apt', 'install', 'curl']
 
     @staticmethod
     def test_transform_args_empty() -> None:
+        """Empty args produce bare wsl invocation."""
         t = WslTransport('Debian')
         result = t.transform_args([])
         assert result == ['wsl', '--exec', '-d', 'Debian']
 
     @staticmethod
     def test_distro_property() -> None:
+        """Distro name is accessible via property."""
         t = WslTransport('Ubuntu-22.04')
         assert t.distro == 'Ubuntu-22.04'
 
     @staticmethod
     def test_transform_cwd_none() -> None:
+        """None cwd passes through."""
         t = WslTransport('Ubuntu')
         assert t.transform_cwd(None) is None
 
     @staticmethod
     def test_transform_cwd_posix_passthrough() -> None:
+        """POSIX paths are returned unchanged."""
         t = WslTransport('Ubuntu')
         cwd = Path('/home/user/project')
         result = t.transform_cwd(cwd)
@@ -113,6 +128,7 @@ class TestWslTransport:
 
     @staticmethod
     def test_check_tool_delegates_to_wsl_which() -> None:
+        """Tool check delegates to wsl_which for the target distro."""
         t = WslTransport('Ubuntu')
         with patch('porringer.plugin.wsl.transport.wsl_which', return_value=True) as mock_which:
             assert t.check_tool('git') is True
@@ -120,10 +136,12 @@ class TestWslTransport:
 
     @staticmethod
     def test_is_transport_protocol() -> None:
+        """WslTransport satisfies the Transport protocol."""
         assert isinstance(WslTransport('test'), Transport)
 
     @staticmethod
     def test_repr() -> None:
+        """Repr includes the distro name."""
         t = WslTransport('Ubuntu-22.04')
         assert 'Ubuntu-22.04' in repr(t)
 
@@ -138,6 +156,7 @@ class TestWithTransport:
 
     @staticmethod
     def test_new_instance_different_transport() -> None:
+        """A fresh instance with the new transport is returned."""
         env = MockRuntimeProvider(MOCK_DIST)
         assert isinstance(env._transport, LocalTransport)
 
@@ -150,12 +169,14 @@ class TestWithTransport:
 
     @staticmethod
     def test_preserves_distribution() -> None:
+        """The new instance keeps the same distribution."""
         env = MockRuntimeProvider(MOCK_DIST)
         new_env = env.with_transport(WslTransport('Debian'))
         assert new_env._distribution == env._distribution
 
     @staticmethod
     def test_original_unchanged() -> None:
+        """The original instance retains its LocalTransport."""
         env = MockRuntimeProvider(MOCK_DIST)
         env.with_transport(WslTransport('Debian'))
         assert isinstance(env._transport, LocalTransport)
@@ -171,6 +192,7 @@ class TestWslDetection:
 
     @staticmethod
     def test_is_wsl_host_on_windows() -> None:
+        """Returns True on Windows when wsl.exe is on PATH."""
         with (
             patch('porringer.plugin.wsl.utility.sys') as mock_sys,
             patch('porringer.plugin.wsl.utility.shutil.which', return_value='C:\\Windows\\system32\\wsl.exe'),
@@ -180,12 +202,14 @@ class TestWslDetection:
 
     @staticmethod
     def test_is_wsl_host_not_windows() -> None:
+        """Returns False on non-Windows platforms."""
         with patch('porringer.plugin.wsl.utility.sys') as mock_sys:
             mock_sys.platform = 'linux'
             assert is_wsl_host() is False
 
     @staticmethod
     def test_is_wsl_host_no_wsl_exe() -> None:
+        """Returns False when wsl.exe is not on PATH."""
         with (
             patch('porringer.plugin.wsl.utility.sys') as mock_sys,
             patch('porringer.plugin.wsl.utility.shutil.which', return_value=None),
@@ -195,18 +219,18 @@ class TestWslDetection:
 
     @staticmethod
     def test_is_inside_wsl_linux_with_microsoft() -> None:
+        """Returns True when /proc/version contains 'microsoft'."""
         with (
             patch('porringer.plugin.wsl.utility.sys') as mock_sys,
             patch('porringer.plugin.wsl.utility.Path') as mock_path,
         ):
             mock_sys.platform = 'linux'
-            mock_path.return_value.read_text.return_value = (
-                'Linux version 5.15.153.1-microsoft-standard-WSL2'
-            )
+            mock_path.return_value.read_text.return_value = 'Linux version 5.15.153.1-microsoft-standard-WSL2'
             assert is_inside_wsl() is True
 
     @staticmethod
     def test_is_inside_wsl_not_linux() -> None:
+        """Returns False on non-Linux platforms."""
         with patch('porringer.plugin.wsl.utility.sys') as mock_sys:
             mock_sys.platform = 'win32'
             assert is_inside_wsl() is False
@@ -222,6 +246,7 @@ class TestWslDistroManifest:
 
     @staticmethod
     def test_empty_manifest() -> None:
+        """All fields default to empty dicts."""
         m = WslDistroManifest()
         assert m.packages == {}
         assert m.tools == {}
@@ -232,13 +257,15 @@ class TestWslDistroManifest:
 
     @staticmethod
     def test_packages_section() -> None:
+        """Packages are parsed into ecosystem-keyed dicts."""
         m = WslDistroManifest.model_validate({
             'packages': {'system': ['curl', 'build-essential']},
         })
-        assert len(m.packages[Ecosystem('system')]) == 2
+        assert len(m.packages[Ecosystem('system')]) == _EXPECTED_PACKAGE_PAIR
 
     @staticmethod
     def test_preferences_override() -> None:
+        """Per-ecosystem preferences are parsed correctly."""
         m = WslDistroManifest.model_validate({
             'packages': {'python': ['requests']},
             'preferences': {'python': 'pip'},
@@ -251,11 +278,13 @@ class TestSetupManifestWsl2:
 
     @staticmethod
     def test_wsl2_defaults_to_empty() -> None:
+        """The wsl2 field defaults to an empty dict."""
         m = SetupManifest()
         assert m.wsl2 == {}
 
     @staticmethod
     def test_wsl2_single_distro() -> None:
+        """A single distro is parsed into the wsl2 dict."""
         m = SetupManifest.model_validate({
             'version': '1',
             'wsl2': {
@@ -270,6 +299,7 @@ class TestSetupManifestWsl2:
 
     @staticmethod
     def test_wsl2_multiple_distros() -> None:
+        """Multiple distros are parsed independently."""
         m = SetupManifest.model_validate({
             'version': '1',
             'wsl2': {
@@ -277,10 +307,11 @@ class TestSetupManifestWsl2:
                 'Debian': {'packages': {'system': ['wget']}},
             },
         })
-        assert len(m.wsl2) == 2
+        assert len(m.wsl2) == _EXPECTED_DISTRO_PAIR
 
     @staticmethod
     def test_iter_wsl_sections() -> None:
+        """iter_wsl_sections yields one tuple per non-empty section."""
         m = SetupManifest.model_validate({
             'version': '1',
             'wsl2': {
@@ -291,7 +322,7 @@ class TestSetupManifestWsl2:
             },
         })
         sections = list(m.iter_wsl_sections())
-        assert len(sections) == 2
+        assert len(sections) == _EXPECTED_SECTION_PAIR
 
         # Each entry is (distro, kind, ecosystem, packages)
         distros = {s[0] for s in sections}
@@ -303,6 +334,7 @@ class TestSetupManifestWsl2:
 
     @staticmethod
     def test_iter_wsl_sections_empty_when_no_wsl2() -> None:
+        """No sections are yielded when wsl2 is absent."""
         m = SetupManifest(packages={_PY: [PackageSpec(name='requests')]})
         assert list(m.iter_wsl_sections()) == []
 
@@ -327,11 +359,11 @@ class TestBuildActionsWsl:
             },
         })
         env = MockPythonEnv(MOCK_DIST)
-        environments = {'mock-pip': env}
+        environments: dict[str, Environment] = {'mock-pip': env}
         actions = build_actions(manifest, environments)
 
         wsl_actions = [a for a in actions if a.distro is not None]
-        assert len(wsl_actions) == 2
+        assert len(wsl_actions) == _EXPECTED_WSL_ACTIONS
         assert all(a.distro == 'Ubuntu' for a in wsl_actions)
         assert all(a.kind == PluginKind.PACKAGE for a in wsl_actions)
 
@@ -428,7 +460,7 @@ class TestBuildActionsWsl:
             },
         })
         pip = MockPythonEnv(MOCK_DIST)
-        environments = {'mock-pip': pip}
+        environments: dict[str, Environment] = {'mock-pip': pip}
         with patch.object(type(pip), 'is_available', return_value=True):
             actions = build_actions(manifest, environments)
 
@@ -463,6 +495,7 @@ class TestNativeDistro:
 
     @staticmethod
     def test_inside_matching_wsl() -> None:
+        """Returns the distro name when running inside that distro."""
         native_distro.cache_clear()
         with (
             patch('porringer.plugin.wsl.utility.is_inside_wsl', return_value=True),
@@ -473,6 +506,7 @@ class TestNativeDistro:
 
     @staticmethod
     def test_not_inside_wsl() -> None:
+        """Returns None when not inside WSL."""
         native_distro.cache_clear()
         with patch('porringer.plugin.wsl.utility.is_inside_wsl', return_value=False):
             assert native_distro() is None
@@ -480,6 +514,7 @@ class TestNativeDistro:
 
     @staticmethod
     def test_inside_wsl_no_env_var() -> None:
+        """Returns None when inside WSL but env var is unset."""
         native_distro.cache_clear()
         with (
             patch('porringer.plugin.wsl.utility.is_inside_wsl', return_value=True),
@@ -490,53 +525,59 @@ class TestNativeDistro:
 
 
 class TestWslTransportForDistro:
-    """_wsl_transport_for returns WslTransport or None for native."""
+    """wsl_transport_for returns WslTransport or None for native."""
 
     @staticmethod
     def test_returns_wsl_transport_when_not_native() -> None:
-        with patch('porringer.plugin.wsl.utility.native_distro', return_value=None):
-            transport = _wsl_transport_for('Ubuntu')
+        """Returns a WslTransport when not running natively."""
+        with patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value=None):
+            transport = wsl_transport_for('Ubuntu')
             assert isinstance(transport, WslTransport)
             assert transport.distro == 'Ubuntu'
 
     @staticmethod
     def test_returns_none_when_native() -> None:
-        with patch('porringer.plugin.wsl.utility.native_distro', return_value='Ubuntu'):
-            assert _wsl_transport_for('Ubuntu') is None
+        """Returns None when already inside the target distro."""
+        with patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value='Ubuntu'):
+            assert wsl_transport_for('Ubuntu') is None
 
     @staticmethod
     def test_returns_transport_when_different_distro() -> None:
-        with patch('porringer.plugin.wsl.utility.native_distro', return_value='Debian'):
-            transport = _wsl_transport_for('Ubuntu')
+        """Returns a WslTransport when native distro differs."""
+        with patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value='Debian'):
+            transport = wsl_transport_for('Ubuntu')
             assert isinstance(transport, WslTransport)
 
 
 class TestOverlayWslEnvironment:
-    """_overlay_wsl_plugin applies or skips WslTransport based on native detection."""
+    """overlay_wsl_plugin applies or skips WslTransport based on native detection."""
 
     @staticmethod
     def test_wraps_with_wsl_transport() -> None:
+        """Installer plugin is wrapped with WslTransport."""
         env = MockPythonEnv(MOCK_DIST)
         envs = {'mock-pip': env}
-        with patch('porringer.plugin.wsl.utility.native_distro', return_value=None):
-            result = _overlay_wsl_plugin(envs, 'mock-pip', 'Ubuntu')
+        with patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value=None):
+            result = overlay_wsl_plugin(envs, 'mock-pip', 'Ubuntu')
         assert result is not envs
         assert isinstance(result['mock-pip']._transport, WslTransport)
 
     @staticmethod
     def test_skips_when_native() -> None:
+        """Returns the same dict when already inside the target distro."""
         env = MockPythonEnv(MOCK_DIST)
         envs = {'mock-pip': env}
-        with patch('porringer.plugin.wsl.utility.native_distro', return_value='Ubuntu'):
-            result = _overlay_wsl_plugin(envs, 'mock-pip', 'Ubuntu')
+        with patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value='Ubuntu'):
+            result = overlay_wsl_plugin(envs, 'mock-pip', 'Ubuntu')
         assert result is envs  # unchanged — same dict object
 
     @staticmethod
     def test_wraps_when_different_distro() -> None:
+        """Wraps when native distro differs from target."""
         env = MockPythonEnv(MOCK_DIST)
         envs = {'mock-pip': env}
-        with patch('porringer.plugin.wsl.utility.native_distro', return_value='Debian'):
-            result = _overlay_wsl_plugin(envs, 'mock-pip', 'Ubuntu')
+        with patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value='Debian'):
+            result = overlay_wsl_plugin(envs, 'mock-pip', 'Ubuntu')
         assert isinstance(result['mock-pip']._transport, WslTransport)
 
 
@@ -550,8 +591,7 @@ class TestWslRuntimeContexts:
 
     @staticmethod
     def test_resolution_context_carries_wsl_contexts() -> None:
-        from porringer.backend.command.core.resolution import ResolutionContext
-
+        """WSL runtime contexts are stored and retrievable."""
         wsl_ctxs = {
             'Ubuntu': RuntimeContext(executables={'python': Path('/usr/bin/python3')}),
         }
@@ -561,29 +601,27 @@ class TestWslRuntimeContexts:
 
     @staticmethod
     def test_resolution_context_defaults_to_none() -> None:
-        from porringer.backend.command.core.resolution import ResolutionContext
-
+        """Default ResolutionContext has no WSL contexts."""
         ctx = ResolutionContext()
         assert ctx.wsl_runtime_contexts is None
 
     @staticmethod
     def test_wsl_runtime_context_is_separate_from_host() -> None:
-        from porringer.backend.command.core.resolution import ResolutionContext
-
+        """Host and WSL runtime contexts are independent."""
         host_ctx = RuntimeContext(executables={'python': Path('C:\\Python314\\python.exe')})
         wsl_ctxs = {
             'Ubuntu': RuntimeContext(executables={'python': Path('/usr/bin/python3.12')}),
         }
         ctx = ResolutionContext(runtime_context=host_ctx, wsl_runtime_contexts=wsl_ctxs)
 
-        # Host and WSL contexts are independent
+        assert ctx.runtime_context is not None
         assert ctx.runtime_context.get('python') == Path('C:\\Python314\\python.exe')
+        assert ctx.wsl_runtime_contexts is not None
         assert ctx.wsl_runtime_contexts['Ubuntu'].get('python') == Path('/usr/bin/python3.12')
 
     @staticmethod
     def test_replace_preserves_wsl_contexts() -> None:
-        from porringer.backend.command.core.resolution import ResolutionContext
-
+        """Dataclass replace preserves wsl_runtime_contexts."""
         wsl_ctxs = {'Ubuntu': RuntimeContext(executables={'python': Path('/usr/bin/python3')})}
         ctx = ResolutionContext(wsl_runtime_contexts=wsl_ctxs)
         new_ctx = replace(ctx, runtime_context=RuntimeContext())
@@ -596,10 +634,6 @@ class TestExecutionStateWslRuntimes:
     @staticmethod
     def test_wsl_runtime_contexts_defaults_empty() -> None:
         """The field defaults to an empty dict."""
-        from unittest.mock import MagicMock
-
-        from porringer.backend.command.core.execution import ExecutionState
-
         state = ExecutionState(
             actions=[],
             plugins=MagicMock(),
@@ -613,10 +647,6 @@ class TestExecutionStateWslRuntimes:
     @staticmethod
     def test_resolution_context_includes_wsl_contexts() -> None:
         """resolution_context property includes wsl_runtime_contexts when populated."""
-        from unittest.mock import MagicMock
-
-        from porringer.backend.command.core.execution import ExecutionState
-
         state = ExecutionState(
             actions=[],
             plugins=MagicMock(project_environments={}),
@@ -635,10 +665,6 @@ class TestExecutionStateWslRuntimes:
     @staticmethod
     def test_resolution_context_none_when_empty() -> None:
         """resolution_context.wsl_runtime_contexts is None when dict is empty."""
-        from unittest.mock import MagicMock
-
-        from porringer.backend.command.core.execution import ExecutionState
-
         state = ExecutionState(
             actions=[],
             plugins=MagicMock(project_environments={}),

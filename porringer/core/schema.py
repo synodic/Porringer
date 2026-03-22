@@ -3,7 +3,7 @@
 import re
 import sys
 from enum import Enum
-from typing import Any, NewType, Protocol
+from typing import Any, NewType, Protocol, Self
 
 __all__ = [
     'Distribution',
@@ -315,10 +315,9 @@ class Plugin(Protocol):
         self._distribution = parameters.distribution
         self._transport = parameters.transport
 
-    def with_transport(self, transport: Transport) -> 'Plugin':
+    def with_transport(self, transport: Transport) -> Self:
         """Create a new instance of this plugin using a different transport."""
-        parameters = PluginParameters(distribution=self._distribution, transport=transport)
-        return type(self)(parameters)
+        ...
 
     @staticmethod
     def ecosystem() -> Ecosystem | None:

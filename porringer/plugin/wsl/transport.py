@@ -27,6 +27,7 @@ class WslTransport:
     __slots__ = ('_distro', '_tool_cache')
 
     def __init__(self, distro: str) -> None:
+        """Initialise the transport for *distro*."""
         self._distro = distro
         self._tool_cache: dict[str, bool] = {}
 
@@ -50,7 +51,8 @@ class WslTransport:
             return None
         # If it looks like a Windows absolute path, translate it
         cwd_str = str(cwd)
-        if len(cwd_str) >= 2 and cwd_str[1] == ':':
+        _MIN_WINDOWS_PATH_LEN = 2
+        if len(cwd_str) >= _MIN_WINDOWS_PATH_LEN and cwd_str[1] == ':':
             translated = windows_to_wsl_path(self._distro, cwd)
             return Path(translated) if translated else cwd
         return cwd
@@ -65,4 +67,5 @@ class WslTransport:
             return result
 
     def __repr__(self) -> str:
+        """Return a developer-friendly representation."""
         return f'WslTransport(distro={self._distro!r})'

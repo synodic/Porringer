@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, override, runtime_checkable
 
 __all__ = ['LocalTransport', 'Transport']
 
@@ -64,7 +64,7 @@ class Transport(Protocol):
         ...
 
 
-class LocalTransport:
+class LocalTransport(Transport):
     """Passthrough transport for local subprocess execution.
 
     All methods are identity operations — commands run on the host
@@ -73,11 +73,17 @@ class LocalTransport:
 
     __slots__ = ()
 
+    @override
     def transform_args(self, args: list[str]) -> list[str]:
+        """Return *args* unchanged for local execution."""
         return args
 
+    @override
     def transform_cwd(self, cwd: Path | None) -> Path | None:
+        """Return *cwd* unchanged for local execution."""
         return cwd
 
+    @override
     def check_tool(self, tool_name: str) -> bool:
+        """Check whether *tool_name* is on the local ``PATH``."""
         return shutil.which(tool_name) is not None
