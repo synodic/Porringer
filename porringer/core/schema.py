@@ -25,6 +25,8 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator
 
+from porringer.core.transport import LocalTransport, Transport
+
 Ecosystem = NewType('Ecosystem', str)
 """Semantic alias for ecosystem identifiers (e.g. `"python"`, `"node"`).
 
@@ -299,16 +301,24 @@ class PluginParameters(PorringerModel):
     """Generic plugin parameters that will be used to construct a Plugin instance"""
 
     distribution: Distribution
+    transport: Transport = Field(default_factory=LocalTransport)
 
 
 class Plugin(Protocol):
     """Porringer plugin"""
 
     _distribution: Distribution
+    _transport: Transport
 
     def __init__(self, parameters: PluginParameters) -> None:
         """Initializes the plugin"""
         self._distribution = parameters.distribution
+        self._transport = parameters.transport
+
+    def with_transport(self, transport: Transport) -> 'Plugin':
+        """Create a new instance of this plugin using a different transport."""
+        parameters = PluginParameters(distribution=self._distribution, transport=transport)
+        return type(self)(parameters)
 
     @staticmethod
     def ecosystem() -> Ecosystem | None:

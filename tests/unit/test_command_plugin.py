@@ -20,6 +20,7 @@ from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import ResolvedRuntime, RuntimeConsumer, RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Distribution, Ecosystem, Package, PluginDependency, PluginKind, PluginParameters
+from porringer.core.transport import LocalTransport
 from porringer.schema import LocalConfiguration
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import is_pipx_installation
@@ -597,6 +598,7 @@ class TestQueryAvailability:
     def test_unsupported_returns_false() -> None:
         """An unsupported plugin returns False regardless of is_available."""
         mock = MagicMock(spec=ToolBasedPlugin)
+        mock._transport = LocalTransport()
         type(mock).is_supported = MagicMock(return_value=False)
         mock.is_available = MagicMock(return_value=True)
 
@@ -608,6 +610,7 @@ class TestQueryAvailability:
     def test_supported_available_returns_true() -> None:
         """A supported and PATH-available plugin returns True without context."""
         mock = MagicMock(spec=ToolBasedPlugin)
+        mock._transport = LocalTransport()
         type(mock).is_supported = MagicMock(return_value=True)
         mock.is_available = MagicMock(return_value=True)
 
@@ -619,6 +622,7 @@ class TestQueryAvailability:
     def test_supported_unavailable_returns_false() -> None:
         """A supported but PATH-unavailable plugin returns False without context."""
         mock = MagicMock(spec=ToolBasedPlugin)
+        mock._transport = LocalTransport()
         type(mock).is_supported = MagicMock(return_value=True)
         mock.is_available = MagicMock(return_value=False)
 
@@ -637,7 +641,7 @@ class TestQueryAvailability:
             _distribution: Distribution
 
             def __init__(self, parameters: PluginParameters) -> None:
-                self._distribution = parameters.distribution
+                super().__init__(parameters)
 
             @staticmethod
             def ecosystem() -> Ecosystem | None:
@@ -678,6 +682,7 @@ class TestQueryAvailability:
     def test_non_consumer_ignores_runtime_context() -> None:
         """A non-RuntimeConsumer plugin uses is_available() even with a context."""
         mock = MagicMock(spec=ToolBasedPlugin)
+        mock._transport = LocalTransport()
         type(mock).is_supported = MagicMock(return_value=True)
         mock.is_available = MagicMock(return_value=True)
 

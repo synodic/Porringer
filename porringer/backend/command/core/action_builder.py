@@ -15,8 +15,10 @@ from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import Ecosystem, PackageRef, PluginKind
+
 from porringer.schema import (
     ManifestMetadata,
+    PackageSpec,
     SetupAction,
     SetupManifest,
     SetupResults,
@@ -350,6 +352,98 @@ def build_actions(
                         include_prereleases=plugin_spec.include_prereleases,
                     )
                 )
+
+    # ---- WSL2 distro sections -------------------------------------------
+    # Each distro gets its own resolver (may have different preferences)
+    # and all produced actions carry the distro name so the execution
+    # layer can wrap them in a WslTransport.
+    for distro, distro_manifest in manifest.wsl2.items():
+        wsl_needed: set[tuple[PluginKind, Ecosystem]] = set()
+        for kind, ecosystem, _packages in distro_manifest.iter_sections():
+            wsl_needed.add((kind, ecosystem))
+
+        wsl_resolver = BackendResolver(
+            plugins.all_plugins,
+            distro_manifest.preferences,
+            needed_pairs=wsl_needed,
+        )
+
+        for kind, ecosystem, packages in distro_manifest.iter_sections():
+            installer = wsl_resolver.resolve(kind, ecosystem)
+            if installer is None:
+                _log_unresolved(wsl_resolver, kind, ecosystem)
+
+            is_registered = installer is not None or wsl_resolver.is_registered(kind, ecosystem)
+            distro_prefix = f'[WSL:{distro}] '
+
+            if kind == PluginKind.PROJECT:
+                actions.append(
+                    SetupAction(
+                        description=distro_prefix + action_description(kind, verb, installer, registered=is_registered),
+                        kind=kind,
+                        ecosystem=ecosystem,
+                        installer=installer,
+                        distro=distro,
+                    )
+                )
+                continue
+
+            if kind == PluginKind.SCM:
+                for package in packages:
+                    if not package.is_applicable():
+                        continue
+                    scm_description = package.description or str(package.name)
+                    desc = distro_prefix + action_description(
+                        kind, verb, installer, package=package.name, registered=is_registered
+                    )
+                    actions.append(
+                        SetupAction(
+                            description=desc,
+                            kind=kind,
+                            ecosystem=ecosystem,
+                            installer=installer,
+                            package=package.name,
+                            package_description=scm_description,
+                            distro=distro,
+                        )
+                    )
+                continue
+
+            for package in packages:
+                if not package.is_applicable():
+                    continue
+                desc = distro_prefix + action_description(
+                    kind, verb, installer, package=package.name, registered=is_registered
+                )
+                actions.append(
+                    SetupAction(
+                        description=desc,
+                        kind=kind,
+                        ecosystem=ecosystem,
+                        installer=installer,
+                        package=package.name,
+                        package_description=package.description,
+                        include_prereleases=package.include_prereleases,
+                        distro=distro,
+                    )
+                )
+
+                for plugin_spec in package.plugins:
+                    actions.append(
+                        SetupAction(
+                            description=distro_prefix + action_description(
+                                kind, verb, installer, package=plugin_spec.name,
+                                plugin_target=package.name, registered=is_registered,
+                            ),
+                            kind=kind,
+                            ecosystem=ecosystem,
+                            installer=installer,
+                            package=plugin_spec.name,
+                            plugin_target=package.name,
+                            include_prereleases=plugin_spec.include_prereleases,
+                            distro=distro,
+                        )
+                    )
 
     # Add post-sync command actions (kind=None)
     for command_str in manifest.post_sync:

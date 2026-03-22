@@ -190,6 +190,12 @@ async def _dry_run_package_action(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=True)
 
+    # --- Per-action WSL distro routing ------------------------------------
+    if action.distro is not None and action.installer in environments:
+        from porringer.backend.command.core.execution import _overlay_wsl_plugin
+
+        environments = _overlay_wsl_plugin(environments, action.installer, action.distro)
+
     ctx = context or ResolutionContext()
     # Merge strategy-derived fields into the context
     ctx = ResolutionContext(
@@ -198,6 +204,7 @@ async def _dry_run_package_action(
         http_client=ctx.http_client,
         package_cache=ctx.package_cache,
         runtime_context=ctx.runtime_context,
+        wsl_runtime_contexts=ctx.wsl_runtime_contexts,
     )
 
     resolved = await resolve_operation(action, environments, strategy, ctx)

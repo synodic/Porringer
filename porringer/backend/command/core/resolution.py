@@ -245,6 +245,10 @@ class ResolutionContext:
     """Resolved runtime paths.  Threaded through to ``packages()``
     so Python-ecosystem plugins can query packages from the correct
     interpreter."""
+    wsl_runtime_contexts: dict[str, RuntimeContext] | None = None
+    """Per-distro runtime contexts for WSL2 actions.  When set,
+    actions with ``action.distro`` use the corresponding context
+    instead of :attr:`runtime_context`."""
 
 
 async def resolve_operation(

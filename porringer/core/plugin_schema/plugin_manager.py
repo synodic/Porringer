@@ -159,8 +159,10 @@ class PluginManager(Protocol):
         tool = self.tool_name()
         _logger = logging.getLogger(f'porringer.{tool}.plugin_list')
         try:
+            args = list(self.plugin_list_command())
+            transformed = self._transport.transform_args(args)
             proc = await asyncio.create_subprocess_exec(
-                *self.plugin_list_command(),
+                *transformed,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -195,7 +197,7 @@ class PluginManager(Protocol):
         tool = self.tool_name()
         _logger = logging.getLogger(f'porringer.{tool}.plugin_add')
         try:
-            result = await run_command(args)
+            result = await run_command(self._transport.transform_args(args))
             _logger.info(result.stdout)
             if result.returncode != 0:
                 _logger.error(result.stderr)
@@ -224,7 +226,7 @@ class PluginManager(Protocol):
         tool = self.tool_name()
         _logger = logging.getLogger(f'porringer.{tool}.plugin_update')
         try:
-            result = await run_command(args)
+            result = await run_command(self._transport.transform_args(args))
             _logger.info(result.stdout)
             if result.returncode != 0:
                 _logger.error(result.stderr)
@@ -253,7 +255,7 @@ class PluginManager(Protocol):
         tool = self.tool_name()
         _logger = logging.getLogger(f'porringer.{tool}.plugin_remove')
         try:
-            result = await run_command(args)
+            result = await run_command(self._transport.transform_args(args))
             _logger.info(result.stdout)
             if result.returncode != 0:
                 _logger.error(result.stderr)

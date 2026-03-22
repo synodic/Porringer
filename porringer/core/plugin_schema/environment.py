@@ -293,8 +293,9 @@ class Environment(ToolBasedPlugin):
         )
         callback = params.progress_callback if params.progress_callback is not None else lambda _: None
         try:
+            transformed = self._transport.transform_args(args)
             result = await stream_command(
-                args,
+                transformed,
                 progress=StreamProgress(
                     action=action,
                     callback=callback,
