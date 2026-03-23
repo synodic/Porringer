@@ -315,35 +315,37 @@ async def _perform_download(
     downloaded = 0
 
     try:
-        async with asyncio.timeout(state.parameters.timeout):
-            async with session.get(state.parameters.url, allow_redirects=True) as response:
-                response.raise_for_status()
+        async with (
+            asyncio.timeout(state.parameters.timeout),
+            session.get(state.parameters.url, allow_redirects=True) as response,
+        ):
+            response.raise_for_status()
 
-                total_size: int | None = None
-                content_length = response.headers.get('Content-Length')
-                if content_length:
-                    total_size = int(content_length)
+            total_size: int | None = None
+            content_length = response.headers.get('Content-Length')
+            if content_length:
+                total_size = int(content_length)
 
-                # Validate size from headers
-                if state.parameters.expected_size and total_size and total_size != state.parameters.expected_size:
-                    return DownloadResult(
-                        success=False,
-                        message=f'Size mismatch: expected {state.parameters.expected_size}, got {total_size}',
-                    )
+            # Validate size from headers
+            if state.parameters.expected_size and total_size and total_size != state.parameters.expected_size:
+                return DownloadResult(
+                    success=False,
+                    message=f'Size mismatch: expected {state.parameters.expected_size}, got {total_size}',
+                )
 
-                with open(temp_fd, 'wb') as f:
-                    async for chunk in response.content.iter_chunked(state.parameters.chunk_size):
-                        if cancellation_token is not None:
-                            cancellation_token.raise_if_cancelled()
+            with open(temp_fd, 'wb') as f:
+                async for chunk in response.content.iter_chunked(state.parameters.chunk_size):
+                    if cancellation_token is not None:
+                        cancellation_token.raise_if_cancelled()
 
-                        f.write(chunk)
-                        downloaded += len(chunk)
+                    f.write(chunk)
+                    downloaded += len(chunk)
 
-                        if hasher:
-                            hasher.update(chunk)
+                    if hasher:
+                        hasher.update(chunk)
 
-                        if state.progress_callback:
-                            state.progress_callback(downloaded, total_size)
+                    if state.progress_callback:
+                        state.progress_callback(downloaded, total_size)
     except aiohttp.ClientResponseError:
         raise  # Let the caller's retry logic handle HTTP errors
 

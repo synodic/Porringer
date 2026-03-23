@@ -116,15 +116,9 @@ class DenoEnvironment(Environment):
             ) as session:
                 for pkg_ref in jsr_refs:
                     jsr_name = pkg_ref.name[4:]  # strip 'jsr:'
-                    try:
-                        async with session.get(f'https://jsr.io/{jsr_name}/meta.json') as response:
-                            response.raise_for_status()
-                            data = await response.json()
-                            latest = data.get('latest')
-                            if latest:
-                                results.append(Package(name=pkg_ref.name, version=latest))
-                    except (aiohttp.ClientError, ValueError) as exc:
-                        logger.debug('JSR query failed for %s: %s', pkg_ref.name, exc)
+                    pkg = await self._fetch_jsr_package(session, pkg_ref.name, jsr_name, logger)
+                    if pkg is not None:
+                        results.append(pkg)
 
         return results
 
@@ -146,3 +140,22 @@ class DenoEnvironment(Environment):
             An empty list.
         """
         return []
+
+    @staticmethod
+    async def _fetch_jsr_package(
+        session: aiohttp.ClientSession,
+        original_name: str,
+        jsr_name: str,
+        logger: logging.Logger,
+    ) -> Package | None:
+        """Fetch a single JSR package's latest version, or ``None`` on failure."""
+        try:
+            async with session.get(f'https://jsr.io/{jsr_name}/meta.json') as response:
+                response.raise_for_status()
+                data = await response.json()
+                latest = data.get('latest')
+                if latest:
+                    return Package(name=original_name, version=latest)
+        except (aiohttp.ClientError, ValueError) as exc:
+            logger.debug('JSR query failed for %s: %s', original_name, exc)
+        return None

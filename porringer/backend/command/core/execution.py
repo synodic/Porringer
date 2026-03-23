@@ -54,9 +54,9 @@ from porringer.schema import (
     Upgrade,
 )
 from porringer.schema.progress import DiscoveredPluginEntry
+from porringer.utility import HTTP_TIMEOUT
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import StreamProgress, stream_command
-from porringer.utility import HTTP_TIMEOUT
 
 from .action_builder import (
     PHASE_ORDER,

@@ -1,5 +1,6 @@
 """Utilities for managing and checking the Porringer installation version."""
 
+import contextlib
 import importlib.metadata
 import logging
 
@@ -27,21 +28,21 @@ async def get_latest_pypi_version(
     Returns:
         The latest version as a Version object, or None if fetch failed.
     """
-    import contextlib
-
     try:
         async with (
-            contextlib.nullcontext(http_client)
-            if http_client is not None
-            else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
-        ) as session:
-            async with session.get(PYPI_URL) as response:
-                response.raise_for_status()
-                json_data = await response.json()
-                version_str = json_data.get('info', {}).get('version')
-                if version_str:
-                    return Version(version_str)
-    except (aiohttp.ClientError, KeyError, ValueError):
+            (
+                contextlib.nullcontext(http_client)
+                if http_client is not None
+                else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
+            ) as session,
+            session.get(PYPI_URL) as response,
+        ):
+            response.raise_for_status()
+            json_data = await response.json()
+            version_str = json_data.get('info', {}).get('version')
+            if version_str:
+                return Version(version_str)
+    except aiohttp.ClientError, KeyError, ValueError:
         pass
     return None
 
