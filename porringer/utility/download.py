@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
+import aiohttp
 
 from porringer.schema import (
     CancellationToken,
@@ -18,6 +18,7 @@ from porringer.schema import (
     HashAlgorithm,
     ProgressCallback,
 )
+from porringer.utility import HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,7 @@ def _verify_download(
 
 
 async def _download_attempt(
+    session: aiohttp.ClientSession,
     state: _DownloadState,
     cancellation_token: CancellationToken | None,
 ) -> DownloadResult:
@@ -161,6 +163,7 @@ async def _download_attempt(
     destination on success.  The caller is responsible for retry logic.
 
     Args:
+        session: Shared aiohttp session.
         state: Download state.
         cancellation_token: Optional cancellation token.
 
@@ -170,8 +173,8 @@ async def _download_attempt(
     Raises:
         asyncio.CancelledError: If cancelled.
         TimeoutError: On timeout.
-        httpx.HTTPStatusError: On HTTP status errors.
-        httpx.HTTPError: On other HTTP errors.
+        aiohttp.ClientResponseError: On HTTP status errors.
+        aiohttp.ClientError: On other HTTP errors.
         OSError: On filesystem errors.
     """
     temp_path: Path | None = None
@@ -183,7 +186,7 @@ async def _download_attempt(
         )
         temp_path = Path(temp_path_str)
 
-        result = await _perform_download(temp_fd, state, cancellation_token)
+        result = await _perform_download(session, temp_fd, state, cancellation_token)
 
         if result.success:
             temp_path.replace(state.parameters.destination)
@@ -209,7 +212,7 @@ async def download_file(
 ) -> DownloadResult:
     """Asynchronously downloads a file with optional hash verification.
 
-    Uses httpx for non-blocking HTTP requests. Suitable for GUI applications
+    Uses aiohttp for non-blocking HTTP requests. Suitable for GUI applications
     that need to keep their event loop responsive during downloads.
 
     Downloads to a temporary file first, verifies hash if provided,
@@ -251,111 +254,53 @@ async def download_file(
 
     last_result: DownloadResult | None = None
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            result = await _download_attempt(state, cancellation_token)
-            if not result.success:
+    async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as session:
+        for attempt in range(_MAX_RETRIES):
+            try:
+                result = await _download_attempt(session, state, cancellation_token)
+                if not result.success:
+                    return result
                 return result
-            return result
 
-        except asyncio.CancelledError:
-            logger.info('Download cancelled')
-            raise
-        except TimeoutError:
-            last_result = DownloadResult(
-                success=False, message=f'Download timed out after {parameters.timeout} seconds'
-            )
-            logger.warning('Timeout on attempt %d/%d', attempt + 1, _MAX_RETRIES)
-        except httpx.HTTPStatusError as e:
-            last_result = DownloadResult(success=False, message=str(e))
-            if e.response.status_code < _SERVER_ERROR_THRESHOLD:
-                logger.error(f'HTTP error: {e}')
-                return last_result
-            logger.warning('Retryable HTTP %d on attempt %d/%d', e.response.status_code, attempt + 1, _MAX_RETRIES)
-        except (httpx.HTTPError, OSError) as e:
-            last_result = DownloadResult(success=False, message=str(e))
-            logger.warning('Network error on attempt %d/%d: %s', attempt + 1, _MAX_RETRIES, e)
-        except Exception as e:
-            logger.error(f'Download failed: {e}')
-            return DownloadResult(success=False, message=str(e))
+            except asyncio.CancelledError:
+                logger.info('Download cancelled')
+                raise
+            except TimeoutError:
+                last_result = DownloadResult(
+                    success=False, message=f'Download timed out after {parameters.timeout} seconds'
+                )
+                logger.warning('Timeout on attempt %d/%d', attempt + 1, _MAX_RETRIES)
+            except aiohttp.ClientResponseError as e:
+                last_result = DownloadResult(success=False, message=str(e))
+                if e.status < _SERVER_ERROR_THRESHOLD:
+                    logger.error(f'HTTP error: {e}')
+                    return last_result
+                logger.warning('Retryable HTTP %d on attempt %d/%d', e.status, attempt + 1, _MAX_RETRIES)
+            except (aiohttp.ClientError, OSError) as e:
+                last_result = DownloadResult(success=False, message=str(e))
+                logger.warning('Network error on attempt %d/%d: %s', attempt + 1, _MAX_RETRIES, e)
+            except Exception as e:
+                logger.error(f'Download failed: {e}')
+                return DownloadResult(success=False, message=str(e))
 
-        if attempt < _MAX_RETRIES - 1:
-            delay = _RETRY_BACKOFF_BASE * (2**attempt)
-            logger.debug('Waiting %.1fs before retry', delay)
-            await asyncio.sleep(delay)
+            if attempt < _MAX_RETRIES - 1:
+                delay = _RETRY_BACKOFF_BASE * (2**attempt)
+                logger.debug('Waiting %.1fs before retry', delay)
+                await asyncio.sleep(delay)
 
     return last_result or DownloadResult(success=False, message='Download failed after retries')
 
 
-async def _stream_download(
-    temp_fd: int,
-    parameters: DownloadParameters,
-    *,
-    hasher: Any,
-    progress_callback: ProgressCallback | None,
-    cancellation_token: CancellationToken | None,
-) -> int:
-    """Stream download chunks to file.
-
-    Returns:
-        Number of bytes downloaded.
-
-    Raises:
-        DownloadSizeMismatchError: If content-length doesn't match expected size.
-    """
-    downloaded = 0
-
-    async with (
-        httpx.AsyncClient(follow_redirects=True) as client,
-        client.stream('GET', parameters.url) as response,
-    ):
-        response.raise_for_status()
-
-        total_size: int | None = None
-        content_length = response.headers.get('Content-Length')
-        if content_length:
-            total_size = int(content_length)
-
-        # Validate size from headers
-        if parameters.expected_size and total_size and total_size != parameters.expected_size:
-            raise DownloadSizeMismatchError(parameters.expected_size, total_size)
-
-        with open(temp_fd, 'wb') as f:
-            async for chunk in response.aiter_bytes(chunk_size=parameters.chunk_size):
-                # Check for cancellation between chunks
-                if cancellation_token is not None:
-                    cancellation_token.raise_if_cancelled()
-
-                f.write(chunk)
-                downloaded += len(chunk)
-
-                if hasher:
-                    hasher.update(chunk)
-
-                if progress_callback:
-                    progress_callback(downloaded, total_size)
-
-    return downloaded
-
-
-class DownloadSizeMismatchError(Exception):
-    """Size mismatch during download."""
-
-    def __init__(self, expected: int, actual: int) -> None:
-        """Initialize with expected and actual sizes."""
-        self.expected = expected
-        self.actual = actual
-        super().__init__(f'Size mismatch: expected {expected}, got {actual}')
-
-
 async def _perform_download(
+    session: aiohttp.ClientSession,
     temp_fd: int,
     state: _DownloadState,
     cancellation_token: CancellationToken | None,
 ) -> DownloadResult:
-    """Perform async download with httpx.
+    """Perform async download with aiohttp.
 
     Args:
+        session: Shared aiohttp session.
         temp_fd: File descriptor for temp file.
         state: Download state with parameters and callbacks.
         cancellation_token: Optional cancellation token.
@@ -371,19 +316,40 @@ async def _perform_download(
 
     try:
         async with asyncio.timeout(state.parameters.timeout):
-            downloaded = await _stream_download(
-                temp_fd,
-                state.parameters,
-                hasher=hasher,
-                progress_callback=state.progress_callback,
-                cancellation_token=cancellation_token,
-            )
-    except DownloadSizeMismatchError as e:
-        return DownloadResult(success=False, message=str(e))
+            async with session.get(state.parameters.url, allow_redirects=True) as response:
+                response.raise_for_status()
+
+                total_size: int | None = None
+                content_length = response.headers.get('Content-Length')
+                if content_length:
+                    total_size = int(content_length)
+
+                # Validate size from headers
+                if state.parameters.expected_size and total_size and total_size != state.parameters.expected_size:
+                    return DownloadResult(
+                        success=False,
+                        message=f'Size mismatch: expected {state.parameters.expected_size}, got {total_size}',
+                    )
+
+                with open(temp_fd, 'wb') as f:
+                    async for chunk in response.content.iter_chunked(state.parameters.chunk_size):
+                        if cancellation_token is not None:
+                            cancellation_token.raise_if_cancelled()
+
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                        if hasher:
+                            hasher.update(chunk)
+
+                        if state.progress_callback:
+                            state.progress_callback(downloaded, total_size)
+    except aiohttp.ClientResponseError:
+        raise  # Let the caller's retry logic handle HTTP errors
 
     logger.info(f'Downloaded {downloaded} bytes')
 
-    # Verify hash and size (reuse sync verification logic)
+    # Verify hash and size
     error = _verify_download(downloaded, state.expected_digest, hasher, state.parameters)
     if error:
         return error

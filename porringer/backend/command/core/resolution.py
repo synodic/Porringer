@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-import httpx
+import aiohttp
 from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
@@ -226,10 +226,10 @@ class ResolutionContext:
     project_environments: dict[str, ProjectEnvironment] | None = None
     """Dict of project-environment plugins, used to look up
     ``PluginManager`` instances for plugin-target actions."""
-    http_client: httpx.AsyncClient | None = None
-    """Shared ``httpx.AsyncClient`` for connection pooling across
+    http_client: aiohttp.ClientSession | None = None
+    """Shared ``aiohttp.ClientSession`` for connection pooling across
     concurrent update checks.  ``None`` means each check creates
-    its own short-lived client."""
+    its own short-lived session."""
     package_cache: PackageCache | None = None
     """Optional shared cache for ``packages()`` results.  When set,
     multiple actions using the same installer share a single
@@ -696,7 +696,7 @@ async def _resolve_latest_installed(
     presence: _PresenceResult,
     installed_ver: str | None,
     plugin_manager: PluginManager | None,
-    http_client: httpx.AsyncClient | None,
+    http_client: aiohttp.ClientSession | None,
     runtime_context: RuntimeContext | None,
 ) -> ResolvedOperation:
     """Resolve a LATEST/EXACT operation for an already-installed package.
@@ -765,7 +765,7 @@ async def _apply_strategy(
     strategy: SyncStrategy,
     presence: _PresenceResult,
     plugin_manager: PluginManager | None = None,
-    http_client: httpx.AsyncClient | None = None,
+    http_client: aiohttp.ClientSession | None = None,
     runtime_context: RuntimeContext | None = None,
 ) -> ResolvedOperation:
     """Apply the sync strategy to determine the operation.
@@ -1014,7 +1014,7 @@ async def check_for_newer_version(
     installed_version: str | None,
     *,
     include_prereleases: bool = False,
-    http_client: httpx.AsyncClient | None = None,
+    http_client: aiohttp.ClientSession | None = None,
     runtime_context: RuntimeContext | None = None,
 ) -> str | None:
     """Query the plugin for a newer upstream version.

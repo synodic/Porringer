@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
-import httpx
+import aiohttp
 
 from porringer.backend.backend import BackendResolver
 from porringer.core.path import ensure_system_path, reset_sync_state
@@ -56,6 +56,7 @@ from porringer.schema import (
 from porringer.schema.progress import DiscoveredPluginEntry
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import StreamProgress, stream_command
+from porringer.utility import HTTP_TIMEOUT
 
 from .action_builder import (
     PHASE_ORDER,
@@ -911,7 +912,7 @@ async def execute_package_actions(
 
     # Shared HTTP client — resolution now always checks for upstream
     # updates, so a pooled connection avoids per-action TCP overhead.
-    async with httpx.AsyncClient(timeout=10.0) as shared_client:
+    async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as shared_client:
         enriched = ResolutionContext(
             project_path=ctx.project_path,
             project_environments=ctx.project_environments,
@@ -980,7 +981,7 @@ async def dry_run_package_actions(
     # Shared cache — collapses N concurrent packages() calls per installer to 1
     cache = PackageCache()
 
-    async def _check(index: int, action: SetupAction, client: httpx.AsyncClient) -> None:
+    async def _check(index: int, action: SetupAction, client: aiohttp.ClientSession) -> None:
         if semaphore is not None:
             await semaphore.acquire()
         try:
@@ -1020,7 +1021,7 @@ async def dry_run_package_actions(
             if semaphore is not None:
                 semaphore.release()
 
-    async with httpx.AsyncClient(timeout=10.0) as shared_client, asyncio.TaskGroup() as tg:
+    async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as shared_client, asyncio.TaskGroup() as tg:
         for i, action in enumerate(package_actions):
             tg.create_task(_check(i, action, shared_client))
 

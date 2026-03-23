@@ -1,11 +1,12 @@
 """Plugin utilities for package environments"""
 
+import contextlib
 import logging
 from abc import abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 
-import httpx
+import aiohttp
 from pydantic import Field
 
 from porringer.core.plugin_schema.runtime import RuntimeContext
@@ -16,6 +17,7 @@ from porringer.core.schema import (
     PorringerModel,
 )
 from porringer.schema import SetupAction, SubActionProgress
+from porringer.utility import HTTP_TIMEOUT
 from porringer.utility.utility import StreamProgress, stream_command
 
 
@@ -53,13 +55,13 @@ class CheckUpdatesParameters(PorringerModel):
         default_factory=list, description='Packages to check for updates. Empty means check all installed packages.'
     )
     include_prereleases: bool = Field(default=False, description='Include pre-release versions')
-    http_client: httpx.AsyncClient | None = Field(
+    http_client: aiohttp.ClientSession | None = Field(
         default=None,
         exclude=True,
         description=(
-            'Shared ``httpx.AsyncClient`` for connection pooling. '
+            'Shared ``aiohttp.ClientSession`` for connection pooling. '
             'When ``None`` (default), each check creates its own '
-            'short-lived client.'
+            'short-lived session.'
         ),
     )
     runtime_context: RuntimeContext | None = Field(
@@ -362,7 +364,7 @@ class Environment(ToolBasedPlugin):
         ``PythonEnvironment._check_pypi_updates()`` where applicable.
 
         Implementations should use async I/O (``_run_json_command``,
-        ``_run_text_command``, ``httpx.AsyncClient``) instead of
+        ``_run_text_command``, ``aiohttp.ClientSession``) instead of
         blocking calls so the event loop is never blocked.
 
         Args:
@@ -381,14 +383,14 @@ class Environment(ToolBasedPlugin):
         *,
         include_prereleases: bool = False,
         logger: logging.Logger | None = None,
-        http_client: httpx.AsyncClient | None = None,
+        http_client: aiohttp.ClientSession | None = None,
     ) -> list[Package]:
         """Query the npm registry for the latest versions of the given packages.
 
         Shared helper for plugins that install from the npm registry
         (npm, pnpm, bun, and the npm branch of deno).
 
-        Uses ``httpx.AsyncClient`` so the event loop is never blocked
+        Uses ``aiohttp.ClientSession`` so the event loop is never blocked
         by network I/O.
 
         For each package, fetches
@@ -402,8 +404,8 @@ class Environment(ToolBasedPlugin):
             include_prereleases: When ``True``, return pre-release versions.
             logger: Optional logger for debug messages. Falls back to
                 ``logging.getLogger('porringer.npm_registry')``.
-            http_client: Shared ``httpx.AsyncClient`` for connection pooling.
-                When ``None``, a short-lived client is created per call.
+            http_client: Shared ``aiohttp.ClientSession`` for connection pooling.
+                When ``None``, a short-lived session is created per call.
 
         Returns:
             A list of packages with their latest available version.
@@ -413,14 +415,17 @@ class Environment(ToolBasedPlugin):
 
         results: list[Package] = []
 
-        async def _run(client: httpx.AsyncClient) -> list[Package]:
-            inner: list[Package] = []
+        async with (
+            contextlib.nullcontext(http_client)
+            if http_client is not None
+            else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
+        ) as session:
             for pkg_ref in packages:
                 try:
-                    response = await client.get(f'https://registry.npmjs.org/{pkg_ref.name}')
-                    response.raise_for_status()
-                    data = response.json()
-                except (httpx.HTTPError, ValueError) as exc:
+                    async with session.get(f'https://registry.npmjs.org/{pkg_ref.name}') as response:
+                        response.raise_for_status()
+                        data = await response.json()
+                except (aiohttp.ClientError, ValueError) as exc:
                     logger.debug('npm registry query failed for %s: %s', pkg_ref.name, exc)
                     continue
 
@@ -428,18 +433,11 @@ class Environment(ToolBasedPlugin):
                     versions = data.get('versions', {})
                     if versions:
                         latest = list(versions.keys())[-1]
-                        inner.append(Package(name=pkg_ref.name, version=latest))
+                        results.append(Package(name=pkg_ref.name, version=latest))
                 else:
                     dist_tags = data.get('dist-tags', {})
                     latest = dist_tags.get('latest')
                     if latest:
-                        inner.append(Package(name=pkg_ref.name, version=latest))
-            return inner
-
-        if http_client is not None:
-            results = await _run(http_client)
-        else:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                results = await _run(client)
+                        results.append(Package(name=pkg_ref.name, version=latest))
 
         return results

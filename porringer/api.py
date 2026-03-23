@@ -121,7 +121,7 @@ class API:
     ) -> DownloadResult:
         """Download a file with optional hash verification.
 
-        Uses httpx for non-blocking HTTP requests.  Suitable for GUI
+        Uses aiohttp for non-blocking HTTP requests.  Suitable for GUI
         applications that need to keep their event loop responsive
         during downloads.
 

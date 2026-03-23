@@ -1,8 +1,8 @@
 """Test the command 'self'"""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-import httpx
+import aiohttp
 from packaging.version import Version
 
 from porringer.api import API
@@ -27,15 +27,17 @@ class TestCommandSelf:
         api = API(config)
 
         mock_response = Mock()
-        mock_response.json.return_value = {'info': {'version': '0.0.1'}}
+        mock_response.json = AsyncMock(return_value={'info': {'version': '0.0.1'}})
         mock_response.raise_for_status = Mock()
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
+        mock_session = AsyncMock()
+        mock_session.get = Mock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
 
-        with patch('porringer.backend.command.self.httpx.AsyncClient', return_value=mock_client):
+        with patch('porringer.backend.command.self.aiohttp.ClientSession', return_value=mock_session):
             result = await api.check_self_updates()
 
         assert isinstance(result, PackageUpdateInfo)
@@ -57,15 +59,17 @@ class TestVersionHelpers:
     async def test_get_latest_pypi_version_success() -> None:
         """Test successful PyPI version fetch"""
         mock_response = Mock()
-        mock_response.json.return_value = {'info': {'version': '1.2.3'}}
+        mock_response.json = AsyncMock(return_value={'info': {'version': '1.2.3'}})
         mock_response.raise_for_status = Mock()
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
+        mock_session = AsyncMock()
+        mock_session.get = Mock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
 
-        with patch('porringer.backend.command.self.httpx.AsyncClient', return_value=mock_client):
+        with patch('porringer.backend.command.self.aiohttp.ClientSession', return_value=mock_session):
             version = await get_latest_pypi_version()
         assert version is not None
         assert str(version) == '1.2.3'
@@ -73,12 +77,16 @@ class TestVersionHelpers:
     @staticmethod
     async def test_get_latest_pypi_version_network_error() -> None:
         """Test that network errors return None"""
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = httpx.HTTPError('Network error')
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
+        mock_response = MagicMock()
+        mock_response.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError('Network error'))
+        mock_response.__aexit__ = AsyncMock(return_value=False)
 
-        with patch('porringer.backend.command.self.httpx.AsyncClient', return_value=mock_client):
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('porringer.backend.command.self.aiohttp.ClientSession', return_value=mock_session):
             version = await get_latest_pypi_version()
         assert version is None
 

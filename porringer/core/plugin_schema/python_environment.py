@@ -14,18 +14,21 @@ boilerplate declarations:
 focus on their tool-specific behaviour.
 """
 
+import asyncio
+import contextlib
 import logging
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-import httpx
+import aiohttp
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
+from porringer.utility import HTTP_TIMEOUT
 
 
 def _pick_highest_version(releases: dict[str, object], *, stable_only: bool) -> Version | None:
@@ -145,7 +148,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
                 check=False,
             )
             return result.returncode == 0
-        except OSError, subprocess.SubprocessError:
+        except (OSError, subprocess.SubprocessError):
             return False
 
     def python_command(self, runtime_context: RuntimeContext | None = None) -> str:
@@ -237,7 +240,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         returned.  When ``True``, the highest version across all
         ``releases`` keys is selected (including dev/alpha/beta/rc).
 
-        Uses ``httpx.AsyncClient`` so the event loop is never blocked
+        Uses ``aiohttp.ClientSession`` so the event loop is never blocked
         by network I/O.
 
         This helper is shared by pip, uv, and pipx plugins.
@@ -253,37 +256,31 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         logger = logging.getLogger(f'porringer.{self.tool_name()}.check_pypi')
         results: list[Package] = []
 
-        shared = params.http_client
-
-        async def _run(client: httpx.AsyncClient) -> list[Package]:
-            inner: list[Package] = []
+        async with (
+            contextlib.nullcontext(params.http_client)
+            if params.http_client is not None
+            else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
+        ) as session:
             for pkg_ref in params.packages:
-                pkg = await self._check_single_pypi_package(client, pkg_ref, params.include_prereleases, logger)
+                pkg = await self._check_single_pypi_package(session, pkg_ref, params.include_prereleases, logger)
                 if pkg is not None:
-                    inner.append(pkg)
-            return inner
-
-        if shared is not None:
-            results = await _run(shared)
-        else:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                results = await _run(client)
+                    results.append(pkg)
 
         return results
 
     @staticmethod
     async def _check_single_pypi_package(
-        client: httpx.AsyncClient,
+        session: aiohttp.ClientSession,
         pkg_ref: PackageRef,
         include_prereleases: bool,
         logger: logging.Logger,
     ) -> Package | None:
         """Fetch one package from PyPI and return the latest version, or ``None``."""
         try:
-            response = await client.get(f'https://pypi.org/pypi/{pkg_ref.name}/json')
-            response.raise_for_status()
-            data = response.json()
-        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            async with session.get(f'https://pypi.org/pypi/{pkg_ref.name}/json') as response:
+                response.raise_for_status()
+                data = await response.json()
+        except (aiohttp.ClientError, ValueError, KeyError) as exc:
             logger.debug('PyPI query failed for %s: %s', pkg_ref.name, exc)
             return None
 

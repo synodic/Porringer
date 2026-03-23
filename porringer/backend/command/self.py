@@ -3,10 +3,11 @@
 import importlib.metadata
 import logging
 
-import httpx
+import aiohttp
 from packaging.version import Version
 
 from porringer.schema import PackageUpdateInfo
+from porringer.utility import HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -14,21 +15,33 @@ PYPI_URL = 'https://pypi.org/pypi/porringer/json'
 PACKAGE_NAME = 'porringer'
 
 
-async def get_latest_pypi_version() -> Version | None:
+async def get_latest_pypi_version(
+    http_client: aiohttp.ClientSession | None = None,
+) -> Version | None:
     """Fetch the latest version of porringer from PyPI.
+
+    Args:
+        http_client: Optional shared session for connection pooling.
+            When ``None``, a short-lived session is created.
 
     Returns:
         The latest version as a Version object, or None if fetch failed.
     """
+    import contextlib
+
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(PYPI_URL)
-            response.raise_for_status()
-            json_data = response.json()
-            version_str = json_data.get('info', {}).get('version')
-            if version_str:
-                return Version(version_str)
-    except httpx.HTTPError, KeyError, ValueError:
+        async with (
+            contextlib.nullcontext(http_client)
+            if http_client is not None
+            else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
+        ) as session:
+            async with session.get(PYPI_URL) as response:
+                response.raise_for_status()
+                json_data = await response.json()
+                version_str = json_data.get('info', {}).get('version')
+                if version_str:
+                    return Version(version_str)
+    except (aiohttp.ClientError, KeyError, ValueError):
         pass
     return None
 
