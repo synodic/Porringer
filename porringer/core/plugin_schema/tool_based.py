@@ -5,10 +5,12 @@ triple so that ``Environment``, ``ProjectEnvironment``, and
 ``ScmEnvironment`` share a single implementation instead of duplicating
 the ``shutil.which`` logic.
 
-The three async helper class-methods — ``_run_json_command``,
+The three async helper instance methods — ``_run_json_command``,
 ``_run_text_command``, and ``_run_bool_command`` — use native
 ``asyncio.create_subprocess_exec`` so that plugin I/O never blocks
-the event loop.
+the event loop.  Each method applies ``self._transport`` to
+transform command arguments and working directories before
+launching the subprocess.
 """
 
 import asyncio
@@ -18,13 +20,14 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.path import ensure_system_path
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
-from porringer.core.schema import Plugin
+from porringer.core.schema import Plugin, PluginParameters
+from porringer.core.transport import LocalTransport, Transport
 
 
 class ToolBasedPlugin(Plugin):
@@ -35,6 +38,11 @@ class ToolBasedPlugin(Plugin):
     Subclasses with `tool_name() → None` (the default) are always
     considered available.
     """
+
+    def with_transport(self, transport: Transport) -> Self:
+        """Create a new instance of this plugin using a different transport."""
+        parameters = PluginParameters(distribution=self._distribution, transport=transport)
+        return type(self)(parameters)
 
     @classmethod
     def tool_name(cls) -> str | None:
@@ -69,18 +77,20 @@ class ToolBasedPlugin(Plugin):
         return shutil.which(name) is not None
 
     def query_availability(self, runtime_context: RuntimeContext | None = None) -> bool:
-        """Unified availability check respecting platform, PATH, and runtime context.
+        """Unified availability check respecting platform, PATH, runtime context, and transport.
 
         Encapsulates the full decision tree so that every call-site
         (``list_packages``, ``build_plugin_info``, ``BackendResolver``,
         ``_plugins_discovered_event``) shares one implementation:
 
         1. ``is_supported()`` — reject unsupported platforms immediately.
-        2. When *runtime_context* is provided **and** the plugin is a
+        2. When a non-local transport is active, delegate to
+           ``self._transport.check_tool()``.
+        3. When *runtime_context* is provided **and** the plugin is a
            ``RuntimeConsumer``, delegate to
            ``is_available_for(runtime_context)`` which can probe the
            *target* interpreter (e.g. ``python -m pip`` via pim).
-        3. Otherwise fall back to the PATH-based ``is_available()``.
+        4. Otherwise fall back to the PATH-based ``is_available()``.
 
         Args:
             runtime_context: Resolved runtime paths for this execution
@@ -92,6 +102,9 @@ class ToolBasedPlugin(Plugin):
         try:
             if not type(self).is_supported():
                 return False
+            if not isinstance(self._transport, LocalTransport):
+                name = type(self).tool_name()
+                return name is None or self._transport.check_tool(name)
             if runtime_context is not None and isinstance(self, RuntimeConsumer):
                 return self.is_available_for(runtime_context)
             return self.is_available()
@@ -103,13 +116,15 @@ class ToolBasedPlugin(Plugin):
             )
             return False
 
-    @classmethod
-    def tool_version(cls) -> Version | None:
+    def tool_version(self) -> Version | None:
         """Returns the PEP 440 version of the underlying CLI tool.
 
         The default implementation runs `<tool_name> --version`, extracts the
         first version-like pattern from the combined stdout/stderr output, and
         parses it as a `Version`.
+
+        The command arguments are transformed by ``self._transport`` so
+        that version checks work through WSL, Docker, or other transports.
 
         Returns `None` when `tool_name()` is `None`, the subprocess
         fails, or the output cannot be parsed as a valid PEP 440 version.
@@ -120,13 +135,14 @@ class ToolBasedPlugin(Plugin):
         Returns:
             The parsed tool version, or `None`.
         """
-        name = cls.tool_name()
+        name = type(self).tool_name()
         if name is None:
             return None
 
         try:
+            args = self._transport.transform_args([name, '--version'])
             result = subprocess.run(
-                [name, '--version'],
+                args,
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -145,12 +161,12 @@ class ToolBasedPlugin(Plugin):
         except InvalidVersion:
             return None
 
-    @classmethod
-    async def _run_json_command(cls, args: list[str], *, check: bool = False) -> Any | None:
+    async def _run_json_command(self, args: list[str], *, check: bool = False) -> Any | None:
         """Run a CLI command and parse its stdout as JSON.
 
         Uses ``asyncio.create_subprocess_exec`` so the event loop is
-        never blocked by subprocess I/O.
+        never blocked by subprocess I/O.  Command arguments are
+        transformed by ``self._transport`` before launching.
 
         Centralises the common pattern of running a subprocess, reading
         its standard output, and parsing it as JSON while handling the
@@ -172,10 +188,11 @@ class ToolBasedPlugin(Plugin):
             the command cannot be executed or its output is not valid
             JSON.
         """
-        logger = logging.getLogger(f'porringer.{cls.tool_name()}.json_command')
+        logger = logging.getLogger(f'porringer.{type(self).tool_name()}.json_command')
+        transformed = self._transport.transform_args(args)
         try:
             proc = await asyncio.create_subprocess_exec(
-                *args,
+                *transformed,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -197,12 +214,12 @@ class ToolBasedPlugin(Plugin):
             logger.warning('Could not parse JSON output from %s: %s', args[0], e)
         return None
 
-    @classmethod
-    async def _run_text_command(cls, args: list[str], *, check: bool = False) -> str | None:
+    async def _run_text_command(self, args: list[str], *, check: bool = False) -> str | None:
         """Run a CLI command and return its stdout as text.
 
         Uses ``asyncio.create_subprocess_exec`` so the event loop is
-        never blocked by subprocess I/O.
+        never blocked by subprocess I/O.  Command arguments are
+        transformed by ``self._transport`` before launching.
 
         Centralises the common pattern of running a subprocess and
         returning its standard output while handling failure modes:
@@ -220,10 +237,11 @@ class ToolBasedPlugin(Plugin):
         Returns:
             The stdout string, or ``None`` on failure.
         """
-        logger = logging.getLogger(f'porringer.{cls.tool_name()}.text_command')
+        logger = logging.getLogger(f'porringer.{type(self).tool_name()}.text_command')
+        transformed = self._transport.transform_args(args)
         try:
             proc = await asyncio.create_subprocess_exec(
-                *args,
+                *transformed,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -242,9 +260,8 @@ class ToolBasedPlugin(Plugin):
             logger.error('Failed to run %s: %s', args[0], e)
         return None
 
-    @classmethod
     async def _run_bool_command(
-        cls,
+        self,
         args: list[str],
         *,
         cwd: Path | None = None,
@@ -253,7 +270,9 @@ class ToolBasedPlugin(Plugin):
         """Run a CLI command and return whether it succeeded.
 
         Uses ``asyncio.create_subprocess_exec`` so the event loop is
-        never blocked by subprocess I/O.
+        never blocked by subprocess I/O.  Command arguments and the
+        working directory are transformed by ``self._transport``
+        before launching.
 
         Logs stdout at info level and stderr at error level on failure.
         Returns ``True`` when the process exits with code 0.
@@ -266,13 +285,15 @@ class ToolBasedPlugin(Plugin):
         Returns:
             ``True`` if the process exited cleanly, ``False`` otherwise.
         """
-        logger = logging.getLogger(f'porringer.{cls.tool_name()}.{label}')
+        logger = logging.getLogger(f'porringer.{type(self).tool_name()}.{label}')
+        transformed = self._transport.transform_args(args)
+        transformed_cwd = self._transport.transform_cwd(cwd)
         try:
             proc = await asyncio.create_subprocess_exec(
-                *args,
+                *transformed,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
+                cwd=transformed_cwd,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300)
             stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''

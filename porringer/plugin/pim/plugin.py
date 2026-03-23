@@ -294,8 +294,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
             packages.append(Package(name=tag, version=version))
         return packages
 
-    @classmethod
-    async def _get_runtime_version(cls, tag: str) -> str | None:
+    async def _get_runtime_version(self, tag: str) -> str | None:
         """Gets the actual version string for an installed runtime.
 
         Args:
@@ -304,7 +303,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         Returns:
             The version string, or None if not found
         """
-        data = await cls._run_json_command(['py', 'list', '--only-managed', '-f', 'json', tag])
+        data = await self._run_json_command(['py', 'list', '--only-managed', '-f', 'json', tag])
         if not isinstance(data, dict):
             return None
         runtimes = data.get('versions', [])

@@ -1,9 +1,9 @@
-"""Tests for concurrency limiting, shared httpx.AsyncClient, and console check command.
+"""Tests for concurrency limiting, shared aiohttp.ClientSession, and console check command.
 
 Validates:
 1. ``max_concurrency`` field on ``SetupParameters``
 2. Semaphore bounding in ``dry_run_package_actions``
-3. Shared ``httpx.AsyncClient`` is threaded through the update-check chain
+3. Shared ``aiohttp.ClientSession`` is threaded through the update-check chain
 4. Console ``check`` command properly awaits async methods
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import override
 from unittest.mock import MagicMock, patch
 
-import httpx
+import aiohttp
 from packaging.version import Version
 
 from porringer.backend.command.core.execution import (
@@ -117,15 +117,15 @@ class TestHttpClientField:
 
     @staticmethod
     def test_with_client() -> None:
-        """Accepts an httpx.AsyncClient instance."""
-        client = MagicMock(spec=httpx.AsyncClient)
+        """Accepts an aiohttp.ClientSession instance."""
+        client = MagicMock(spec=aiohttp.ClientSession)
         params = CheckUpdatesParameters(packages=[], http_client=client)
         assert params.http_client is client
 
     @staticmethod
     def test_excluded_from_serialization() -> None:
         """The http_client field is excluded from model dumps."""
-        client = MagicMock(spec=httpx.AsyncClient)
+        client = MagicMock(spec=aiohttp.ClientSession)
         params = CheckUpdatesParameters(packages=[], http_client=client)
         dumped = params.model_dump()
         assert 'http_client' not in dumped
@@ -141,8 +141,8 @@ class TestResolutionContextHttpClient:
 
     @staticmethod
     def test_with_client() -> None:
-        """Accepts an httpx.AsyncClient instance."""
-        client = MagicMock(spec=httpx.AsyncClient)
+        """Accepts an aiohttp.ClientSession instance."""
+        client = MagicMock(spec=aiohttp.ClientSession)
         ctx = ResolutionContext(http_client=client)
         assert ctx.http_client is client
 
@@ -228,7 +228,7 @@ class TestDryRunConcurrencyBounding:
 
 
 # =========================================================================
-# Shared httpx.AsyncClient threading
+# Shared aiohttp.ClientSession threading
 # =========================================================================
 
 
@@ -239,7 +239,7 @@ class TestSharedHttpClient:
     async def test_check_for_newer_version_passes_client() -> None:
         """``check_for_newer_version`` includes http_client in params."""
         env = _StubEnv(_MOCK_PARAMS)
-        client = MagicMock(spec=httpx.AsyncClient)
+        client = MagicMock(spec=aiohttp.ClientSession)
 
         captured_params: list[CheckUpdatesParameters] = []
 
@@ -281,11 +281,11 @@ class TestSharedHttpClient:
 
     @staticmethod
     async def test_dry_run_creates_shared_client() -> None:
-        """Dry-run path creates a shared httpx.AsyncClient for all tasks."""
+        """Dry-run path creates a shared aiohttp.ClientSession for all tasks."""
         environments: dict[str, Environment] = {'stub': _StubEnv(_MOCK_PARAMS)}
         params = SetupParameters(dry_run=True, max_concurrency=0)
 
-        seen_clients: list[httpx.AsyncClient | None] = []
+        seen_clients: list[aiohttp.ClientSession | None] = []
 
         async def _capture_client(action, envs, **kwargs):
             ctx = kwargs.get('context')

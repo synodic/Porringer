@@ -219,6 +219,95 @@ def _log_unresolved(resolver: BackendResolver, kind: PluginKind, ecosystem: Ecos
         )
 
 
+def _emit_section_actions(
+    actions: list[SetupAction],
+    kind: PluginKind,
+    ecosystem: Ecosystem,
+    packages: list,
+    installer: str | None,
+    verb: str,
+    is_registered: bool,
+    *,
+    distro: str | None = None,
+) -> None:
+    """Append actions for a single manifest section to *actions*.
+
+    Handles project, SCM and package/tool/runtime kinds.
+    When *distro* is set the description is prefixed with ``[WSL:<distro>]``.
+    """
+    prefix = f'[WSL:{distro}] ' if distro else ''
+
+    if kind == PluginKind.PROJECT:
+        actions.append(
+            SetupAction(
+                description=prefix + action_description(kind, verb, installer, registered=is_registered),
+                kind=kind,
+                ecosystem=ecosystem,
+                installer=installer,
+                distro=distro,
+            )
+        )
+        return
+
+    if kind == PluginKind.SCM:
+        for package in packages:
+            if not package.is_applicable():
+                continue
+            scm_description = package.description or str(package.name)
+            desc = prefix + action_description(kind, verb, installer, package=package.name, registered=is_registered)
+            actions.append(
+                SetupAction(
+                    description=desc,
+                    kind=kind,
+                    ecosystem=ecosystem,
+                    installer=installer,
+                    package=package.name,
+                    package_description=scm_description,
+                    distro=distro,
+                )
+            )
+        return
+
+    for package in packages:
+        if not package.is_applicable():
+            continue
+        desc = prefix + action_description(kind, verb, installer, package=package.name, registered=is_registered)
+        actions.append(
+            SetupAction(
+                description=desc,
+                kind=kind,
+                ecosystem=ecosystem,
+                installer=installer,
+                package=package.name,
+                package_description=package.description,
+                include_prereleases=package.include_prereleases,
+                distro=distro,
+            )
+        )
+
+        for plugin_spec in package.plugins:
+            actions.append(
+                SetupAction(
+                    description=prefix
+                    + action_description(
+                        kind,
+                        verb,
+                        installer,
+                        package=plugin_spec.name,
+                        plugin_target=package.name,
+                        registered=is_registered,
+                    ),
+                    kind=kind,
+                    ecosystem=ecosystem,
+                    installer=installer,
+                    package=plugin_spec.name,
+                    plugin_target=package.name,
+                    include_prereleases=plugin_spec.include_prereleases,
+                    distro=distro,
+                )
+            )
+
+
 def build_actions(
     manifest: SetupManifest,
     plugins: DiscoveredPlugins | dict[str, Environment],
@@ -267,89 +356,27 @@ def build_actions(
             _log_unresolved(resolver, kind, ecosystem)
 
         is_registered = installer is not None or resolver.is_registered(kind, ecosystem)
+        _emit_section_actions(actions, kind, ecosystem, packages, installer, verb, is_registered)
 
-        # Project kind produces a single sync action
-        if kind == PluginKind.PROJECT:
-            actions.append(
-                SetupAction(
-                    description=action_description(kind, verb, installer, registered=is_registered),
-                    kind=kind,
-                    ecosystem=ecosystem,
-                    installer=installer,
-                )
-            )
-            continue
+    # ---- WSL2 distro sections -------------------------------------------
+    for distro, distro_manifest in manifest.wsl2.items():
+        wsl_needed: set[tuple[PluginKind, Ecosystem]] = set()
+        for kind, ecosystem, _packages in distro_manifest.iter_sections():
+            wsl_needed.add((kind, ecosystem))
 
-        # SCM kind produces one clone action per repository URL
-        if kind == PluginKind.SCM:
-            for package in packages:
-                if not package.is_applicable():
-                    continue
-                # Use the manifest description if set, otherwise surface
-                # the repo URL as the package description so UI cards
-                # show *what* is being cloned.
-                scm_description = package.description or str(package.name)
-                desc = action_description(
-                    kind,
-                    verb,
-                    installer,
-                    package=package.name,
-                    registered=is_registered,
-                )
-                actions.append(
-                    SetupAction(
-                        description=desc,
-                        kind=kind,
-                        ecosystem=ecosystem,
-                        installer=installer,
-                        package=package.name,
-                        package_description=scm_description,
-                    )
-                )
-            continue
+        wsl_resolver = BackendResolver(
+            plugins.all_plugins,
+            distro_manifest.preferences,
+            needed_pairs=wsl_needed,
+        )
 
-        for package in packages:
-            if not package.is_applicable():
-                continue
-            desc = action_description(
-                kind,
-                verb,
-                installer,
-                package=package.name,
-                registered=is_registered,
-            )
-            actions.append(
-                SetupAction(
-                    description=desc,
-                    kind=kind,
-                    ecosystem=ecosystem,
-                    installer=installer,
-                    package=package.name,
-                    package_description=package.description,
-                    include_prereleases=package.include_prereleases,
-                )
-            )
+        for kind, ecosystem, packages in distro_manifest.iter_sections():
+            installer = wsl_resolver.resolve(kind, ecosystem)
+            if installer is None:
+                _log_unresolved(wsl_resolver, kind, ecosystem)
 
-            # Emit plugin-management actions for declared plugins
-            for plugin_spec in package.plugins:
-                actions.append(
-                    SetupAction(
-                        description=action_description(
-                            kind,
-                            verb,
-                            installer,
-                            package=plugin_spec.name,
-                            plugin_target=package.name,
-                            registered=is_registered,
-                        ),
-                        kind=kind,
-                        ecosystem=ecosystem,
-                        installer=installer,
-                        package=plugin_spec.name,
-                        plugin_target=package.name,
-                        include_prereleases=plugin_spec.include_prereleases,
-                    )
-                )
+            is_registered = installer is not None or wsl_resolver.is_registered(kind, ecosystem)
+            _emit_section_actions(actions, kind, ecosystem, packages, installer, verb, is_registered, distro=distro)
 
     # Add post-sync command actions (kind=None)
     for command_str in manifest.post_sync:

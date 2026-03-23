@@ -21,6 +21,7 @@ from porringer.schema import (
 from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 from .resolution import ResolutionContext, resolve_operation, resolved_to_result
+from .wsl_overlay import overlay_wsl_plugin
 
 __all__ = ['dry_run_action', 'clone_status_to_result']
 
@@ -190,6 +191,10 @@ async def _dry_run_package_action(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=True)
 
+    # --- Per-action WSL distro routing ------------------------------------
+    if action.distro is not None and action.installer in environments:
+        environments = overlay_wsl_plugin(environments, action.installer, action.distro)
+
     ctx = context or ResolutionContext()
     # Merge strategy-derived fields into the context
     ctx = ResolutionContext(
@@ -198,6 +203,7 @@ async def _dry_run_package_action(
         http_client=ctx.http_client,
         package_cache=ctx.package_cache,
         runtime_context=ctx.runtime_context,
+        wsl_runtime_contexts=ctx.wsl_runtime_contexts,
     )
 
     resolved = await resolve_operation(action, environments, strategy, ctx)

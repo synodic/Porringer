@@ -120,7 +120,7 @@ class BrewEnvironment(Environment):
         if result is not None and result.version is None:
             result = Package(
                 name=result.name,
-                version=await self.__class__._get_formula_version(result.name),
+                version=await self._get_formula_version(result.name),
             )
         return result
 
@@ -135,7 +135,7 @@ class BrewEnvironment(Environment):
         if result is not None and result.version is None:
             result = Package(
                 name=result.name,
-                version=await self.__class__._get_formula_version(result.name),
+                version=await self._get_formula_version(result.name),
             )
         return result
 
@@ -167,8 +167,7 @@ class BrewEnvironment(Environment):
             packages.append(Package(name=name, version=version))
         return packages
 
-    @classmethod
-    async def _get_formula_version(cls, formula: str) -> str | None:
+    async def _get_formula_version(self, formula: str) -> str | None:
         """Gets the installed version for a formula.
 
         Args:
@@ -177,7 +176,7 @@ class BrewEnvironment(Environment):
         Returns:
             The version string, or None if not found
         """
-        info = await cls._run_json_command(['brew', 'info', formula, '--json=v2'])
+        info = await self._run_json_command(['brew', 'info', formula, '--json=v2'])
         if not isinstance(info, dict):
             return None
         formulas = info.get('formulae', [])

@@ -8,7 +8,7 @@ error conditions, and package filtering.
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import aiohttp
 from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
@@ -61,7 +61,7 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.AsyncClient') as mock_client:
+        with patch('aiohttp.ClientSession') as mock_client:
             _setup_async_client(mock_client, response)
             result = await env._check_pypi_updates(_make_params(['some-package']))
 
@@ -86,7 +86,7 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.AsyncClient') as mock_client:
+        with patch('aiohttp.ClientSession') as mock_client:
             _setup_async_client(mock_client, response)
             result = await env._check_pypi_updates(_make_params(['some-package'], include_prereleases=True))
 
@@ -98,9 +98,12 @@ class TestCheckPypiUpdates:
         """Network failures are handled gracefully."""
         env = PIPXEnvironment(_MOCK_PARAMS)
 
-        with patch('httpx.AsyncClient') as mock_client:
+        with patch('aiohttp.ClientSession') as mock_client:
             mock_instance = MagicMock()
-            mock_instance.get = AsyncMock(side_effect=httpx.HTTPError('timeout'))
+            error_resp = MagicMock()
+            error_resp.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError('timeout'))
+            error_resp.__aexit__ = AsyncMock(return_value=False)
+            mock_instance.get = MagicMock(return_value=error_resp)
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
             mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
             result = await env._check_pypi_updates(_make_params(['some-package']))
@@ -116,15 +119,17 @@ class TestCheckPypiUpdates:
 
         call_count = 0
 
-        async def mock_get(url: str) -> MagicMock:
+        def mock_get(url: str) -> MagicMock:
             nonlocal call_count
             resp = MagicMock()
             resp.raise_for_status = MagicMock()
-            resp.json.return_value = data_a if call_count == 0 else data_b
+            resp.json = AsyncMock(return_value=data_a if call_count == 0 else data_b)
+            resp.__aenter__ = AsyncMock(return_value=resp)
+            resp.__aexit__ = AsyncMock(return_value=False)
             call_count += 1
             return resp
 
-        with patch('httpx.AsyncClient') as mock_client:
+        with patch('aiohttp.ClientSession') as mock_client:
             instance = MagicMock(get=mock_get)
             mock_client.return_value.__aenter__ = AsyncMock(return_value=instance)
             mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -151,7 +156,7 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.AsyncClient') as mock_client:
+        with patch('aiohttp.ClientSession') as mock_client:
             _setup_async_client(mock_client, response)
             result = await env._check_pypi_updates(_make_params(['cppython']))
 
@@ -173,7 +178,7 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.AsyncClient') as mock_client:
+        with patch('aiohttp.ClientSession') as mock_client:
             _setup_async_client(mock_client, response)
             result = await env._check_pypi_updates(_make_params(['some-package']))
 
@@ -194,7 +199,7 @@ class TestCheckPypiUpdates:
         response.json.return_value = pypi_data
         response.raise_for_status = MagicMock()
 
-        with patch('httpx.AsyncClient') as mock_client:
+        with patch('aiohttp.ClientSession') as mock_client:
             _setup_async_client(mock_client, response)
             result = await env._check_pypi_updates(_make_params(['some-package']))
 
@@ -355,7 +360,7 @@ class TestDenoCheckUpdates:
 
         with (
             patch.object(env, '_check_npm_registry', new_callable=AsyncMock, return_value=[]),
-            patch('porringer.plugin.deno.plugin.httpx.AsyncClient') as mock_client,
+            patch('porringer.plugin.deno.plugin.aiohttp.ClientSession') as mock_client,
         ):
             _setup_async_client(mock_client, response)
             result = await env.check_updates(_make_params(['jsr:@std/path']))
@@ -631,7 +636,7 @@ class TestNpmRegistryHelper:
         response.json.return_value = registry_data
         response.raise_for_status = MagicMock()
 
-        with patch('porringer.core.plugin_schema.environment.httpx.AsyncClient') as mock_client:
+        with patch('porringer.core.plugin_schema.environment.aiohttp.ClientSession') as mock_client:
             _setup_async_client(mock_client, response)
             result = await Environment._check_npm_registry([PackageRef.model_validate('typescript')])
 
@@ -649,7 +654,7 @@ class TestNpmRegistryHelper:
         response.json.return_value = registry_data
         response.raise_for_status = MagicMock()
 
-        with patch('porringer.core.plugin_schema.environment.httpx.AsyncClient') as mock_client:
+        with patch('porringer.core.plugin_schema.environment.aiohttp.ClientSession') as mock_client:
             _setup_async_client(mock_client, response)
             result = await Environment._check_npm_registry(
                 [PackageRef.model_validate('typescript')],
@@ -662,9 +667,12 @@ class TestNpmRegistryHelper:
     @staticmethod
     async def test_http_error_returns_empty() -> None:
         """HTTP errors result in an empty list."""
-        with patch('porringer.core.plugin_schema.environment.httpx.AsyncClient') as mock_client:
+        with patch('porringer.core.plugin_schema.environment.aiohttp.ClientSession') as mock_client:
             mock_instance = MagicMock()
-            mock_instance.get = AsyncMock(side_effect=httpx.HTTPError('timeout'))
+            error_resp = MagicMock()
+            error_resp.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError('timeout'))
+            error_resp.__aexit__ = AsyncMock(return_value=False)
+            mock_instance.get = MagicMock(return_value=error_resp)
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
             mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
             result = await Environment._check_npm_registry([PackageRef.model_validate('typescript')])

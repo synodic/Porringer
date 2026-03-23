@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
-import httpx
+import aiohttp
 
 from porringer.backend.backend import BackendResolver
 from porringer.core.path import ensure_system_path, reset_sync_state
@@ -54,6 +54,7 @@ from porringer.schema import (
     Upgrade,
 )
 from porringer.schema.progress import DiscoveredPluginEntry
+from porringer.utility import HTTP_TIMEOUT
 from porringer.utility.exception import PluginError
 from porringer.utility.utility import StreamProgress, stream_command
 
@@ -77,6 +78,7 @@ from .resolution import (
     resolve_uninstall_operation,
     resolved_to_result,
 )
+from .wsl_overlay import overlay_wsl_plugin, wsl_transport_for
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,10 @@ class ExecutionState:
     """Accumulated runtime context for this execution run.  Populated
     by :meth:`propagate_runtime` and threaded through to every
     operation that needs an interpreter path."""
+    wsl_runtime_contexts: dict[str, RuntimeContext] = field(default_factory=dict)
+    """Per-distro runtime contexts for WSL2 actions.  Populated by
+    :meth:`_propagate_wsl_runtimes` during the RUNTIME phase.  Keys
+    are WSL distribution names."""
 
     # -- convenience accessors (delegate to plugins / preview) ---------
 
@@ -208,6 +214,34 @@ class ExecutionState:
             kind, executable = result
             self.runtime_context = self.runtime_context.with_executable(kind, executable)
 
+    async def _propagate_wsl_runtimes(self) -> None:
+        """Resolve per-distro interpreter paths from WSL runtime actions.
+
+        Iterates RUNTIME-phase actions where ``action.distro`` is set,
+        groups them by distro, and for each distro wraps the
+        ``RuntimeProvider`` with the appropriate transport before calling
+        ``resolve_executable()``.
+
+        Results are stored in :attr:`wsl_runtime_contexts` and do
+        **not** inject onto the host ``PATH`` (WSL paths are not valid
+        on the Windows host).
+        """
+        runtime_actions = self.phases.get(PluginKind.RUNTIME, [])
+        wsl_actions: dict[str, list[SetupAction]] = {}
+        for action in runtime_actions:
+            if action.distro is not None:
+                wsl_actions.setdefault(action.distro, []).append(action)
+
+        if not wsl_actions:
+            return
+
+        for distro, actions in wsl_actions.items():
+            result = await _propagate_wsl_runtime(distro, actions, self.plugins)
+            if result is not None:
+                kind, executable = result
+                ctx = self.wsl_runtime_contexts.get(distro, RuntimeContext())
+                self.wsl_runtime_contexts[distro] = ctx.with_executable(kind, executable)
+
     # -- result helpers ------------------------------------------------
 
     def emit(self, event: ProgressEvent) -> None:
@@ -224,6 +258,7 @@ class ExecutionState:
         return ResolutionContext(
             project_environments=self.project_environments,
             runtime_context=self.runtime_context,
+            wsl_runtime_contexts=self.wsl_runtime_contexts or None,
         )
 
     # -- phase executor delegates --------------------------------------
@@ -503,10 +538,22 @@ async def execute_package(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=False, message='Installer or package not specified')
 
+    # --- Per-action WSL distro routing ------------------------------------
+    if action.distro is not None and action.installer in environments:
+        environments = overlay_wsl_plugin(environments, action.installer, action.distro)
+
     ctx = context or ResolutionContext()
     # Merge caller-provided cache into the context for resolution
     if package_cache is not None:
         ctx = replace(ctx, package_cache=package_cache)
+
+    # --- Per-distro WSL runtime context -----------------------------------
+    if (
+        action.distro is not None
+        and ctx.wsl_runtime_contexts
+        and (wsl_ctx := ctx.wsl_runtime_contexts.get(action.distro)) is not None
+    ):
+        ctx = replace(ctx, runtime_context=wsl_ctx)
 
     # --- Per-action runtime override --------------------------------------
     if action.runtime_tag is not None:
@@ -631,6 +678,10 @@ async def execute_uninstall(
     """
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=False, message='Installer or package not specified')
+
+    # --- Per-action WSL distro routing ------------------------------------
+    if action.distro is not None and action.installer in environments:
+        environments = overlay_wsl_plugin(environments, action.installer, action.distro)
 
     ctx = context or ResolutionContext()
     # Merge caller-provided cache into the context for resolution
@@ -861,7 +912,7 @@ async def execute_package_actions(
 
     # Shared HTTP client — resolution now always checks for upstream
     # updates, so a pooled connection avoids per-action TCP overhead.
-    async with httpx.AsyncClient(timeout=10.0) as shared_client:
+    async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as shared_client:
         enriched = ResolutionContext(
             project_path=ctx.project_path,
             project_environments=ctx.project_environments,
@@ -930,7 +981,7 @@ async def dry_run_package_actions(
     # Shared cache — collapses N concurrent packages() calls per installer to 1
     cache = PackageCache()
 
-    async def _check(index: int, action: SetupAction, client: httpx.AsyncClient) -> None:
+    async def _check(index: int, action: SetupAction, client: aiohttp.ClientSession) -> None:
         if semaphore is not None:
             await semaphore.acquire()
         try:
@@ -970,7 +1021,7 @@ async def dry_run_package_actions(
             if semaphore is not None:
                 semaphore.release()
 
-    async with httpx.AsyncClient(timeout=10.0) as shared_client, asyncio.TaskGroup() as tg:
+    async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as shared_client, asyncio.TaskGroup() as tg:
         for i, action in enumerate(package_actions):
             tg.create_task(_check(i, action, shared_client))
 
@@ -1454,6 +1505,54 @@ async def _propagate_runtime(
     return None
 
 
+async def _propagate_wsl_runtime(
+    distro: str,
+    runtime_actions: list[SetupAction],
+    plugins: DiscoveredPlugins,
+) -> tuple[str, Path] | None:
+    """Resolve an interpreter path inside a WSL distro.
+
+    Like :func:`_propagate_runtime` but wraps the ``RuntimeProvider``
+    with the appropriate transport for the target distro.  Does **not**
+    inject onto the host ``PATH`` since WSL paths are not valid on the
+    Windows host.
+
+    Returns:
+        A ``(kind, executable)`` tuple on success, or ``None``.
+    """
+    environments = plugins.environments
+
+    transport = wsl_transport_for(distro)
+
+    for action in runtime_actions:
+        if action.installer is None or action.package is None:
+            continue
+        env = environments.get(action.installer)
+        if env is None or not isinstance(env, RuntimeProvider):
+            continue
+
+        # Wrap with WSL transport if not running natively
+        if transport is not None:
+            env = cast(RuntimeProvider, env.with_transport(transport))
+
+        kind = cast(type[RuntimeProvider], type(env)).provided_runtime_kind()
+        tag = action.package.name
+        executable = await env.resolve_executable(tag)
+        if executable is None:
+            logger.debug(
+                'WSL RuntimeProvider %s could not resolve executable for tag %s in %s',
+                action.installer,
+                tag,
+                distro,
+            )
+            continue
+
+        logger.info('WSL runtime resolved for %s: %s -> %s', distro, tag, executable)
+        return (kind, executable)
+
+    return None
+
+
 def resolve_deferred_actions(
     actions: list[SetupAction],
     plugins: DiscoveredPlugins,
@@ -1678,6 +1777,11 @@ async def _execute_project_sync(
         The result of the sync operation.
     """
     proj_envs = project_environments or {}
+
+    # --- Per-action WSL distro routing ------------------------------------
+    if action.distro is not None and action.installer is not None and action.installer in proj_envs:
+        proj_envs = overlay_wsl_plugin(proj_envs, action.installer, action.distro)
+
     if action.installer is None or action.installer not in proj_envs:
         return SetupActionResult(
             action=action,
@@ -1835,6 +1939,11 @@ async def _execute_scm_clone(
         The result of the clone operation.
     """
     scm_envs = scm_environments or {}
+
+    # --- Per-action WSL distro routing ------------------------------------
+    if action.distro is not None and action.installer is not None and action.installer in scm_envs:
+        scm_envs = overlay_wsl_plugin(scm_envs, action.installer, action.distro)
+
     if action.installer is None or action.installer not in scm_envs:
         message = (
             f"No SCM plugin found for installer '{action.installer}'. "

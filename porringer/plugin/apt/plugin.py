@@ -139,7 +139,7 @@ class APTEnvironment(Environment):
             verb='install',
         )
         if result is not None:
-            version = await self.__class__._get_package_version(package)
+            version = await self._get_package_version(package)
             return Package(name=result.name, version=version)
         return None
 
@@ -168,7 +168,7 @@ class APTEnvironment(Environment):
             verb='upgrade',
         )
         if result is not None:
-            version = await self.__class__._get_package_version(package)
+            version = await self._get_package_version(package)
             return Package(name=result.name, version=version)
         return None
 
@@ -202,8 +202,7 @@ class APTEnvironment(Environment):
                     packages.append(Package(name=name, version=version))
         return packages
 
-    @classmethod
-    async def _get_package_version(cls, package: str) -> str | None:
+    async def _get_package_version(self, package: str) -> str | None:
         """Gets the installed version for a package.
 
         Args:
@@ -212,7 +211,7 @@ class APTEnvironment(Environment):
         Returns:
             The version string, or None if not found
         """
-        output = await cls._run_text_command(['dpkg-query', '-W', '-f', '${Version}', package])
+        output = await self._run_text_command(['dpkg-query', '-W', '-f', '${Version}', package])
         if output and output.strip():
             return output.strip()
         return None

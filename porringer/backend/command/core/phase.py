@@ -119,6 +119,7 @@ class RuntimePhase(_PhaseBase):
     async def post_execute(self, state: ExecutionState) -> None:
         """Propagate the resolved runtime and trigger a full plugin refresh."""
         await state.propagate_runtime()
+        await state._propagate_wsl_runtimes()
         await asyncio.to_thread(state.refresh_all_plugins)
 
 

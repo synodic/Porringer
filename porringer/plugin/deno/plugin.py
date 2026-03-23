@@ -1,14 +1,16 @@
 """Plugin implementation for Deno environment."""
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import override
 
-import httpx
+import aiohttp
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
+from porringer.utility import HTTP_TIMEOUT
 
 
 class DenoEnvironment(Environment):
@@ -106,25 +108,17 @@ class DenoEnvironment(Environment):
                 results[i] = Package(name=npm_ref.name, version=results[i].version)
 
         # JSR packages
-        async def _fetch_jsr(client: httpx.AsyncClient) -> None:
-            for pkg_ref in jsr_refs:
-                jsr_name = pkg_ref.name[4:]  # strip 'jsr:'
-                try:
-                    response = await client.get(f'https://jsr.io/{jsr_name}/meta.json')
-                    response.raise_for_status()
-                    data = response.json()
-                    latest = data.get('latest')
-                    if latest:
-                        results.append(Package(name=pkg_ref.name, version=latest))
-                except (httpx.HTTPError, ValueError) as exc:
-                    logger.debug('JSR query failed for %s: %s', pkg_ref.name, exc)
-
         if jsr_refs:
-            if params.http_client is not None:
-                await _fetch_jsr(params.http_client)
-            else:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    await _fetch_jsr(client)
+            async with (
+                contextlib.nullcontext(params.http_client)
+                if params.http_client is not None
+                else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
+            ) as session:
+                for pkg_ref in jsr_refs:
+                    jsr_name = pkg_ref.name[4:]  # strip 'jsr:'
+                    pkg = await self._fetch_jsr_package(session, pkg_ref.name, jsr_name, logger)
+                    if pkg is not None:
+                        results.append(pkg)
 
         return results
 
@@ -146,3 +140,22 @@ class DenoEnvironment(Environment):
             An empty list.
         """
         return []
+
+    @staticmethod
+    async def _fetch_jsr_package(
+        session: aiohttp.ClientSession,
+        original_name: str,
+        jsr_name: str,
+        logger: logging.Logger,
+    ) -> Package | None:
+        """Fetch a single JSR package's latest version, or ``None`` on failure."""
+        try:
+            async with session.get(f'https://jsr.io/{jsr_name}/meta.json') as response:
+                response.raise_for_status()
+                data = await response.json()
+                latest = data.get('latest')
+                if latest:
+                    return Package(name=original_name, version=latest)
+        except (aiohttp.ClientError, ValueError) as exc:
+            logger.debug('JSR query failed for %s: %s', original_name, exc)
+        return None
