@@ -688,6 +688,14 @@ async def execute_uninstall(
     if package_cache is not None:
         ctx = replace(ctx, package_cache=package_cache)
 
+    # --- Per-distro WSL runtime context -----------------------------------
+    if (
+        action.distro is not None
+        and ctx.wsl_runtime_contexts
+        and (wsl_ctx := ctx.wsl_runtime_contexts.get(action.distro)) is not None
+    ):
+        ctx = replace(ctx, runtime_context=wsl_ctx)
+
     resolved = await resolve_uninstall_operation(
         action,
         environments,
