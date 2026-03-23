@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from porringer.backend.builder import Builder
 from porringer.backend.command.core.action_builder import build_actions
 from porringer.backend.command.core.execution import ExecutionState
 from porringer.backend.command.core.resolution import ResolutionContext
 from porringer.backend.command.core.wsl_overlay import overlay_wsl_plugin, wsl_transport_for
+from porringer.backend.command.package import PackageCommands
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from porringer.core.schema import Ecosystem, PluginKind
+from porringer.core.schema import Ecosystem, Package, PackageRef, PluginKind
 from porringer.core.transport import LocalTransport, Transport
 from porringer.plugin.wsl.transport import WslTransport
 from porringer.plugin.wsl.utility import is_inside_wsl, is_wsl_host, native_distro
@@ -675,3 +677,230 @@ class TestExecutionStateWslRuntimes:
         )
         ctx = state.resolution_context
         assert ctx.wsl_runtime_contexts is None
+
+
+# ---------------------------------------------------------------------------
+# PackageCommands WSL distro parameter
+# ---------------------------------------------------------------------------
+
+
+class TestPackageCommandsListDistro:
+    """PackageCommands.list forwards distro to WSL overlay."""
+
+    @staticmethod
+    async def test_list_without_distro_unchanged() -> None:
+        """Default distro=None preserves existing behaviour."""
+        expected = [Package(name='requests', version='2.31.0')]
+        mock_env = MagicMock(spec=Environment)
+        mock_env.query_availability = MagicMock(return_value=True)
+        mock_env.packages = AsyncMock(return_value=expected)
+
+        with (
+            patch('porringer.backend.command.package._discover_environments', return_value={'mock-pip': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
+        ):
+            result = await PackageCommands.list('mock-pip')
+
+        assert result == expected
+        # Transport should not have been overlaid
+        assert not isinstance(getattr(mock_env, '_transport', None), WslTransport)
+
+    @staticmethod
+    async def test_list_with_distro_overlays_transport() -> None:
+        """Passing distro= wraps the plugin with WslTransport."""
+        expected = [Package(name='requests', version='2.31.0')]
+        env = MockPythonEnv(MOCK_DIST)
+        envs: dict[str, Environment] = {'mock-pip': env}
+
+        with (
+            patch('porringer.backend.command.package._discover_environments', return_value=envs),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
+            patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value=None),
+            patch.object(type(env), 'query_availability', return_value=True),
+            patch.object(type(env), 'packages', new_callable=AsyncMock, return_value=expected),
+        ):
+            result = await PackageCommands.list('mock-pip', distro='Ubuntu')
+
+        assert result == expected
+
+    @staticmethod
+    async def test_list_with_distro_none_when_native() -> None:
+        """When already inside the target distro, no overlay happens."""
+        expected = [Package(name='requests', version='2.31.0')]
+        mock_env = MagicMock(spec=Environment)
+        mock_env.query_availability = MagicMock(return_value=True)
+        mock_env.packages = AsyncMock(return_value=expected)
+        mock_env._transport = LocalTransport()
+
+        with (
+            patch('porringer.backend.command.package._discover_environments', return_value={'mock-pip': mock_env}),
+            patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=RuntimeContext()),
+            patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value='Ubuntu'),
+        ):
+            result = await PackageCommands.list('mock-pip', distro='Ubuntu')
+
+        assert result == expected
+
+
+class TestPackageCommandsImperativeDistro:
+    """install/upgrade/uninstall forward distro to SetupAction."""
+
+    @staticmethod
+    async def test_upgrade_sets_distro_on_action() -> None:
+        """upgrade(distro='Ubuntu') produces SetupAction.distro == 'Ubuntu'."""
+        captured_action = None
+
+        async def _capture_execute(action, *args, **kwargs):
+            nonlocal captured_action
+            captured_action = action
+            return MagicMock(success=True, skipped=False, skip_reason=None, message=None)
+
+        mock_env = MagicMock(spec=Environment)
+        mock_env.plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
+        mock_env.ecosystem = MagicMock(return_value=Ecosystem('python'))
+
+        mock_plugins = MagicMock()
+        mock_plugins.environments = {'pip': mock_env}
+        mock_plugins.resolved_runtime = MagicMock(return_value=RuntimeContext())
+
+        with patch('porringer.backend.command.package.execute_package', side_effect=_capture_execute):
+            await PackageCommands.upgrade(
+                'pip',
+                PackageRef(name='requests'),
+                plugins=mock_plugins,
+                distro='Ubuntu',
+            )
+
+        assert captured_action is not None
+        assert captured_action.distro == 'Ubuntu'
+
+    @staticmethod
+    async def test_install_sets_distro_on_action() -> None:
+        """install(distro='Debian') produces SetupAction.distro == 'Debian'."""
+        captured_action = None
+
+        async def _capture_execute(action, *args, **kwargs):
+            nonlocal captured_action
+            captured_action = action
+            return MagicMock(success=True, skipped=False, skip_reason=None, message=None)
+
+        mock_env = MagicMock(spec=Environment)
+        mock_env.plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
+        mock_env.ecosystem = MagicMock(return_value=Ecosystem('python'))
+
+        mock_plugins = MagicMock()
+        mock_plugins.environments = {'pip': mock_env}
+        mock_plugins.resolved_runtime = MagicMock(return_value=RuntimeContext())
+
+        with patch('porringer.backend.command.package.execute_package', side_effect=_capture_execute):
+            await PackageCommands.install(
+                'pip',
+                PackageRef(name='flask'),
+                plugins=mock_plugins,
+                distro='Debian',
+            )
+
+        assert captured_action is not None
+        assert captured_action.distro == 'Debian'
+
+    @staticmethod
+    async def test_uninstall_sets_distro_on_action() -> None:
+        """uninstall(distro='Ubuntu') produces SetupAction.distro == 'Ubuntu'."""
+        captured_action = None
+
+        async def _capture_execute(action, *args, **kwargs):
+            nonlocal captured_action
+            captured_action = action
+            return MagicMock(success=True, skipped=False, skip_reason=None, message=None)
+
+        mock_env = MagicMock(spec=Environment)
+        mock_env.plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
+        mock_env.ecosystem = MagicMock(return_value=Ecosystem('python'))
+
+        mock_plugins = MagicMock()
+        mock_plugins.environments = {'pip': mock_env}
+        mock_plugins.resolved_runtime = MagicMock(return_value=RuntimeContext())
+
+        with patch('porringer.backend.command.package.execute_uninstall', side_effect=_capture_execute):
+            await PackageCommands.uninstall(
+                'pip',
+                PackageRef(name='requests'),
+                plugins=mock_plugins,
+                distro='Ubuntu',
+            )
+
+        assert captured_action is not None
+        assert captured_action.distro == 'Ubuntu'
+
+    @staticmethod
+    async def test_imperative_without_distro_defaults_none() -> None:
+        """Without distro=, SetupAction.distro is None (backward compat)."""
+        captured_action = None
+
+        async def _capture_execute(action, *args, **kwargs):
+            nonlocal captured_action
+            captured_action = action
+            return MagicMock(success=True, skipped=False, skip_reason=None, message=None)
+
+        mock_env = MagicMock(spec=Environment)
+        mock_env.plugin_kind = MagicMock(return_value=PluginKind.PACKAGE)
+        mock_env.ecosystem = MagicMock(return_value=Ecosystem('python'))
+
+        mock_plugins = MagicMock()
+        mock_plugins.environments = {'pip': mock_env}
+        mock_plugins.resolved_runtime = MagicMock(return_value=RuntimeContext())
+
+        with patch('porringer.backend.command.package.execute_package', side_effect=_capture_execute):
+            await PackageCommands.upgrade(
+                'pip',
+                PackageRef(name='requests'),
+                plugins=mock_plugins,
+            )
+
+        assert captured_action is not None
+        assert captured_action.distro is None
+
+
+class TestPackageCommandsCheckUpdatesDistro:
+    """check_updates forwards distro to WSL overlay."""
+
+    @staticmethod
+    async def test_check_updates_without_distro_unchanged() -> None:
+        """Default distro=None preserves existing behaviour."""
+        env = MockPythonEnv(MOCK_DIST)
+
+        mock_plugins = MagicMock()
+        mock_plugins.environments = {'mock-pip': env}
+        mock_plugins.resolved_runtime = MagicMock(return_value=RuntimeContext())
+
+        with (
+            patch.object(type(env), 'is_available', return_value=True),
+            patch.object(env, 'query_availability', return_value=True),
+            patch.object(type(env), 'packages', new_callable=AsyncMock, return_value=[]),
+            patch.object(type(env), 'check_updates', new_callable=AsyncMock, return_value=[]),
+        ):
+            results = await PackageCommands.check_updates(plugins=mock_plugins)
+
+        assert len(results) == 1
+        assert results[0].plugin == 'mock-pip'
+
+    @staticmethod
+    async def test_check_updates_with_distro_overlays_transport() -> None:
+        """Passing distro= wraps each plugin with WslTransport."""
+        env = MockPythonEnv(MOCK_DIST)
+
+        mock_plugins = MagicMock()
+        mock_plugins.environments = {'mock-pip': env}
+        mock_plugins.resolved_runtime = MagicMock(return_value=RuntimeContext())
+
+        with (
+            patch.object(type(env), 'is_available', return_value=True),
+            patch.object(type(env), 'query_availability', return_value=True),
+            patch.object(type(env), 'packages', new_callable=AsyncMock, return_value=[]),
+            patch.object(type(env), 'check_updates', new_callable=AsyncMock, return_value=[]),
+            patch('porringer.backend.command.core.wsl_overlay.native_distro', return_value=None),
+        ):
+            results = await PackageCommands.check_updates(plugins=mock_plugins, distro='Ubuntu')
+
+        assert len(results) == 1
+        assert results[0].plugin == 'mock-pip'
