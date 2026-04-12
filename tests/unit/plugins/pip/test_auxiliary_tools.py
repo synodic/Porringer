@@ -1,6 +1,7 @@
 """Tests for auxiliary-tool interactions in the pip plugin."""
 
 from collections.abc import Generator
+from typing import override
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -23,10 +24,7 @@ def _make_context(scenario: str) -> Generator[InstallContext]:
     params = PackageParameters(package=PackageRef(name='test-pkg'))
 
     # Determine shutil.which behavior
-    if scenario == 'tools_absent':
-        which_return = None
-    else:
-        which_return = r'C:\Program Files\pymanager\pymanager.exe'
+    which_return = None if scenario == 'tools_absent' else r'C:\Program Files\pymanager\pymanager.exe'
 
     # Determine run_command behavior for auxiliary tool calls
     if scenario == 'tools_fail_exception':
@@ -65,6 +63,7 @@ def _make_context(scenario: str) -> Generator[InstallContext]:
 class TestPymanagerRefresh(AuxiliaryToolTests[PIPEnvironment]):
     """Auxiliary-tool tests for pip's pymanager refresh integration."""
 
+    @override
     @pytest.fixture(name='install_context', params=_SCENARIOS)
     def fixture_install_context(self, request: pytest.FixtureRequest) -> Generator[InstallContext]:
         """Yield an InstallContext parametrized over auxiliary-tool scenarios."""
