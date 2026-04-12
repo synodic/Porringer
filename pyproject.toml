@@ -72,6 +72,7 @@ testpaths = ["tests"]
 markers = [
   "fresh_plugins: invalidate the plugin discovery cache before this test",
   "mock_packages: use a cached package list instead of real subprocess calls",
+  "bare_environment: simulate a bare system with only the primary tool on PATH",
 ]
 
 [tool.ruff]

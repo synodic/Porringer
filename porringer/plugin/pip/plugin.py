@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import override
 
@@ -43,6 +43,12 @@ class PIPEnvironment(PythonEnvironment):
     This plugin can optionally use a Python runtime provider (like pim) for managing
     the underlying Python installation.
     """
+
+    @classmethod
+    @override
+    def auxiliary_tools(cls) -> Sequence[str]:
+        """Pip may invoke ``pymanager`` to refresh global aliases."""
+        return ('pymanager',)
 
     @classmethod
     @override

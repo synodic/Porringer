@@ -19,6 +19,7 @@ import logging
 import re
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Self
 
@@ -38,6 +39,19 @@ class ToolBasedPlugin(Plugin):
     Subclasses with `tool_name() → None` (the default) are always
     considered available.
     """
+
+    @classmethod
+    def auxiliary_tools(cls) -> Sequence[str]:
+        """Return optional CLI tools that may be invoked as post-action side effects.
+
+        Override to declare tools the plugin calls via ``shutil.which``
+        outside its primary ``tool_name()``.  The test framework uses
+        this to verify that the plugin tolerates each tool being absent.
+
+        Returns:
+            Tool names (empty by default).
+        """
+        return ()
 
     def with_transport(self, transport: Transport) -> Self:
         """Create a new instance of this plugin using a different transport."""

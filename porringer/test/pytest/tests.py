@@ -1,15 +1,19 @@
 """Implementation of tests that should be overridden in plugins"""
 
 import shutil
-from abc import ABCMeta
+from abc import ABCMeta, abstractmethod
+from collections.abc import Generator
+from typing import NamedTuple
+from unittest.mock import AsyncMock
 
 from packaging.version import Version
 
 import pytest
-from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Distribution, PackageRef, PluginParameters
 from porringer.test.pytest.shared import (
     EnvironmentTests,
@@ -183,3 +187,70 @@ class RuntimeProviderUnitTests[T: Environment](EnvironmentUnitTests[T], RuntimeP
         kind = plugin_type.provided_runtime_kind()
         assert isinstance(kind, str)
         assert len(kind) > 0
+
+
+class InstallContext(NamedTuple):
+    """Context returned by the ``install_context`` fixture."""
+
+    plugin: Environment
+    params: PackageParameters
+    mock_run: AsyncMock
+    scenario: str
+
+
+class AuxiliaryToolTests[T: ToolBasedPlugin](metaclass=ABCMeta):
+    """Mixin that tests auxiliary-tool interactions declared via ``_auxiliary_tools``.
+
+    Concrete test classes must provide:
+
+    * ``fixture_install_context`` — a fixture yielding an
+      :class:`InstallContext` whose ``scenario`` field indicates which
+      auxiliary-tool configuration is active.
+
+    Expected scenarios (the fixture should be parametrized over these):
+
+    * ``"tools_absent"`` — ``shutil.which`` returns ``None`` for
+      auxiliary tools; ``run_command`` is not expected to be called
+      for them.
+    * ``"tools_present"`` — ``shutil.which`` returns a fake path;
+      ``run_command`` mock returns success.
+    * ``"tools_fail_exception"`` — ``shutil.which`` returns a fake
+      path; ``run_command`` raises ``OSError`` for auxiliary tools.
+    * ``"tools_fail_nonzero"`` — ``shutil.which`` returns a fake path;
+      ``run_command`` returns non-zero for auxiliary tools.
+
+    The mixin is intentionally separate from ``EnvironmentUnitTests`` so
+    that plugins without auxiliary tools don't inherit meaningless tests.
+    """
+
+    @abstractmethod
+    @pytest.fixture(name='install_context')
+    def fixture_install_context(self) -> Generator[InstallContext]:
+        """Yield an ``InstallContext`` with install internals mocked."""
+        raise NotImplementedError('Override this fixture')
+
+    @staticmethod
+    async def test_install_succeeds(install_context: InstallContext) -> None:
+        """install() succeeds regardless of auxiliary tool availability."""
+        plugin, params, _mock_run, _scenario = install_context
+        result = await plugin.install(params)
+        # Install should never fail due to auxiliary tool issues
+        assert result is not None
+
+    @staticmethod
+    async def test_auxiliary_tools_called_only_when_present(
+        install_context: InstallContext,
+    ) -> None:
+        """Auxiliary tools are invoked when present, skipped when absent."""
+        plugin, params, mock_run, scenario = install_context
+        aux = type(plugin).auxiliary_tools()
+        if not aux:
+            pytest.skip('No auxiliary tools declared')
+
+        await plugin.install(params)
+
+        called_args = [str(c) for c in mock_run.call_args_list]
+        if scenario == 'tools_absent':
+            assert not any(tool in arg for arg in called_args for tool in aux)
+        else:
+            assert any(tool in arg for arg in called_args for tool in aux)
