@@ -6,7 +6,7 @@ The resolver selects a plugin per (PluginKind, ecosystem) pair using:
 """
 
 from pathlib import Path
-from typing import Self, cast
+from typing import Self
 
 from packaging.version import Version
 
@@ -36,7 +36,7 @@ class _StubPlugin:
 
     def with_transport(self, transport: Transport) -> Self:
         parameters = PluginParameters(distribution=self._distribution, transport=transport)
-        return cast(Self, type(self)(parameters))
+        return type(self)(parameters)
 
     @staticmethod
     def ecosystem() -> Ecosystem | None:

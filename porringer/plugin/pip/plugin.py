@@ -127,6 +127,10 @@ class PIPEnvironment(PythonEnvironment):
         When a progress_callback is provided, streams stderr line-by-line to
         report download and install phases. Otherwise falls back to the simple
         `run_command` path for zero overhead.
+
+        On Windows, if the Python Install Manager (pymanager) is available,
+        runs ``pymanager install --refresh`` after a successful install to
+        regenerate global aliases for newly installed entry points.
         """
         logger = logging.getLogger('porringer.pip.install')
         args = list(
@@ -139,9 +143,30 @@ class PIPEnvironment(PythonEnvironment):
 
         if params.progress_callback is None:
             # Fast path — no streaming needed
-            return await self._install_simple(args, params.package, logger)
+            result = await self._install_simple(args, params.package, logger)
+        else:
+            result = await self._install_with_progress(args, params, logger)
 
-        return await self._install_with_progress(args, params, logger)
+        if not params.dry:
+            await self._refresh_pymanager_aliases(logger)
+
+        return result
+
+    @staticmethod
+    async def _refresh_pymanager_aliases(logger: logging.Logger) -> None:
+        """Best-effort refresh of pymanager global aliases after pip install.
+
+        No-op when pymanager is absent.  Failures never block the install.
+        """
+        if shutil.which('pymanager') is None:
+            return
+
+        try:
+            result = await run_command(['pymanager', 'install', '--refresh'])
+            if result.returncode != 0:
+                logger.warning('pymanager install --refresh exited with code %d', result.returncode)
+        except Exception as exc:
+            logger.warning('Failed to refresh pymanager aliases: %s', exc)
 
     @staticmethod
     async def _install_simple(args: list[str], package: PackageRef, logger: logging.Logger) -> Package | None:
