@@ -1,5 +1,6 @@
 """Shared pytest configuration and fixtures."""
 
+import shutil
 import sys
 import tempfile
 from collections.abc import Generator
@@ -55,6 +56,10 @@ def pytest_configure(config: pytest.Config) -> None:
         'markers',
         'frozen_app: simulate a frozen (PyInstaller) application environment',
     )
+    config.addinivalue_line(
+        'markers',
+        'bare_environment: simulate a bare system with only the primary tool on PATH',
+    )
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -102,6 +107,30 @@ def frozen_context(*, which_result: str | None = None) -> Generator[None]:
     finally:
         for p in reversed(patches):
             p.stop()
+
+
+@contextmanager
+def bare_environment_context(*, allowed_tools: set[str] | None = None) -> Generator[None]:
+    """Context manager that hides all CLI tools except *allowed_tools*.
+
+    Patches ``shutil.which`` globally so that any tool not in
+    *allowed_tools* appears absent.  This catches undeclared
+    auxiliary-tool dependencies.
+
+    Args:
+        allowed_tools: Tool names that should remain discoverable.
+            When ``None``, **all** tools are hidden.
+    """
+    allowed = allowed_tools or set()
+    original_which = shutil.which
+
+    def _restricted_which(name: str, *args, **kwargs) -> str | None:
+        if name in allowed:
+            return original_which(name, *args, **kwargs)
+        return None
+
+    with patch('shutil.which', side_effect=_restricted_which):
+        yield
 
 
 @pytest.fixture(autouse=True)
