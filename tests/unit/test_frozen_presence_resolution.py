@@ -8,7 +8,6 @@ Covers:
 - Frozen vs. non-frozen resolution matrix
 """
 
-import asyncio
 import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -133,7 +132,10 @@ class TestProbeToolVersion:
     async def test_returns_none_on_timeout() -> None:
         """Subprocess exceeding the timeout yields ``None``."""
         proc = fake_proc()
-        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
+        # Use a regular MagicMock so that calling communicate() does not
+        # create a coroutine object.  The patched asyncio.wait_for raises
+        # `TimeoutError synchronously.
+        proc.communicate = MagicMock()
         with (
             patch('asyncio.create_subprocess_exec', return_value=proc),
             patch('asyncio.wait_for', side_effect=TimeoutError),
