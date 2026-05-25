@@ -1,12 +1,14 @@
-"""Unified operation resolution for dry-run and real execution.
+"""CLI command implementation for resolution."""
+
+"""Unified operation resolution for inspection and real execution.
 
 Determines the correct operation (install, upgrade, or skip) for a
 given action based on the sync strategy and current system state.
-Both the dry-run path and the real execution path delegate to
+Both the inspection path and the real execution path delegate to
 :func:`resolve_operation` so that strategy logic lives in one place.
 
 Also hosts :func:`is_package_installed`, the shared presence-detection
-helper used by resolution, dry-run, and execution paths.
+helper used by resolution, inspection, and execution paths.
 """
 
 import asyncio
@@ -47,6 +49,7 @@ from porringer.schema import (
     Upgrade,
 )
 from porringer.utility.exception import PluginError
+from porringer.utility.trace import CommandTrace
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +59,7 @@ class ResolvedOperation:
     """Result of resolving what operation an action requires.
 
     Produced by :func:`resolve_operation` and consumed by both the
-    dry-run reporter and the real execution engine.
+    inspection reporter and the real execution engine.
     """
 
     action: SetupAction
@@ -68,10 +71,22 @@ class ResolvedOperation:
     does not need to look it up again."""
 
 
+@dataclass(frozen=True, slots=True)
+class PackageCacheStats:
+    """Counters for package/plugin presence cache behavior."""
+
+    package_hits: int = 0
+    package_misses: int = 0
+    plugin_hits: int = 0
+    plugin_misses: int = 0
+    package_invalidations: int = 0
+    plugin_invalidations: int = 0
+
+
 def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
     """Map a :class:`ResolvedOperation` to a :class:`SetupActionResult`.
 
-    This is the single mapping used by both the dry-run and real
+    This is the single mapping used by both the inspection and real
     execution paths so that the translation lives in one place.
 
     For :class:`Skip` operations the result carries version metadata
@@ -128,6 +143,40 @@ class PackageCache:
         self._packages: dict[str, list[Package]] = {}
         self._plugins: dict[str, list[Package]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._package_hits = 0
+        self._package_misses = 0
+        self._plugin_hits = 0
+        self._plugin_misses = 0
+        self._package_invalidations = 0
+        self._plugin_invalidations = 0
+
+    def stats(self) -> PackageCacheStats:
+        """Return a snapshot of package/plugin cache counters."""
+        return PackageCacheStats(
+            package_hits=self._package_hits,
+            package_misses=self._package_misses,
+            plugin_hits=self._plugin_hits,
+            plugin_misses=self._plugin_misses,
+            package_invalidations=self._package_invalidations,
+            plugin_invalidations=self._plugin_invalidations,
+        )
+
+    def log_debug_stats(self, label: str) -> None:
+        """Emit cache counters to the debug log when enabled."""
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+        stats = self.stats()
+        logger.debug(
+            '%s PackageCache stats: package_hits=%d package_misses=%d '
+            'plugin_hits=%d plugin_misses=%d package_invalidations=%d plugin_invalidations=%d',
+            label,
+            stats.package_hits,
+            stats.package_misses,
+            stats.plugin_hits,
+            stats.plugin_misses,
+            stats.package_invalidations,
+            stats.plugin_invalidations,
+        )
 
     def _lock_for(self, key: str) -> asyncio.Lock:
         """Return (creating if needed) the lock for *key*."""
@@ -156,10 +205,12 @@ class PackageCache:
         """
         key = f'pkg:{installer}:{project_path}'
         async with self._lock_for(key):
-            if key not in self._packages:
-                self._packages[key] = await environment.packages(
-                    project_path=project_path, runtime_context=runtime_context
-                )
+            if key in self._packages:
+                self._package_hits += 1
+                return self._packages[key]
+
+            self._package_misses += 1
+            self._packages[key] = await environment.packages(project_path=project_path, runtime_context=runtime_context)
             return self._packages[key]
 
     async def get_plugins(
@@ -178,8 +229,12 @@ class PackageCache:
         """
         key = f'plg:{tool_name}'
         async with self._lock_for(key):
-            if key not in self._plugins:
-                self._plugins[key] = await manager.installed_plugins()
+            if key in self._plugins:
+                self._plugin_hits += 1
+                return self._plugins[key]
+
+            self._plugin_misses += 1
+            self._plugins[key] = await manager.installed_plugins()
             return self._plugins[key]
 
     def invalidate_packages(self, installer: str, project_path: Path | None = None) -> None:
@@ -193,7 +248,8 @@ class PackageCache:
             project_path: Optional project directory scope.
         """
         key = f'pkg:{installer}:{project_path}'
-        self._packages.pop(key, None)
+        if self._packages.pop(key, None) is not None:
+            self._package_invalidations += 1
 
     def invalidate_plugins(self, tool_name: str) -> None:
         """Remove cached plugins for a tool so next access re-queries.
@@ -202,7 +258,8 @@ class PackageCache:
             tool_name: The host tool name.
         """
         key = f'plg:{tool_name}'
-        self._plugins.pop(key, None)
+        if self._plugins.pop(key, None) is not None:
+            self._plugin_invalidations += 1
 
     def invalidate_all(self) -> None:
         """Clear all cached data.
@@ -210,6 +267,8 @@ class PackageCache:
         Locks are intentionally retained — clearing them while a
         concurrent coroutine holds one would be unsafe.
         """
+        self._package_invalidations += len(self._packages)
+        self._plugin_invalidations += len(self._plugins)
         self._packages.clear()
         self._plugins.clear()
 
@@ -238,10 +297,20 @@ class ResolutionContext:
     """Resolved runtime paths.  Threaded through to ``packages()``
     so Python-ecosystem plugins can query packages from the correct
     interpreter."""
-    wsl_runtime_contexts: dict[str, RuntimeContext] | None = None
-    """Per-distro runtime contexts for WSL2 actions.  When set,
-    actions with ``action.distro`` use the corresponding context
-    instead of :attr:`runtime_context`."""
+
+
+async def _query_installed_packages(installer: str, environment: Environment, ctx: ResolutionContext) -> list[Package]:
+    """Return installed packages for *installer*, via cache when available."""
+    if ctx.package_cache is not None:
+        return await ctx.package_cache.get_packages(installer, environment, ctx.project_path, ctx.runtime_context)
+    return await environment.packages(project_path=ctx.project_path, runtime_context=ctx.runtime_context)
+
+
+async def _query_installed_plugins(plugin_name: str, manager: PluginManager, ctx: ResolutionContext) -> list[Package]:
+    """Return installed plugins for *plugin_name*, via cache when available."""
+    if ctx.package_cache is not None:
+        return await ctx.package_cache.get_plugins(plugin_name, manager)
+    return await manager.installed_plugins()
 
 
 async def resolve_operation(
@@ -316,10 +385,7 @@ async def _resolve_plugin_operation(
         introspection_python=manager.tool_python(),
     )
     try:
-        if ctx.package_cache is not None:
-            installed = await ctx.package_cache.get_plugins(action.plugin_target.name, manager)
-        else:
-            installed = await manager.installed_plugins()
+        installed = await _query_installed_plugins(action.plugin_target.name, manager, ctx)
         presence.is_installed, presence.detail, presence.matched = is_package_installed(action.package, installed)
     except Exception as e:
         logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
@@ -366,14 +432,7 @@ async def _resolve_package_operation(
 
     presence = _PresenceResult(env_for_updates=environment, introspection_python=introspection_python)
     try:
-        if ctx.package_cache is not None:
-            installed_packages = await ctx.package_cache.get_packages(
-                action.installer, environment, ctx.project_path, ctx.runtime_context
-            )
-        else:
-            installed_packages = await environment.packages(
-                project_path=ctx.project_path, runtime_context=ctx.runtime_context
-            )
+        installed_packages = await _query_installed_packages(action.installer, environment, ctx)
         presence.is_installed, presence.detail, presence.matched = is_package_installed(
             action.package, installed_packages, validator, action.kind
         )
@@ -426,6 +485,27 @@ async def _resolve_package_operation(
 _VERSION_PATTERN = re.compile(r'v?(\d+\.\d+(?:\.\d+)*)')
 
 
+async def _capture_subprocess(args: list[str], *, timeout: int) -> tuple[int | None, bytes, bytes] | None:
+    """Run *args*, capturing stdout/stderr under a command trace.
+
+    Returns ``(returncode, stdout, stderr)`` on completion, or ``None``
+    when the subprocess cannot be started or times out.
+    """
+    trace = CommandTrace.start(args)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        trace.finish(returncode=proc.returncode, stdout=stdout_bytes, stderr=stderr_bytes)
+        return proc.returncode, stdout_bytes or b'', stderr_bytes or b''
+    except (FileNotFoundError, OSError, TimeoutError) as exc:
+        trace.finish(returncode=None, error=f'{type(exc).__name__}: {exc}')
+        return None
+
+
 async def probe_tool_version(name: str) -> str | None:
     """Run ``<name> --version`` and extract a version string.
 
@@ -436,20 +516,11 @@ async def probe_tool_version(name: str) -> str | None:
     Returns the version string on success, or ``None`` when the
     subprocess fails, times out, or the output cannot be parsed.
     """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            name,
-            '--version',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=5)
-        output = (stdout_bytes or b'').decode('utf-8', errors='replace') + (stderr_bytes or b'').decode(
-            'utf-8', errors='replace'
-        )
-    except FileNotFoundError, OSError, TimeoutError:
+    result = await _capture_subprocess([name, '--version'], timeout=5)
+    if result is None:
         return None
-
+    _, stdout_bytes, stderr_bytes = result
+    output = stdout_bytes.decode('utf-8', errors='replace') + stderr_bytes.decode('utf-8', errors='replace')
     match = _VERSION_PATTERN.search(output)
     return match.group(1) if match else None
 
@@ -466,18 +537,6 @@ _REQUIRES_SCRIPT = (
 """Subprocess one-liner (stdlib only) that emits a package's
 ``Requires-Dist`` entries as a JSON list of strings."""
 
-_PLUGIN_EXTRAS_SCRIPT = (
-    'import importlib.metadata, json, sys; '
-    'd = importlib.metadata.distribution(sys.argv[1]); '
-    'ns = [d.metadata["Name"] for d in importlib.metadata.distributions()]; '
-    'json.dump({"requires": d.requires or [], "installed": ns}, sys.stdout)'
-)
-"""Subprocess one-liner that returns *both* the ``Requires-Dist`` entries
-for a specific package **and** the names of every installed distribution.
-
-Used for plugin-target extras checks where the host process does not
-have access to the tool's own package list."""
-
 
 async def _run_metadata_script(python: str, script: str, package_name: str, *, timeout: int = 10) -> bytes | None:
     """Run a metadata-introspection one-liner in *python* and return stdout.
@@ -485,21 +544,13 @@ async def _run_metadata_script(python: str, script: str, package_name: str, *, t
     Returns raw stdout bytes on success, or ``None`` when the
     subprocess fails, times out, or cannot be started.
     """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            python,
-            '-c',
-            script,
-            package_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        if proc.returncode != 0:
-            return None
-        return stdout_bytes or b''
-    except FileNotFoundError, OSError, TimeoutError:
+    result = await _capture_subprocess([python, '-c', script, package_name], timeout=timeout)
+    if result is None:
         return None
+    returncode, stdout_bytes, _ = result
+    if returncode != 0:
+        return None
+    return stdout_bytes
 
 
 async def fetch_package_requires(
@@ -913,14 +964,7 @@ async def resolve_uninstall_operation(
     validator = type(environment).package_name_validator()
 
     try:
-        if ctx.package_cache is not None:
-            installed_packages = await ctx.package_cache.get_packages(
-                action.installer, environment, ctx.project_path, ctx.runtime_context
-            )
-        else:
-            installed_packages = await environment.packages(
-                project_path=ctx.project_path, runtime_context=ctx.runtime_context
-            )
+        installed_packages = await _query_installed_packages(action.installer, environment, ctx)
         logger.debug(
             'packages query for %s returned %d entries',
             action.installer,
@@ -976,10 +1020,7 @@ async def _resolve_plugin_uninstall(
         )
 
     try:
-        if ctx.package_cache is not None:
-            installed = await ctx.package_cache.get_plugins(action.plugin_target.name, manager)
-        else:
-            installed = await manager.installed_plugins()
+        installed = await _query_installed_plugins(action.plugin_target.name, manager, ctx)
         is_installed, detail, matched = is_package_installed(action.package, installed)
     except Exception as e:
         logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)

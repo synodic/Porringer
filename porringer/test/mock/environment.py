@@ -1,4 +1,6 @@
-"""Mock environment data"""
+"""Tests covering the environment behavior."""
+
+"""Mock environment data."""
 
 from pathlib import Path
 from typing import override
@@ -9,7 +11,7 @@ from porringer.core.schema import Package, PackageRef
 
 
 class MockEnvironment(Environment):
-    """Mocked environment plugin"""
+    """Mocked environment plugin."""
 
     @override
     def install_command(
@@ -34,7 +36,7 @@ class MockEnvironment(Environment):
     async def packages(
         self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
     ) -> list[Package]:
-        """Gathers installed packages in the given environment
+        """Gathers installed packages in the given environment.
 
         Args:
             project_path: Unused in mock.

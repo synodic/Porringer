@@ -1,8 +1,10 @@
+"""Helpers for test concurrency and client."""
+
 """Tests for concurrency limiting, shared aiohttp.ClientSession, and console check command.
 
 Validates:
 1. ``max_concurrency`` field on ``SetupParameters``
-2. Semaphore bounding in ``dry_run_package_actions``
+2. Semaphore bounding in ``inspect_actions``
 3. Shared ``aiohttp.ClientSession`` is threaded through the update-check chain
 4. Console ``check`` command properly awaits async methods
 """
@@ -16,9 +18,9 @@ from unittest.mock import MagicMock, patch
 import aiohttp
 from packaging.version import Version
 
-from porringer.backend.command.core.execution import (
-    dry_run_package_actions,
-)
+from porringer.backend.command.core import execution as execution_module
+from porringer.backend.command.core.discovery import DiscoveredPlugins
+from porringer.backend.command.core.inspection import inspect_actions
 from porringer.backend.command.core.resolution import (
     ResolutionContext,
     check_for_newer_version,
@@ -34,13 +36,15 @@ from porringer.core.schema import (
     PluginKind,
     PluginParameters,
 )
-from porringer.schema import SetupAction, SetupActionResult, SetupParameters
+from porringer.schema import ProgressEvent, SetupAction, SetupActionResult, SetupParameters, SetupResults
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
+_EXPECTED_WORKER_TASKS = 2
+_MANY_ACTIONS = 6
 
 
 class _StubEnv(Environment):
@@ -107,6 +111,11 @@ def _make_action(name: str, installer: str = 'stub') -> SetupAction:
     )
 
 
+def _make_preview(actions: list[SetupAction]) -> SetupResults:
+    """Build a manifest preview for inspection tests."""
+    return SetupResults(actions=actions, root_directory=Path.cwd())
+
+
 # =========================================================================
 # CheckUpdatesParameters.http_client
 # =========================================================================
@@ -148,26 +157,27 @@ class TestResolutionContextHttpClient:
 
 
 # =========================================================================
-# Semaphore bounding in dry-run
+# Semaphore bounding in inspection
 # =========================================================================
 
 
-class TestDryRunConcurrencyBounding:
-    """``dry_run_package_actions`` respects ``max_concurrency``."""
+class TestInspectionConcurrencyBounding:
+    """``inspect_actions`` respects ``max_concurrency``."""
 
     @staticmethod
     async def test_semaphore_limits_concurrency() -> None:
         """With max_concurrency=2, at most 2 tasks run concurrently."""
         environments: dict[str, Environment] = {'stub': _StubEnv(_MOCK_PARAMS)}
+        plugins = DiscoveredPlugins(environments=environments, project_environments={}, scm_environments={})
         max_concurrent = 2
-        params = SetupParameters(dry_run=True, max_concurrency=max_concurrent)
+        params = SetupParameters(max_concurrency=max_concurrent)
 
         # Track peak concurrency
         active = 0
         peak = 0
         lock = asyncio.Lock()
 
-        async def _counting_dry_run(action, envs, **kwargs):
+        async def _counting_inspect(action, envs, **kwargs):
             nonlocal active, peak
             async with lock:
                 active += 1
@@ -182,49 +192,98 @@ class TestDryRunConcurrencyBounding:
         actions = [_make_action(f'pkg-{i}') for i in range(num_actions)]
 
         with patch(
-            'porringer.backend.command.core.execution.dry_run_action',
-            side_effect=_counting_dry_run,
+            'porringer.backend.command.core.inspection.inspect_action',
+            side_effect=_counting_inspect,
         ):
-            results = await dry_run_package_actions(
-                actions,
-                environments,
-                asyncio.Queue(),
-                parameters=params,
-            )
+            results = await inspect_actions(_make_preview(actions), plugins, params)
 
         assert len(results) == num_actions
         assert all(r.success for r in results)
         assert peak <= max_concurrent, f'Peak concurrency was {peak}, expected <= {max_concurrent}'
 
     @staticmethod
-    async def test_unlimited_concurrency() -> None:
-        """With max_concurrency=0, all tasks can run simultaneously."""
+    async def test_task_creation_is_bounded_by_max_concurrency() -> None:
+        """With max_concurrency set, inspect creates worker tasks, not one task per action."""
         environments: dict[str, Environment] = {'stub': _StubEnv(_MOCK_PARAMS)}
-        params = SetupParameters(dry_run=True, max_concurrency=0)
+        plugins = DiscoveredPlugins(environments=environments, project_environments={}, scm_environments={})
+        params = SetupParameters(max_concurrency=_EXPECTED_WORKER_TASKS)
+        actions = [_make_action(f'pkg-{i}') for i in range(_MANY_ACTIONS)]
+        groups: list[object] = []
 
-        call_count = 0
+        class _CountingTaskGroup:
+            """Minimal TaskGroup stand-in that records created tasks."""
 
-        async def _mock_dry_run(action, envs, **kwargs):
-            nonlocal call_count
-            call_count += 1
+            def __init__(self) -> None:
+                self.created = 0
+                self._tasks: list[asyncio.Task[None]] = []
+                groups.append(self)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> bool:
+                if self._tasks:
+                    await asyncio.gather(*self._tasks)
+                return False
+
+            def create_task(self, coro) -> asyncio.Task[None]:
+                self.created += 1
+                task = asyncio.create_task(coro)
+                self._tasks.append(task)
+                return task
+
+        async def _mock_inspect(action, envs, **kwargs):
             return SetupActionResult(action=action, success=True, skipped=True, message='ok')
 
+        with (
+            patch('porringer.backend.command.core.inspection.inspect_action', side_effect=_mock_inspect),
+            patch('porringer.backend.command.core.inspection.asyncio.TaskGroup', _CountingTaskGroup),
+        ):
+            results = await inspect_actions(_make_preview(actions), plugins, params)
+
+        assert len(results) == len(actions)
+        first_group = groups[0]
+        assert isinstance(first_group, _CountingTaskGroup)
+        assert first_group.created == _EXPECTED_WORKER_TASKS
+
+    @staticmethod
+    async def test_unlimited_concurrency() -> None:
+        """With max_concurrency=0, all tasks run simultaneously.
+
+        Each mocked inspection blocks until every task has started.  If the
+        scheduler serialized work, the first task would block forever and the
+        ``wait_for`` would time out, so reaching ``peak == num_actions`` proves
+        the actions genuinely ran in parallel.
+        """
+        environments: dict[str, Environment] = {'stub': _StubEnv(_MOCK_PARAMS)}
+        plugins = DiscoveredPlugins(environments=environments, project_environments={}, scm_environments={})
+        params = SetupParameters(max_concurrency=0)
+
         num_actions = 5
+        active = 0
+        peak = 0
+        all_started = asyncio.Event()
+
+        async def _mock_inspect(action, envs, **kwargs):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            if active >= num_actions:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), timeout=5)
+            active -= 1
+            return SetupActionResult(action=action, success=True, skipped=True, message='ok')
+
         actions = [_make_action(f'pkg-{i}') for i in range(num_actions)]
 
         with patch(
-            'porringer.backend.command.core.execution.dry_run_action',
-            side_effect=_mock_dry_run,
+            'porringer.backend.command.core.inspection.inspect_action',
+            side_effect=_mock_inspect,
         ):
-            results = await dry_run_package_actions(
-                actions,
-                environments,
-                asyncio.Queue(),
-                parameters=params,
-            )
+            results = await inspect_actions(_make_preview(actions), plugins, params)
 
         assert len(results) == num_actions
-        assert call_count == num_actions
+        assert peak == num_actions
 
 
 # =========================================================================
@@ -280,10 +339,11 @@ class TestSharedHttpClient:
         assert captured_params[0].http_client is None
 
     @staticmethod
-    async def test_dry_run_creates_shared_client() -> None:
-        """Dry-run path creates a shared aiohttp.ClientSession for all tasks."""
+    async def test_inspection_creates_shared_client() -> None:
+        """Inspection creates a shared aiohttp.ClientSession for all tasks."""
         environments: dict[str, Environment] = {'stub': _StubEnv(_MOCK_PARAMS)}
-        params = SetupParameters(dry_run=True, max_concurrency=0)
+        plugins = DiscoveredPlugins(environments=environments, project_environments={}, scm_environments={})
+        params = SetupParameters(max_concurrency=0)
 
         seen_clients: list[aiohttp.ClientSession | None] = []
 
@@ -296,15 +356,10 @@ class TestSharedHttpClient:
         actions = [_make_action(f'pkg-{i}') for i in range(num_actions)]
 
         with patch(
-            'porringer.backend.command.core.execution.dry_run_action',
+            'porringer.backend.command.core.inspection.inspect_action',
             side_effect=_capture_client,
         ):
-            await dry_run_package_actions(
-                actions,
-                environments,
-                asyncio.Queue(),
-                parameters=params,
-            )
+            await inspect_actions(_make_preview(actions), plugins, params)
 
         # All tasks should have received a non-None client
         assert len(seen_clients) == num_actions
@@ -325,3 +380,49 @@ class TestConsoleCheckAsync:
     def test_check_updates_is_async() -> None:
         """``PackageCommands.check_updates`` is a coroutine function."""
         assert inspect.iscoroutinefunction(PackageCommands.check_updates)
+
+
+# =========================================================================
+# Parallel package execution: fail_fast result shape
+# =========================================================================
+
+
+class TestParallelPackagesFailFast:
+    """``_run_parallel_packages`` reports a stable result shape under fail_fast."""
+
+    @staticmethod
+    async def test_fail_fast_returns_failed_result_and_stops() -> None:
+        """A failing action yields its result and signals ``should_continue=False``.
+
+        Exercises the fail_fast + ``max_concurrency`` path: the failing
+        action's result must be present (not silently dropped), and the
+        function must report that execution should stop.
+        """
+        environments: dict[str, Environment] = {'stub': _StubEnv(_MOCK_PARAMS)}
+        params = SetupParameters(max_concurrency=2, fail_fast=True)
+        event_queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
+
+        actions = [_make_action(f'pkg-{i}') for i in range(4)]
+        failing_package = actions[1].package.name if actions[1].package else ''
+
+        async def _fake_execute_package(action, *_args, **_kwargs):
+            success = (action.package.name if action.package else '') != failing_package
+            return SetupActionResult(
+                action=action,
+                success=success,
+                message='ok' if success else 'boom',
+            )
+
+        with patch.object(execution_module, 'execute_package', side_effect=_fake_execute_package):
+            results, should_continue = await execution_module._run_parallel_packages(
+                actions,
+                environments,
+                params,
+                event_queue,
+            )
+
+        assert should_continue is False
+        failed = [r for r in results if not r.success]
+        assert len(failed) == 1
+        assert failed[0].message == 'boom'
+        assert (failed[0].action.package.name if failed[0].action.package else '') == failing_package

@@ -1,4 +1,6 @@
-"""Presence detection and dry-run simulation.
+"""CLI command implementation for presence."""
+
+"""Presence detection and action inspection.
 
 Checks whether packages are already installed so the sync engine can
 skip redundant operations.
@@ -11,6 +13,7 @@ from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import PluginKind
 from porringer.schema import (
+    InspectionMode,
     SetupAction,
     SetupActionResult,
     SetupParameters,
@@ -21,14 +24,18 @@ from porringer.schema import (
 from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 from .resolution import ResolutionContext, resolve_operation, resolved_to_result
-from .wsl_overlay import overlay_wsl_plugin
 
-__all__ = ['dry_run_action', 'clone_status_to_result']
+__all__ = ['inspect_action', 'clone_status_to_result']
 
 logger = logging.getLogger(__name__)
 
 
-async def dry_run_action(
+def _fast_inspection_result(action: SetupAction) -> SetupActionResult:
+    """Return a non-mutating result without presence/update probing."""
+    return SetupActionResult(action=action, success=True)
+
+
+async def inspect_action(
     action: SetupAction,
     environments: dict[str, Environment],
     *,
@@ -37,21 +44,18 @@ async def dry_run_action(
     working_dir: Path | None = None,
     parameters: SetupParameters | None = None,
 ) -> SetupActionResult:
-    """Simulate executing an action in dry-run mode (async).
+    """Inspect an action without mutating the system.
 
     For package/tool/runtime actions, delegates to
-    :func:`resolve_operation` to determine what *would* happen, then
+    :func:`resolve_operation` to determine what operation is needed, then
     maps the result to a ``SetupActionResult`` via
     :func:`resolved_to_result`.
 
     For SCM actions, performs a lightweight ``is_cloned()`` check
     when SCM environments and a working directory are provided.
 
-    Post-sync commands (``kind is None``) always report success since
-    they would unconditionally run during a real execution.
-
     Args:
-        action: The action to simulate.
+        action: The action to inspect.
         environments: Dict of instantiated environment plugins.
         context: Optional resolution context providing runtime paths,
             project-environment references, HTTP client, and package
@@ -64,23 +68,26 @@ async def dry_run_action(
             ``SyncStrategy.MINIMAL`` is used.
 
     Returns:
-        The simulated result.
+        The inspected result.
     """
+    if parameters is not None and parameters.inspection_mode == InspectionMode.FAST:
+        return _fast_inspection_result(action)
+
     match action.kind:
         case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
-            return await _dry_run_package_action(
+            return await _inspect_package_action(
                 action,
                 environments,
                 context=context,
                 parameters=parameters,
             )
         case PluginKind.SCM:
-            return await _dry_run_scm_action(
+            return await _inspect_scm_action(
                 action,
                 scm_environments=scm_environments,
                 working_dir=working_dir,
             )
-        case PluginKind.PROJECT | None:
+        case PluginKind.PROJECT:
             return SetupActionResult(action=action, success=True)
         case _:
             return SetupActionResult(action=action, success=False, message=f'Unknown action kind: {action.kind}')
@@ -94,7 +101,7 @@ def clone_status_to_result(
 ) -> SetupActionResult | None:
     """Map a ``CloneStatus`` to a skip result, or ``None`` for MISSING.
 
-    Shared by the dry-run presence path and the real execution path
+    Shared by the inspection presence path and the real execution path
     to produce consistent skip results for already-cloned and
     URL-mismatch cases.
 
@@ -140,13 +147,13 @@ def clone_status_to_result(
             return None
 
 
-async def _dry_run_scm_action(
+async def _inspect_scm_action(
     action: SetupAction,
     *,
     scm_environments: dict[str, ScmEnvironment] | None = None,
     working_dir: Path | None = None,
 ) -> SetupActionResult:
-    """Simulate an SCM clone action in dry-run mode.
+    """Inspect an SCM clone action without mutating the system.
 
     Performs a lightweight ``is_cloned()`` check to determine whether
     the repository already exists at the destination.  Returns a
@@ -174,14 +181,14 @@ async def _dry_run_scm_action(
     )
 
 
-async def _dry_run_package_action(
+async def _inspect_package_action(
     action: SetupAction,
     environments: dict[str, Environment],
     *,
     context: ResolutionContext | None = None,
     parameters: SetupParameters | None = None,
 ) -> SetupActionResult:
-    """Simulate a package or plugin action in dry-run mode.
+    """Inspect a package or plugin action without mutating the system.
 
     Delegates to :func:`resolve_operation` for the install/upgrade/skip
     decision and maps the result via :func:`resolved_to_result`.
@@ -191,10 +198,6 @@ async def _dry_run_package_action(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=True)
 
-    # --- Per-action WSL distro routing ------------------------------------
-    if action.distro is not None and action.installer in environments:
-        environments = overlay_wsl_plugin(environments, action.installer, action.distro)
-
     ctx = context or ResolutionContext()
     # Merge strategy-derived fields into the context
     ctx = ResolutionContext(
@@ -203,12 +206,11 @@ async def _dry_run_package_action(
         http_client=ctx.http_client,
         package_cache=ctx.package_cache,
         runtime_context=ctx.runtime_context,
-        wsl_runtime_contexts=ctx.wsl_runtime_contexts,
     )
 
     resolved = await resolve_operation(action, environments, strategy, ctx)
 
     if isinstance(resolved.operation, Skip):
-        logger.info("Dry-run: skipping '%s': %s", action.package, resolved.message)
+        logger.info("Inspection: skipping '%s': %s", action.package, resolved.message)
 
     return resolved_to_result(resolved)

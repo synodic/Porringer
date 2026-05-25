@@ -1,8 +1,10 @@
+"""CLI command implementation for execution."""
+
 """Phased execution engine.
 
 Orchestrates the multi-phase setup flow: runtime → packages → tools →
-project-sync → SCM → post-sync commands.  Each phase ensures its
-prerequisites are met before proceeding.
+project-sync → SCM.  Each phase ensures its prerequisites are met before
+proceeding.
 """
 
 import asyncio
@@ -33,6 +35,9 @@ from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, Package, PluginKind
 from porringer.schema import (
     ActionCompletedEvent,
+    ActionProgress,
+    ActionProgressEvent,
+    ActionRef,
     ActionStartedEvent,
     Install,
     InstallReason,
@@ -47,8 +52,6 @@ from porringer.schema import (
     SetupResults,
     Skip,
     SkipReason,
-    SubActionProgress,
-    SubActionProgressEvent,
     SyncStrategy,
     Uninstall,
     Upgrade,
@@ -56,7 +59,8 @@ from porringer.schema import (
 from porringer.schema.progress import DiscoveredPluginEntry
 from porringer.utility import HTTP_TIMEOUT
 from porringer.utility.exception import PluginError
-from porringer.utility.utility import StreamProgress, stream_command
+from porringer.utility.trace import TraceContext, current_trace_context, use_trace_context
+from porringer.utility.utility import CommandProgress, run_command
 
 from .action_builder import (
     PHASE_ORDER,
@@ -70,7 +74,7 @@ from .discovery import (
     invalidate_plugin_cache,
 )
 from .phase import run_phases
-from .presence import clone_status_to_result, dry_run_action
+from .presence import clone_status_to_result
 from .resolution import (
     PackageCache,
     ResolutionContext,
@@ -78,16 +82,66 @@ from .resolution import (
     resolve_uninstall_operation,
     resolved_to_result,
 )
-from .wsl_overlay import overlay_wsl_plugin, wsl_transport_for
 
 logger = logging.getLogger(__name__)
 
 
-def _action_index(action: SetupAction, index_map: dict[int, int] | None) -> int | None:
-    """Look up the global action index for *action* via its ``id()``."""
-    if index_map is None:
+def _action_ref(action: SetupAction, ref_map: dict[int, ActionRef] | None) -> ActionRef | None:
+    """Look up the stable action reference for *action* via its ``id()``."""
+    if ref_map is None:
         return None
-    return index_map.get(id(action))
+    return ref_map.get(id(action))
+
+
+def _action_trace_context(
+    mode: str,
+    action: SetupAction,
+    ref: ActionRef | None,
+    *,
+    operation: str | None = None,
+) -> TraceContext:
+    """Build compact trace metadata for an action."""
+    return TraceContext(
+        mode=mode,
+        action_ref=ref,
+        action_description=action.description,
+        action_kind=action.kind.value if action.kind is not None else None,
+        installer=action.installer,
+        package_name=action.package.name if action.package is not None else None,
+        operation=operation,
+    )
+
+
+def _current_action_ref() -> ActionRef | None:
+    """Return the action ref from the active trace context, if any."""
+    context = current_trace_context()
+    return context.action_ref if context is not None else None
+
+
+def _make_progress_callback(
+    action: SetupAction, event_queue: asyncio.Queue[ProgressEvent | None]
+) -> Callable[[ActionProgress], None]:
+    """Return a callback that emits ``ActionProgressEvent`` for *action*."""
+
+    def _callback(update: ActionProgress) -> None:
+        event_queue.put_nowait(ActionProgressEvent(action=action, progress=update, action_ref=_current_action_ref()))
+
+    return _callback
+
+
+def _emit_started(action: SetupAction, ref: ActionRef | None, event_queue: asyncio.Queue[ProgressEvent | None]) -> None:
+    """Emit an ``ActionStartedEvent`` for *action*."""
+    event_queue.put_nowait(ActionStartedEvent(action=action, action_ref=ref))
+
+
+def _emit_completed(
+    action: SetupAction,
+    result: SetupActionResult,
+    ref: ActionRef | None,
+    event_queue: asyncio.Queue[ProgressEvent | None],
+) -> None:
+    """Emit an ``ActionCompletedEvent`` for *action*."""
+    event_queue.put_nowait(ActionCompletedEvent(action=action, result=result, action_ref=ref))
 
 
 @dataclass(slots=True)
@@ -109,17 +163,21 @@ class ExecutionState:
     event_queue: asyncio.Queue[ProgressEvent | None]
     manifest_directory: Path
     preview: SetupResults
+    manifest_index: int = 0
     results: list[SetupActionResult] = field(default_factory=list)
     runtime_context: RuntimeContext = field(default_factory=RuntimeContext)
     """Accumulated runtime context for this execution run.  Populated
     by :meth:`propagate_runtime` and threaded through to every
     operation that needs an interpreter path."""
-    wsl_runtime_contexts: dict[str, RuntimeContext] = field(default_factory=dict)
-    """Per-distro runtime contexts for WSL2 actions.  Populated by
-    :meth:`_propagate_wsl_runtimes` during the RUNTIME phase.  Keys
-    are WSL distribution names."""
+    _setup_complete: set[str] = field(default_factory=set)
+    """Installer names whose ``setup()`` has been called this sync.
+    Ensures each plugin's ``setup()`` runs at most once (G1)."""
+    _teardown_complete: set[str] = field(default_factory=set)
+    """Installer names whose ``teardown()`` has been called this sync.
+    Ensures each plugin's ``teardown()`` runs at most once."""
+    _cached_action_ref_map: dict[int, ActionRef] | None = field(default=None, init=False, repr=False)
 
-    # -- convenience accessors (delegate to plugins / preview) ---------
+    # Convenience accessors that delegate to the discovered plugins and preview data.
 
     @property
     def environments(self) -> dict[str, Environment]:
@@ -127,7 +185,7 @@ class ExecutionState:
         return self.plugins.environments
 
     @property
-    def phases(self) -> dict[PluginKind | None, list[SetupAction]]:
+    def phases(self) -> dict[PluginKind, list[SetupAction]]:
         """Group actions into phase buckets on access."""
         return group_actions_by_phase(self.actions)
 
@@ -163,10 +221,10 @@ class ExecutionState:
 
     @property
     def fallback_dir(self) -> Path:
-        """Working directory for SCM and post-sync command phases."""
+        """Working directory for SCM phases."""
         return determine_fallback_dir(self.parameters, self.manifest_directory)
 
-    # -- convenience properties ----------------------------------------
+    # Convenience properties for common execution state.
 
     @property
     def strategy(self) -> SyncStrategy:
@@ -174,11 +232,19 @@ class ExecutionState:
         return self.parameters.strategy
 
     @property
-    def _action_index_map(self) -> dict[int, int]:
-        """Map ``id(action)`` → global index in :attr:`actions`."""
-        return {id(a): i for i, a in enumerate(self.actions)}
+    def _action_ref_map(self) -> dict[int, ActionRef]:
+        """Map ``id(action)`` to stable action references in :attr:`actions`."""
+        if self._cached_action_ref_map is None:
+            source_indices = self.preview.action_indices
+            if len(source_indices) != len(self.actions):
+                source_indices = list(range(len(self.actions)))
+            self._cached_action_ref_map = {
+                id(action): ActionRef.from_indices(self.manifest_index, source_index)
+                for action, source_index in zip(self.actions, source_indices, strict=True)
+            }
+        return self._cached_action_ref_map
 
-    # -- plugin refresh machinery --------------------------------------
+    # Refresh plugins and runtime state for a new execution run.
 
     def refresh_all_plugins(self) -> None:
         """Refresh PATH and re-discover all plugin types.
@@ -214,35 +280,7 @@ class ExecutionState:
             kind, executable = result
             self.runtime_context = self.runtime_context.with_executable(kind, executable)
 
-    async def _propagate_wsl_runtimes(self) -> None:
-        """Resolve per-distro interpreter paths from WSL runtime actions.
-
-        Iterates RUNTIME-phase actions where ``action.distro`` is set,
-        groups them by distro, and for each distro wraps the
-        ``RuntimeProvider`` with the appropriate transport before calling
-        ``resolve_executable()``.
-
-        Results are stored in :attr:`wsl_runtime_contexts` and do
-        **not** inject onto the host ``PATH`` (WSL paths are not valid
-        on the Windows host).
-        """
-        runtime_actions = self.phases.get(PluginKind.RUNTIME, [])
-        wsl_actions: dict[str, list[SetupAction]] = {}
-        for action in runtime_actions:
-            if action.distro is not None:
-                wsl_actions.setdefault(action.distro, []).append(action)
-
-        if not wsl_actions:
-            return
-
-        for distro, actions in wsl_actions.items():
-            result = await _propagate_wsl_runtime(distro, actions, self.plugins)
-            if result is not None:
-                kind, executable = result
-                ctx = self.wsl_runtime_contexts.get(distro, RuntimeContext())
-                self.wsl_runtime_contexts[distro] = ctx.with_executable(kind, executable)
-
-    # -- result helpers ------------------------------------------------
+    # Helpers for emitting and packaging execution results.
 
     def emit(self, event: ProgressEvent) -> None:
         """Put *event* on the event queue."""
@@ -258,25 +296,80 @@ class ExecutionState:
         return ResolutionContext(
             project_environments=self.project_environments,
             runtime_context=self.runtime_context,
-            wsl_runtime_contexts=self.wsl_runtime_contexts or None,
         )
 
-    # -- phase executor delegates --------------------------------------
+    # Ensure plugin lifecycle hooks run once per sync.
+
+    async def _ensure_plugins_setup(self, actions: list[SetupAction]) -> set[str]:
+        """Call ``setup()`` on plugins before their first action in this sync.
+
+        Each plugin's ``setup()`` is called at most once per sync
+        (G1 idempotency gating).  Failures are logged at WARNING and
+        the failing plugin name is returned so the caller can skip its
+        actions (G2 soft-fail isolation).
+
+        Returns:
+            Set of installer names whose ``setup()`` raised.
+        """
+        failed: set[str] = set()
+        for installer_name in dict.fromkeys(a.installer for a in actions if a.installer):
+            if installer_name in self._setup_complete:
+                continue
+            env = self.environments.get(installer_name)
+            if env is None:
+                continue
+            self._setup_complete.add(installer_name)
+            try:
+                await env.setup()
+            except Exception:
+                logger.warning(
+                    "setup() failed for plugin '%s'; its actions will be skipped",
+                    installer_name,
+                    exc_info=True,
+                )
+                failed.add(installer_name)
+        return failed
+
+    # Delegates for the package, project, and SCM execution phases.
 
     async def run_package_actions(self, actions: list[SetupAction]) -> tuple[list[SetupActionResult], bool]:
         """Execute package/tool/runtime actions.
 
+        Calls ``setup()`` on each plugin before its first action in
+        this sync (G1 idempotency gating).
+
         Returns:
             Tuple of (results, should_continue).
         """
-        return await execute_package_actions(
+        setup_skip_results: list[SetupActionResult] = []
+        failed = await self._ensure_plugins_setup(actions)
+        if failed:
+            remaining: list[SetupAction] = []
+            action_ref_map = self._action_ref_map
+            for a in actions:
+                if a.installer in failed:
+                    result = SetupActionResult(
+                        action=a,
+                        success=False,
+                        message=f"Skipped: setup() failed for '{a.installer}'",
+                    )
+                    setup_skip_results.append(result)
+                    ref = _action_ref(a, action_ref_map)
+                    _emit_started(a, ref, self.event_queue)
+                    _emit_completed(a, result, ref, self.event_queue)
+                else:
+                    remaining.append(a)
+            actions = remaining
+
+        results, ok = await execute_package_actions(
             actions,
             self.environments,
             self.parameters,
             self.event_queue,
             self.resolution_context,
-            action_index_map=self._action_index_map,
+            action_ref_map=self._action_ref_map,
         )
+        return setup_skip_results + results, ok
 
     async def run_project_phase(self, actions: list[SetupAction]) -> list[SetupActionResult]:
         """Execute or skip project sync actions."""
@@ -290,28 +383,32 @@ class ExecutionState:
             self.fallback_dir,
             self.parameters,
             self.event_queue,
-            action_index_map=self._action_index_map,
+            action_ref_map=self._action_ref_map,
         )
-
-    async def run_command_actions(self, actions: list[SetupAction]) -> list[SetupActionResult]:
-        """Execute post-sync shell commands."""
-        return await execute_command_actions(actions, self)
 
     def resolve_deferred(self, actions: list[SetupAction]) -> None:
         """Resolve deferred actions via ``replace()`` on frozen ``SetupAction``."""
+        action_ids = {id(action) for action in actions}
+        indices = [index for index, action in enumerate(self.actions) if id(action) in action_ids]
+        phase_actions = [self.actions[index] for index in indices]
         resolve_deferred_actions(
-            self.actions,
+            phase_actions,
             self.plugins,
             self.strategy,
             preferences=self.preferences,
             runtime_context=self.runtime_context,
         )
+        for index, action in zip(indices, phase_actions, strict=True):
+            self.actions[index] = action
+        self._cached_action_ref_map = None
 
     def early_return(self) -> SetupResults:
         """Create a ``SetupResults`` from the results accumulated so far."""
         return SetupResults(
             actions=self.actions,
+            action_indices=self.preview.action_indices,
             results=self.results,
+            manifest_index=self.manifest_index,
             manifest_path=self.manifest_path,
             root_directory=self.manifest_directory,
             metadata=self.metadata,
@@ -338,6 +435,16 @@ def _prepend_to_path(dirs: list[str], *, require_exists: bool = False) -> None:
 
     Uses a lock to prevent concurrent mutations from interleaving.
 
+    .. warning::
+        Because ``PATH`` is shared process state, **two sync runs must
+        not execute concurrently within the same process.**  The lock
+        only serializes individual mutations; it does not isolate one
+        run's ``PATH`` from another's.  A runtime installed by one run
+        becomes visible to a sibling run's tool resolution, which can
+        produce non-deterministic results.  Embedders (GUI, server)
+        that need parallelism should run each sync in a separate
+        process.  The CLI is unaffected (one sync per process).
+
     Args:
         dirs: Directory paths to prepend (in order).
         require_exists: When ``True``, skip directories that do not
@@ -362,7 +469,7 @@ def refresh_path() -> None:
     ``sysconfig`` script directories so that executables such as
     ``pipx`` are discoverable after installation.
     """
-    # Allow re-reading the OS PATH (handles tools installed mid-session).
+    # Refresh the process PATH so tools installed during the current session are visible.
     reset_sync_state()
     ensure_system_path()
 
@@ -393,70 +500,6 @@ def inject_runtime_path(executable: Path) -> None:
     parent = str(executable.parent)
     scripts = str(executable.parent / ('Scripts' if os.name == 'nt' else 'bin'))
     _prepend_to_path([parent, scripts])
-
-
-# ---------------------------------------------------------------------------
-# Post-sync command execution
-# ---------------------------------------------------------------------------
-
-
-async def execute_run_command(
-    action: SetupAction,
-    working_dir: Path,
-    timeout: int,
-    event_queue: asyncio.Queue[ProgressEvent | None],
-) -> SetupActionResult:
-    """Execute a post-install command with real-time output streaming.
-
-    Uses ``stream_command`` so the event loop is never blocked, and
-    streams stdout/stderr line-by-line as ``SUB_ACTION_PROGRESS``
-    events on the *event_queue*.
-
-    Args:
-        action: The command action.
-        working_dir: Working directory for the command.
-        timeout: Timeout in seconds.
-        event_queue: Queue to emit sub-action progress into.
-
-    Returns:
-        The result of the command execution.
-    """
-    if action.command is None or len(action.command) == 0:
-        return SetupActionResult(action=action, success=False, message='No command specified')
-
-    logger.info(f'Running command: {" ".join(action.command)}')
-
-    def _progress_cb(update: SubActionProgress) -> None:
-        event_queue.put_nowait(SubActionProgressEvent(action=action, sub_action=update))
-
-    progress = StreamProgress(
-        action=action,
-        callback=_progress_cb,
-        phase='command',
-    )
-
-    try:
-        result = await stream_command(
-            action.command,
-            progress=progress,
-            cwd=working_dir,
-            timeout=float(timeout),
-        )
-        if result.returncode == 0:
-            return SetupActionResult(action=action, success=True)
-        stderr = result.stderr.strip() if result.stderr else 'Unknown error'
-        return SetupActionResult(
-            action=action,
-            success=False,
-            message=f'Exit code {result.returncode}: {stderr}',
-        )
-    except TimeoutError:
-        message = f'Command timed out after {timeout} seconds'
-        logger.error(message)
-        return SetupActionResult(action=action, success=False, message=message)
-    except Exception as e:
-        message = f'Command not found: {action.command[0]}' if isinstance(e, FileNotFoundError) else str(e)
-        return SetupActionResult(action=action, success=False, message=message)
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +548,57 @@ def forward_version_metadata(result: SetupActionResult, operation: Operation) ->
         result.available_version = result.available_version or operation.available_version
 
 
+def invalidate_runtime_cache_after_mutation(
+    action: SetupAction,
+    environments: dict[str, Environment],
+    result: SetupActionResult,
+) -> None:
+    """Clear runtime-provider caches after successful runtime install/upgrade/uninstall."""
+    if not result.success or result.skipped or action.kind is not PluginKind.RUNTIME or action.installer is None:
+        return
+
+    environment = environments.get(action.installer)
+    if environment is None:
+        return
+
+    invalidator = getattr(environment, 'invalidate_runtime_cache', None)
+    if callable(invalidator):
+        invalidator()
+
+
+def _prepare_action_context(
+    action: SetupAction,
+    environments: dict[str, Environment],
+    context: ResolutionContext | None,
+    package_cache: PackageCache | None,
+) -> tuple[dict[str, Environment], ResolutionContext]:
+    """Apply per-action WSL routing and cache/runtime-context merges.
+
+    Shared by :func:`execute_package` and :func:`execute_uninstall`.
+    Merges a caller-provided ``package_cache`` into the resolution
+    context.
+
+    Callers must validate ``action.installer`` / ``action.package``
+    before calling.
+
+    Args:
+        action: The package action being executed.
+        environments: Dict of instantiated environment plugins.
+        context: Optional resolution context.
+        package_cache: Optional shared cache for ``packages()`` results.
+
+    Returns:
+        A tuple of the (possibly overlaid) environments and the
+        prepared resolution context.
+    """
+    ctx = context or ResolutionContext()
+    # Merge any caller-provided package cache into the resolution context.
+    if package_cache is not None:
+        ctx = replace(ctx, package_cache=package_cache)
+
+    return environments, ctx
+
+
 async def execute_package(
     action: SetupAction,
     environments: dict[str, Environment],
@@ -524,7 +618,7 @@ async def execute_package(
         action: The package action.
         environments: Dict of instantiated environment plugins.
         strategy: The sync strategy.
-        event_queue: Queue to emit sub-action events into.
+        event_queue: Queue to emit action progress events into.
         context: Optional resolution context providing runtime paths,
             project-environment references, and package cache.
         package_cache: Optional shared cache for ``packages()`` results.
@@ -538,24 +632,9 @@ async def execute_package(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=False, message='Installer or package not specified')
 
-    # --- Per-action WSL distro routing ------------------------------------
-    if action.distro is not None and action.installer in environments:
-        environments = overlay_wsl_plugin(environments, action.installer, action.distro)
+    environments, ctx = _prepare_action_context(action, environments, context, package_cache)
 
-    ctx = context or ResolutionContext()
-    # Merge caller-provided cache into the context for resolution
-    if package_cache is not None:
-        ctx = replace(ctx, package_cache=package_cache)
-
-    # --- Per-distro WSL runtime context -----------------------------------
-    if (
-        action.distro is not None
-        and ctx.wsl_runtime_contexts
-        and (wsl_ctx := ctx.wsl_runtime_contexts.get(action.distro)) is not None
-    ):
-        ctx = replace(ctx, runtime_context=wsl_ctx)
-
-    # --- Per-action runtime override --------------------------------------
+    # Apply any per-action runtime override before resolving the operation.
     if action.runtime_tag is not None:
         override_ctx = await resolve_runtime_tag_override(action.runtime_tag, action.ecosystem, environments)
         if override_ctx is None:
@@ -573,7 +652,7 @@ async def execute_package(
         ctx,
     )
 
-    # --- Skip -------------------------------------------------------------
+    # Skip the action when the resolver reports that it should be skipped.
     if isinstance(resolved.operation, Skip):
         logger.info("Skipping '%s': %s", action.package, resolved.message)
         return resolved_to_result(resolved)
@@ -608,6 +687,7 @@ async def execute_package(
         action, environment, resolved.operation, event_queue, runtime_context=ctx.runtime_context
     )
     forward_version_metadata(result, resolved.operation)
+    invalidate_runtime_cache_after_mutation(action, environments, result)
     return result
 
 
@@ -625,7 +705,7 @@ async def _attempt_package_operation(
         action: The package action.
         environment: The environment plugin to use.
         operation: The resolved operation (Install or Upgrade).
-        event_queue: Queue to emit sub-action events into.
+        event_queue: Queue to emit action progress events into.
         runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
@@ -657,21 +737,25 @@ async def execute_uninstall(
     context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
+    teardown_complete: set[str] | None = None,
 ) -> SetupActionResult:
     """Execute a package uninstall after resolving presence.
 
     Delegates to :func:`resolve_uninstall_operation` to determine
     whether the package is installed, then dispatches to
-    ``uninstall`` (or ``plugin_remove`` for plugin-target
+    ``uninstall`` (or ``plugin_uninstall`` for plugin-target
     actions).
 
     Args:
         action: The package action describing what to uninstall.
         environments: Dict of instantiated environment plugins.
-        event_queue: Queue to emit sub-action events into.
+        event_queue: Queue to emit action progress events into.
         context: Optional resolution context providing runtime paths,
             project-environment references, and package cache.
         package_cache: Optional shared cache for ``packages()`` results.
+        teardown_complete: Optional set tracking which environments have
+            already had their ``teardown`` invoked, used to avoid
+            redundant teardown across multiple uninstall actions.
 
     Returns:
         The result of the operation.
@@ -679,22 +763,7 @@ async def execute_uninstall(
     if action.installer is None or action.package is None:
         return SetupActionResult(action=action, success=False, message='Installer or package not specified')
 
-    # --- Per-action WSL distro routing ------------------------------------
-    if action.distro is not None and action.installer in environments:
-        environments = overlay_wsl_plugin(environments, action.installer, action.distro)
-
-    ctx = context or ResolutionContext()
-    # Merge caller-provided cache into the context for resolution
-    if package_cache is not None:
-        ctx = replace(ctx, package_cache=package_cache)
-
-    # --- Per-distro WSL runtime context -----------------------------------
-    if (
-        action.distro is not None
-        and ctx.wsl_runtime_contexts
-        and (wsl_ctx := ctx.wsl_runtime_contexts.get(action.distro)) is not None
-    ):
-        ctx = replace(ctx, runtime_context=wsl_ctx)
+    environments, ctx = _prepare_action_context(action, environments, context, package_cache)
 
     resolved = await resolve_uninstall_operation(
         action,
@@ -733,6 +802,26 @@ async def execute_uninstall(
         runtime_context=ctx.runtime_context,
     )
     forward_version_metadata(result, resolved.operation)
+    invalidate_runtime_cache_after_mutation(action, environments, result)
+
+    # --- Teardown when the plugin has no remaining packages ----------------
+    if result.success:
+        if teardown_complete is not None and action.installer in teardown_complete:
+            pass  # already torn down this sync
+        else:
+            try:
+                remaining = await environment.packages()
+                if not remaining:
+                    if teardown_complete is not None and action.installer:
+                        teardown_complete.add(action.installer)
+                    await environment.teardown()
+            except Exception:
+                logger.warning(
+                    "teardown() failed for plugin '%s'",
+                    action.installer,
+                    exc_info=True,
+                )
+
     return result
 
 
@@ -744,7 +833,7 @@ async def _attempt_plugin_operation(
     plugin_manager: PluginManager | None = None,
     project_environments: dict[str, ProjectEnvironment] | None = None,
 ) -> SetupActionResult:
-    """Add, update, or remove a plugin via its native ``PluginManager``.
+    """Install, upgrade, or uninstall an extension package via its native ``PluginManager``.
 
     Uses the *plugin_manager* resolved during operation resolution
     when available, falling back to a fresh lookup when not provided.
@@ -753,7 +842,7 @@ async def _attempt_plugin_operation(
         action: The plugin action (``plugin_target`` must be set).
         operation: The resolved operation (Install, Upgrade, or
             Uninstall).
-        event_queue: Queue to emit sub-action events into.
+        event_queue: Queue to emit action progress events into.
         plugin_manager: Pre-resolved ``PluginManager`` from
             :func:`resolve_operation`, if available.
         project_environments: Dict of project-environment plugins,
@@ -773,14 +862,14 @@ async def _attempt_plugin_operation(
 
     match operation:
         case Install():
-            execute = plugin_manager.plugin_add
-            verb, verb_past, suffix = 'add plugin', 'Added', f' to {action.plugin_target.name} (native)'
+            execute = plugin_manager.plugin_install
+            verb, verb_past, suffix = 'install plugin', 'Installed', f' to {action.plugin_target.name} (native)'
         case Upgrade():
-            execute = plugin_manager.plugin_update
-            verb, verb_past, suffix = 'update plugin', 'Updated', f' to {action.plugin_target.name} (native)'
+            execute = plugin_manager.plugin_upgrade
+            verb, verb_past, suffix = 'upgrade plugin', 'Upgraded', f' to {action.plugin_target.name} (native)'
         case Uninstall():
-            execute = plugin_manager.plugin_remove
-            verb, verb_past, suffix = 'remove plugin', 'Removed', f' from {action.plugin_target.name} (native)'
+            execute = plugin_manager.plugin_uninstall
+            verb, verb_past, suffix = 'uninstall plugin', 'Uninstalled', f' from {action.plugin_target.name} (native)'
         case _:
             msg = f'Unexpected operation {operation} for plugin action'
             return SetupActionResult(action=action, success=False, message=msg)
@@ -832,7 +921,7 @@ async def _attempt_operation(
     Args:
         action: The action being executed.
         spec: The operation specification (callable + verb forms).
-        event_queue: Queue to emit sub-action events into.
+        event_queue: Queue to emit action progress events into.
         runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
@@ -841,26 +930,27 @@ async def _attempt_operation(
     success = False
     message = ''
 
-    def sub_action_cb(update: SubActionProgress) -> None:
-        event_queue.put_nowait(SubActionProgressEvent(action=action, sub_action=update))
+    action_progress_cb = _make_progress_callback(action, event_queue)
+
+    if action.package is None:
+        return SetupActionResult(action=action, success=False, message='No package specified')
+    params = PackageParameters(
+        package=action.package,
+        dry=False,
+        include_prereleases=action.include_prereleases,
+        progress_callback=action_progress_cb,
+        runtime_context=runtime_context,
+    )
 
     try:
-        if action.package is None:
-            return SetupActionResult(action=action, success=False, message='No package specified')
-        params = PackageParameters(
-            package=action.package,
-            dry=False,
-            include_prereleases=action.include_prereleases,
-            progress_callback=sub_action_cb,
-            runtime_context=runtime_context,
-        )
         result = await spec.execute(params)
 
-        if result is not None:
-            success = True
-            message = f'{spec.verb_past} {result.name}{spec.success_suffix}'
-        else:
-            message = f"Failed to {spec.verb} '{action.package}'{spec.success_suffix}"
+        success = result is not None
+        message = (
+            f'{spec.verb_past} {result.name}{spec.success_suffix}'
+            if result is not None
+            else f"Failed to {spec.verb} '{action.package}'{spec.success_suffix}"
+        )
     except PluginError as e:
         logger.error(f'Plugin error {spec.verb}ing {action.package}: {e}')
         message = str(e)
@@ -888,26 +978,13 @@ async def execute_package_actions(
     event_queue: asyncio.Queue[ProgressEvent | None],
     context: ResolutionContext | None = None,
     *,
-    action_index_map: dict[int, int] | None = None,
+    action_ref_map: dict[int, ActionRef] | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Execute PACKAGE actions with parallel support.
 
     Returns:
         Tuple of (results, should_continue). should_continue is False if fail_fast triggered.
     """
-    if parameters.dry_run:
-        return (
-            await dry_run_package_actions(
-                package_actions,
-                environments,
-                event_queue,
-                context=context,
-                parameters=parameters,
-                action_index_map=action_index_map,
-            ),
-            True,
-        )
-
     parallel_actions, sequential_actions = _group_actions_by_parallelism(package_actions, environments)
 
     results: list[SetupActionResult] = []
@@ -938,10 +1015,11 @@ async def execute_package_actions(
                 event_queue,
                 enriched,
                 package_cache=cache,
-                action_index_map=action_index_map,
+                action_ref_map=action_ref_map,
             )
             results.extend(parallel_results)
             if not should_continue:
+                cache.log_debug_stats('execute_package_actions')
                 return results, False
 
         # Execute sequential actions one at a time
@@ -952,103 +1030,12 @@ async def execute_package_actions(
             event_queue,
             enriched,
             package_cache=cache,
-            action_index_map=action_index_map,
+            action_ref_map=action_ref_map,
         )
         results.extend(sequential_results)
 
+    cache.log_debug_stats('execute_package_actions')
     return results, should_continue
-
-
-async def dry_run_package_actions(
-    package_actions: list[SetupAction],
-    environments: dict[str, Environment],
-    event_queue: asyncio.Queue[ProgressEvent | None],
-    *,
-    context: ResolutionContext | None = None,
-    parameters: SetupParameters | None = None,
-    action_index_map: dict[int, int] | None = None,
-) -> list[SetupActionResult]:
-    """Execute dry-run for package actions in parallel.
-
-    All actions are dispatched concurrently via ``asyncio.TaskGroup``.
-    A shared :class:`PackageCache` ensures each installer's
-    ``packages()`` is called at most once, regardless of how many
-    actions target the same installer.
-
-    Results are emitted in the original action order regardless of
-    which checks finish first, preserving deterministic card ordering
-    for GUI consumers.
-    """
-    ctx = context or ResolutionContext()
-    max_concurrency = parameters.max_concurrency if parameters else 0
-
-    result_slots: list[SetupActionResult | None] = [None] * len(package_actions)
-
-    semaphore: asyncio.Semaphore | None = asyncio.Semaphore(max_concurrency) if max_concurrency > 0 else None
-
-    # Shared cache — collapses N concurrent packages() calls per installer to 1
-    cache = PackageCache()
-
-    async def _check(index: int, action: SetupAction, client: aiohttp.ClientSession) -> None:
-        if semaphore is not None:
-            await semaphore.acquire()
-        try:
-            # Emit ACTION_STARTED *before* the check so GUI clients can
-            # show a spinner while the dry-run is in progress.
-            event_queue.put_nowait(
-                ActionStartedEvent(
-                    action=action,
-                    action_index=_action_index(action, action_index_map),
-                )
-            )
-            try:
-                result = await dry_run_action(
-                    action,
-                    environments,
-                    context=ResolutionContext(
-                        project_path=ctx.project_path,
-                        project_environments=ctx.project_environments,
-                        runtime_context=ctx.runtime_context,
-                        http_client=client,
-                        package_cache=cache,
-                    ),
-                    parameters=parameters,
-                )
-            except Exception as exc:
-                logger.debug('Dry-run check failed for %s: %s', action.description, exc)
-                result = SetupActionResult(action=action, success=False, message=str(exc))
-            result_slots[index] = result
-            event_queue.put_nowait(
-                ActionCompletedEvent(
-                    action=action,
-                    result=result,
-                    action_index=_action_index(action, action_index_map),
-                )
-            )
-        finally:
-            if semaphore is not None:
-                semaphore.release()
-
-    async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as shared_client, asyncio.TaskGroup() as tg:
-        for i, action in enumerate(package_actions):
-            tg.create_task(_check(i, action, shared_client))
-
-    # All tasks completed — return results in original order.
-    # Replace any unfilled slots (e.g. from cancellation) with
-    # explicit failure results so callers always get a 1:1 mapping.
-    results: list[SetupActionResult] = []
-    for i, maybe in enumerate(result_slots):
-        if maybe is not None:
-            results.append(maybe)
-        else:
-            results.append(
-                SetupActionResult(
-                    action=package_actions[i],
-                    success=False,
-                    message='Task did not complete',
-                )
-            )
-    return results
 
 
 def _group_actions_by_parallelism(
@@ -1079,26 +1066,23 @@ async def _run_sequential_packages(
     context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
-    action_index_map: dict[int, int] | None = None,
+    action_ref_map: dict[int, ActionRef] | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions sequentially."""
     ctx = context or ResolutionContext()
     results: list[SetupActionResult] = []
     for action in sequential_actions:
-        event_queue.put_nowait(
-            ActionStartedEvent(
-                action=action,
-                action_index=_action_index(action, action_index_map),
+        ref = _action_ref(action, action_ref_map)
+        _emit_started(action, ref, event_queue)
+        with use_trace_context(_action_trace_context('execute', action, ref, operation='package')):
+            result = await execute_package(
+                action,
+                environments,
+                parameters.strategy,
+                event_queue,
+                context,
+                package_cache=package_cache,
             )
-        )
-        result = await execute_package(
-            action,
-            environments,
-            parameters.strategy,
-            event_queue,
-            context,
-            package_cache=package_cache,
-        )
         results.append(result)
         # Invalidate cache after successful install/upgrade so the next
         # action sees fresh state for the same installer.
@@ -1106,13 +1090,7 @@ async def _run_sequential_packages(
             package_cache.invalidate_packages(action.installer, ctx.project_path)
             if action.plugin_target is not None:
                 package_cache.invalidate_plugins(action.plugin_target.name)
-        event_queue.put_nowait(
-            ActionCompletedEvent(
-                action=action,
-                result=result,
-                action_index=_action_index(action, action_index_map),
-            )
-        )
+        _emit_completed(action, result, ref, event_queue)
         if not result.success and not result.skipped and parameters.fail_fast:
             logger.error(f'Action failed: {action.description} - {result.message}')
             return results, False
@@ -1127,7 +1105,7 @@ async def _run_parallel_packages(
     context: ResolutionContext | None = None,
     *,
     package_cache: PackageCache | None = None,
-    action_index_map: dict[int, int] | None = None,
+    action_ref_map: dict[int, ActionRef] | None = None,
 ) -> tuple[list[SetupActionResult], bool]:
     """Run package actions in parallel using TaskGroup.
 
@@ -1145,30 +1123,21 @@ async def _run_parallel_packages(
         if semaphore is not None:
             await semaphore.acquire()
         try:
-            event_queue.put_nowait(
-                ActionStartedEvent(
-                    action=action,
-                    action_index=_action_index(action, action_index_map),
-                )
-            )
+            ref = _action_ref(action, action_ref_map)
+            _emit_started(action, ref, event_queue)
             try:
-                result = await execute_package(
-                    action,
-                    environments,
-                    parameters.strategy,
-                    event_queue,
-                    context,
-                    package_cache=package_cache,
-                )
+                with use_trace_context(_action_trace_context('execute', action, ref, operation='package')):
+                    result = await execute_package(
+                        action,
+                        environments,
+                        parameters.strategy,
+                        event_queue,
+                        context,
+                        package_cache=package_cache,
+                    )
             except Exception as e:
                 result = SetupActionResult(action=action, success=False, message=str(e))
-            event_queue.put_nowait(
-                ActionCompletedEvent(
-                    action=action,
-                    result=result,
-                    action_index=_action_index(action, action_index_map),
-                )
-            )
+            _emit_completed(action, result, ref, event_queue)
             results[index] = result
         finally:
             if semaphore is not None:
@@ -1178,10 +1147,23 @@ async def _run_parallel_packages(
         async with asyncio.TaskGroup() as tg:
             for i, action in enumerate(parallel_actions):
                 tg.create_task(package_with_event(i, action))
-    except ExceptionGroup as eg:
-        # TaskGroup raises ExceptionGroup if any task fails with unhandled exception
-        # Our package_with_event catches exceptions, so this shouldn't happen normally
-        logger.error(f'Parallel package operation failed with exceptions: {eg.exceptions}')
+    except BaseExceptionGroup as eg:
+        # ``package_with_event`` converts ordinary task failures into result
+        # objects, so a plain ``Exception`` never escapes a worker.  Reaching
+        # this handler therefore means the TaskGroup propagated a
+        # ``BaseException`` (typically a cancellation) or, defensively, an
+        # unexpected exception that slipped past the worker.  Note the old
+        # ``except ExceptionGroup`` could not even catch cancellation, since a
+        # ``CancelledError`` group is a ``BaseExceptionGroup`` (not an
+        # ``ExceptionGroup``).  Split the two: log unexpected exceptions and
+        # fall through to report partial results, but re-raise cancellation so
+        # the caller's cancellation semantics are preserved.
+        cancellations, unexpected = eg.split(asyncio.CancelledError)
+        if unexpected is not None:
+            logger.error('Parallel package operation failed with exceptions: %s', unexpected.exceptions)
+        if cancellations is not None:
+            logger.warning('Parallel package operation cancelled (%d task(s))', len(cancellations.exceptions))
+            raise cancellations from None
 
     # Convert dict to ordered list
     result_list = [results.get(i) for i in range(len(parallel_actions))]
@@ -1203,54 +1185,15 @@ async def _run_parallel_packages(
 
 
 # ---------------------------------------------------------------------------
-# Command / project / SCM action execution
+# Project / SCM action execution
 # ---------------------------------------------------------------------------
 
 
-async def execute_command_actions(
-    command_actions: list[SetupAction],
-    state: ExecutionState,
-) -> list[SetupActionResult]:
-    """Execute RUN_COMMAND actions sequentially."""
-    aim = state._action_index_map
-    results: list[SetupActionResult] = []
-    for action in command_actions:
-        state.event_queue.put_nowait(ActionStartedEvent(action=action, action_index=_action_index(action, aim)))
-
-        if state.parameters.dry_run:
-            result = await dry_run_action(
-                action,
-                state.environments,
-                parameters=state.parameters,
-            )
-        else:
-            result = await execute_run_command(
-                action,
-                state.fallback_dir,
-                state.parameters.timeout,
-                event_queue=state.event_queue,
-            )
-        results.append(result)
-        state.event_queue.put_nowait(
-            ActionCompletedEvent(
-                action=action,
-                result=result,
-                action_index=_action_index(action, aim),
-            )
-        )
-        if not result.success and not result.skipped:
-            logger.error(f'Action failed: {action.description} - {result.message}')
-            if state.parameters.fail_fast:
-                break
-    return results
-
-
 def determine_fallback_dir(parameters: SetupParameters, root_directory: Path) -> Path:
-    """Determine the fallback working directory for SCM and post-sync commands.
+    """Determine the fallback working directory for SCM actions.
 
     Project-sync actions use per-plugin auto-discovery instead of
-    this method.  This fallback is used by SCM clone and post-sync
-    command phases only.
+    this method.  This fallback is used by SCM clone actions.
 
     Args:
         parameters: Setup parameters that may specify a project directory.
@@ -1277,7 +1220,7 @@ async def handle_project_phase(
     Returns:
         Results for each project action.
     """
-    aim = state._action_index_map
+    action_ref_map = state._action_ref_map
     if not state.skip_project:
         return await _execute_project_sync_actions(
             project_actions,
@@ -1286,14 +1229,14 @@ async def handle_project_phase(
             state.parameters,
             state.event_queue,
             runtime_context=state.runtime_context,
-            action_index_map=aim,
+            action_ref_map=action_ref_map,
         )
     return skip_actions(
         project_actions,
         SkipReason.NO_PROJECT_DIRECTORY,
         'No project directory provided',
         state.event_queue,
-        action_index_map=aim,
+        action_ref_map=action_ref_map,
     )
 
 
@@ -1302,15 +1245,15 @@ async def handle_project_phase(
 # ---------------------------------------------------------------------------
 
 
-def _plugins_discovered_event(
+def discovered_plugin_entries(
     plugins: DiscoveredPlugins,
     runtime_context: RuntimeContext | None = None,
-) -> ProgressEvent:
-    """Build a ``PLUGINS_DISCOVERED`` progress event.
+) -> tuple[DiscoveredPluginEntry, ...]:
+    """Collect availability entries for discovered plugins.
 
-    Collects availability for every discovered plugin and returns a
-    single ``ProgressEvent`` that GUI clients can use to render
-    availability badges.
+    This pure data helper is shared by inspection reports and the
+    ``PLUGINS_DISCOVERED`` progress event so callers see the same
+    availability map in both preview and execution paths.
 
     When *runtime_context* is provided, ``RuntimeConsumer`` plugins are
     probed via the runtime-aware ``query_availability()`` path.
@@ -1334,7 +1277,15 @@ def _plugins_discovered_event(
             )
         )
 
-    discovered = tuple(entries)
+    return tuple(entries)
+
+
+def _plugins_discovered_event(
+    plugins: DiscoveredPlugins,
+    runtime_context: RuntimeContext | None = None,
+) -> ProgressEvent:
+    """Build a ``PLUGINS_DISCOVERED`` progress event."""
+    discovered = discovered_plugin_entries(plugins, runtime_context)
     logger.info('Plugins discovered — %d plugin(s)', len(discovered))
     return PluginsDiscoveredEvent(discovered_plugins=discovered)
 
@@ -1345,6 +1296,7 @@ async def execute_single(
     event_queue: asyncio.Queue[ProgressEvent | None],
     *,
     plugins: DiscoveredPlugins | None = None,
+    manifest_index: int = 0,
 ) -> SetupResults:
     """Execute setup actions for a single path with parallel support.
 
@@ -1361,7 +1313,6 @@ async def execute_single(
     4. **Project sync** — run ``pdm install`` / ``uv sync`` in the
        manifest directory.
     5. **SCM clone** — clone source-control repositories.
-    6. **Post-sync commands** — run arbitrary shell commands.
 
     Args:
         preview: The parsed manifest preview containing actions,
@@ -1371,6 +1322,7 @@ async def execute_single(
         plugins: Pre-discovered plugins.  When provided, plugin
             discovery is skipped entirely (useful when the caller has
             already discovered plugins for a batch of manifests).
+        manifest_index: Stable index of this manifest within the current batch.
 
     Returns:
         SetupResults containing the results of each action.
@@ -1379,17 +1331,16 @@ async def execute_single(
     assert preview.root_directory is not None  # guaranteed by parse_manifest
     root_directory = preview.root_directory
 
-    logger.info(f'Executing {len(actions)} setup actions async (dry_run={parameters.dry_run})')
+    logger.info('Executing %d setup action(s) async', len(actions))
 
     # Use pre-discovered plugins when available; otherwise discover.
     plugins_discovered_here = plugins is None
     if plugins is None:
-        if not parameters.dry_run:
-            invalidate_plugin_cache()
-        plugins = discover_all_plugins(use_cache=parameters.dry_run)
+        invalidate_plugin_cache()
+        plugins = discover_all_plugins()
 
     # Emit PLUGINS_DISCOVERED only when we performed discovery ourselves.
-    # Batch callers (execute_stream / run) pre-discover and emit the
+    # Batch callers pre-discover and emit the
     # event once for the entire batch, so we skip it here to avoid
     # sending duplicate events.
     if plugins_discovered_here:
@@ -1415,11 +1366,12 @@ async def execute_single(
         event_queue=event_queue,
         manifest_directory=root_directory,
         preview=preview,
+        manifest_index=manifest_index,
         runtime_context=seeded_context,
     )
 
     # Emit MANIFEST_LOADED — the fully-resolved preview.
-    state.emit(ManifestLoadedEvent(manifest=preview))
+    state.emit(ManifestLoadedEvent(manifest=preview, manifest_index=manifest_index))
 
     # Run all phases via the generalized phase loop.
     await run_phases(state)
@@ -1430,7 +1382,9 @@ async def execute_single(
 
     return SetupResults(
         actions=actions,
+        action_indices=preview.action_indices,
         results=state.results,
+        manifest_index=manifest_index,
         manifest_path=state.manifest_path,
         root_directory=state.manifest_directory,
         metadata=state.metadata,
@@ -1445,18 +1399,16 @@ async def execute_single(
 
 def group_actions_by_phase(
     actions: list[SetupAction],
-) -> dict[PluginKind | None, list[SetupAction]]:
+) -> dict[PluginKind, list[SetupAction]]:
     """Group actions into phase buckets keyed by `PluginKind`.
-
-    Post-sync commands (`kind is None`) are stored under the
-    `None` key.
 
     Returns:
         Dict mapping each phase to its action list.
     """
-    phases: dict[PluginKind | None, list[SetupAction]] = {k: [] for k in PHASE_ORDER}
+    phases: dict[PluginKind, list[SetupAction]] = {k: [] for k in PHASE_ORDER}
     for action in actions:
-        phases[action.kind].append(action)
+        if action.kind is not None:
+            phases[action.kind].append(action)
     return phases
 
 
@@ -1508,54 +1460,6 @@ async def _propagate_runtime(
         inject_runtime_path(executable)
 
         # Use only the first successfully resolved runtime
-        return (kind, executable)
-
-    return None
-
-
-async def _propagate_wsl_runtime(
-    distro: str,
-    runtime_actions: list[SetupAction],
-    plugins: DiscoveredPlugins,
-) -> tuple[str, Path] | None:
-    """Resolve an interpreter path inside a WSL distro.
-
-    Like :func:`_propagate_runtime` but wraps the ``RuntimeProvider``
-    with the appropriate transport for the target distro.  Does **not**
-    inject onto the host ``PATH`` since WSL paths are not valid on the
-    Windows host.
-
-    Returns:
-        A ``(kind, executable)`` tuple on success, or ``None``.
-    """
-    environments = plugins.environments
-
-    transport = wsl_transport_for(distro)
-
-    for action in runtime_actions:
-        if action.installer is None or action.package is None:
-            continue
-        env = environments.get(action.installer)
-        if env is None or not isinstance(env, RuntimeProvider):
-            continue
-
-        # Wrap with WSL transport if not running natively
-        if transport is not None:
-            env = cast(RuntimeProvider, env.with_transport(transport))
-
-        kind = cast(type[RuntimeProvider], type(env)).provided_runtime_kind()
-        tag = action.package.name
-        executable = await env.resolve_executable(tag)
-        if executable is None:
-            logger.debug(
-                'WSL RuntimeProvider %s could not resolve executable for tag %s in %s',
-                action.installer,
-                tag,
-                distro,
-            )
-            continue
-
-        logger.info('WSL runtime resolved for %s: %s -> %s', distro, tag, executable)
         return (kind, executable)
 
     return None
@@ -1647,7 +1551,7 @@ def skip_actions(
     message: str,
     event_queue: asyncio.Queue[ProgressEvent | None],
     *,
-    action_index_map: dict[int, int] | None = None,
+    action_ref_map: dict[int, ActionRef] | None = None,
 ) -> list[SetupActionResult]:
     """Skip a list of actions, emitting progress events and a warning for each.
 
@@ -1656,7 +1560,7 @@ def skip_actions(
         skip_reason: Machine-readable skip code.
         message: Human-readable skip detail.
         event_queue: Queue for progress events.
-        action_index_map: Optional id(action) → global index map.
+        action_ref_map: Optional id(action) → stable action ref map.
 
     Returns:
         List of skipped action results.
@@ -1672,15 +1576,9 @@ def skip_actions(
             message=message,
         )
         results.append(result)
-        idx = _action_index(action, action_index_map)
-        event_queue.put_nowait(ActionStartedEvent(action=action, action_index=idx))
-        event_queue.put_nowait(
-            ActionCompletedEvent(
-                action=action,
-                result=result,
-                action_index=idx,
-            )
-        )
+        ref = _action_ref(action, action_ref_map)
+        _emit_started(action, ref, event_queue)
+        _emit_completed(action, result, ref, event_queue)
     return results
 
 
@@ -1697,7 +1595,7 @@ async def _execute_project_sync_actions(
     event_queue: asyncio.Queue[ProgressEvent | None],
     *,
     runtime_context: RuntimeContext | None = None,
-    action_index_map: dict[int, int] | None = None,
+    action_ref_map: dict[int, ActionRef] | None = None,
 ) -> list[SetupActionResult]:
     """Execute PROJECT_SYNC actions sequentially.
 
@@ -1713,10 +1611,10 @@ async def _execute_project_sync_actions(
         project_sync_actions: The project sync actions.
         project_environments: Dict of project-environment plugins.
         manifest_directory: Directory containing the manifest file.
-        parameters: Setup parameters (dry-run, etc.).
+        parameters: Setup parameters.
         event_queue: Queue for progress events.
         runtime_context: Resolved runtime paths for this execution run.
-        action_index_map: Optional id(action) → global index map.
+        action_ref_map: Optional id(action) → stable action ref map.
 
     Returns:
         List of action results.
@@ -1724,26 +1622,21 @@ async def _execute_project_sync_actions(
     results: list[SetupActionResult] = []
 
     for action in project_sync_actions:
-        idx = _action_index(action, action_index_map)
-        event_queue.put_nowait(ActionStartedEvent(action=action, action_index=idx))
+        ref = _action_ref(action, action_ref_map)
+        _emit_started(action, ref, event_queue)
 
-        result = await _execute_project_sync(
-            action,
-            project_environments,
-            manifest_directory,
-            parameters,
-            event_queue=event_queue,
-            runtime_context=runtime_context,
-        )
+        with use_trace_context(_action_trace_context('execute', action, ref, operation='project_sync')):
+            result = await _execute_project_sync(
+                action,
+                project_environments,
+                manifest_directory,
+                parameters,
+                event_queue=event_queue,
+                runtime_context=runtime_context,
+            )
 
         results.append(result)
-        event_queue.put_nowait(
-            ActionCompletedEvent(
-                action=action,
-                result=result,
-                action_index=idx,
-            )
-        )
+        _emit_completed(action, result, ref, event_queue)
         if not result.success and parameters.fail_fast:
             logger.error(f'Project sync failed: {action.description} - {result.message}')
             break
@@ -1762,8 +1655,8 @@ async def _execute_project_sync(
 ) -> SetupActionResult:
     """Execute a single PROJECT_SYNC action.
 
-    The sync command is always run via ``stream_command`` so that
-    stdout/stderr lines are emitted as ``SUB_ACTION_PROGRESS``
+    The sync command is always run via ``run_command`` with progress so that
+    stdout/stderr lines are emitted as action progress
     events in real time.
 
     When `parameters.project_directory` is an explicit `Path`
@@ -1778,17 +1671,13 @@ async def _execute_project_sync(
         project_environments: Dict of project-environment plugins.
         manifest_directory: Directory containing the manifest file.
         parameters: Setup parameters.
-        event_queue: Queue for streaming progress events.
+        event_queue: Queue for progress events.
         runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
         The result of the sync operation.
     """
     proj_envs = project_environments or {}
-
-    # --- Per-action WSL distro routing ------------------------------------
-    if action.distro is not None and action.installer is not None and action.installer in proj_envs:
-        proj_envs = overlay_wsl_plugin(proj_envs, action.installer, action.distro)
 
     if action.installer is None or action.installer not in proj_envs:
         return SetupActionResult(
@@ -1828,23 +1717,24 @@ async def _execute_project_sync(
                 )
 
     try:
-        # Always stream — build the CLI args from the plugin and
-        # run them via stream_command for line-by-line output.
-        args = list(proj_env.sync_command(runtime_context=runtime_context))
-        if parameters.dry_run:
-            args.append('--dry-run')
+        # Always observe output: build the CLI steps from the plugin and
+        # run them via run_command for line-by-line progress.
+        plan = type(proj_env).command_plan(effective_dir, runtime_context=runtime_context)
+        effective_dir = plan.directory
+        steps = plan.steps or ([plan.argv] if plan.argv else [])
 
-        def _progress_cb(update: SubActionProgress) -> None:
-            event_queue.put_nowait(SubActionProgressEvent(action=action, sub_action=update))
-
-        progress = StreamProgress(
+        progress = CommandProgress(
             action=action,
-            callback=_progress_cb,
+            callback=_make_progress_callback(action, event_queue),
             phase='sync',
         )
 
-        cmd_result = await stream_command(args, progress=progress, cwd=effective_dir, timeout=300.0)
-        success = cmd_result.returncode == 0
+        success = True
+        for args in steps:
+            cmd_result = await run_command(args, progress=progress, cwd=effective_dir, timeout=300.0)
+            success = cmd_result.returncode == 0
+            if not success:
+                break
 
         if success:
             return SetupActionResult(
@@ -1873,7 +1763,7 @@ async def _execute_scm_actions(
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None],
     *,
-    action_index_map: dict[int, int] | None = None,
+    action_ref_map: dict[int, ActionRef] | None = None,
 ) -> list[SetupActionResult]:
     """Execute SCM_CLONE actions sequentially.
 
@@ -1884,9 +1774,9 @@ async def _execute_scm_actions(
         scm_actions: The SCM clone actions.
         scm_environments: Dict of SCM-environment plugins.
         working_dir: Working directory (manifest location).
-        parameters: Setup parameters (dry-run, etc.).
+        parameters: Setup parameters.
         event_queue: Queue for progress events.
-        action_index_map: Optional id(action) → global index map.
+        action_ref_map: Optional id(action) → stable action ref map.
 
     Returns:
         List of action results.
@@ -1894,25 +1784,20 @@ async def _execute_scm_actions(
     results: list[SetupActionResult] = []
 
     for action in scm_actions:
-        idx = _action_index(action, action_index_map)
-        event_queue.put_nowait(ActionStartedEvent(action=action, action_index=idx))
+        ref = _action_ref(action, action_ref_map)
+        _emit_started(action, ref, event_queue)
 
-        result = await _execute_scm_clone(
-            action,
-            scm_environments,
-            working_dir,
-            parameters,
-            event_queue=event_queue,
-        )
+        with use_trace_context(_action_trace_context('execute', action, ref, operation='scm')):
+            result = await _execute_scm_clone(
+                action,
+                scm_environments,
+                working_dir,
+                parameters,
+                event_queue=event_queue,
+            )
 
         results.append(result)
-        event_queue.put_nowait(
-            ActionCompletedEvent(
-                action=action,
-                result=result,
-                action_index=idx,
-            )
-        )
+        _emit_completed(action, result, ref, event_queue)
         if not result.success and not result.skipped and parameters.fail_fast:
             logger.error(f'SCM clone failed: {action.description} - {result.message}')
             break
@@ -1930,10 +1815,10 @@ async def _execute_scm_clone(
 ) -> SetupActionResult:
     """Execute a single SCM_CLONE action.
 
-    When the tool is ``git``, the clone is run via ``stream_command``
+    When the tool is ``git``, the clone is run via ``run_command`` with progress
     with ``--progress`` so that stderr progress lines
     (``Receiving objects: 42%``) are emitted as
-    ``SUB_ACTION_PROGRESS`` events in real time.  For other SCM
+    action progress events in real time.  For other SCM
     plugins the plugin's ``clone()`` method is called directly.
 
     Args:
@@ -1941,16 +1826,12 @@ async def _execute_scm_clone(
         scm_environments: Dict of SCM-environment plugins.
         working_dir: Working directory (manifest location).
         parameters: Setup parameters.
-        event_queue: Queue for streaming progress events.
+        event_queue: Queue for progress events.
 
     Returns:
         The result of the clone operation.
     """
     scm_envs = scm_environments or {}
-
-    # --- Per-action WSL distro routing ------------------------------------
-    if action.distro is not None and action.installer is not None and action.installer in scm_envs:
-        scm_envs = overlay_wsl_plugin(scm_envs, action.installer, action.distro)
 
     if action.installer is None or action.installer not in scm_envs:
         message = (
@@ -1984,28 +1865,17 @@ async def _execute_scm_clone(
     # Only MISSING reaches here — the repository needs cloning.
     logger.info("SCM clone needed: repository not found at '%s'", destination)
 
-    if parameters.dry_run:
-        return SetupActionResult(action=action, success=True, message=f"Would clone '{url}' into '{destination}'")
+    # Progress path for git — use --progress to get real-time
+    # progress on stderr ("Receiving objects: 42%").
+    progress = CommandProgress(
+        action=action,
+        callback=_make_progress_callback(action, event_queue),
+        phase='cloning',
+    )
 
     try:
         if scm_env.tool_name() == 'git':
-            # Streaming path for git — use --progress to get real-time
-            # progress on stderr ("Receiving objects: 42%").
-            def _progress_cb(update: SubActionProgress) -> None:
-                event_queue.put_nowait(
-                    SubActionProgressEvent(
-                        action=action,
-                        sub_action=update,
-                    )
-                )
-
-            progress = StreamProgress(
-                action=action,
-                callback=_progress_cb,
-                phase='cloning',
-            )
-
-            cmd_result = await stream_command(
+            cmd_result = await run_command(
                 ['git', 'clone', '--progress', url, str(destination)],
                 progress=progress,
                 timeout=600.0,
@@ -2014,10 +1884,10 @@ async def _execute_scm_clone(
         else:
             # Non-git SCM plugins — delegate to the plugin's clone()
             success = await scm_env.clone(url, destination, dry=False)
-
-        message = (
-            f"Cloned '{url}' via {action.installer}" if success else f"Clone failed for '{url}' via {action.installer}"
-        )
-        return SetupActionResult(action=action, success=success, message=message)
     except Exception as e:
         return SetupActionResult(action=action, success=False, message=str(e))
+
+    message = (
+        f"Cloned '{url}' via {action.installer}" if success else f"Clone failed for '{url}' via {action.installer}"
+    )
+    return SetupActionResult(action=action, success=success, message=message)

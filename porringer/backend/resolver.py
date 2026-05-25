@@ -1,4 +1,6 @@
-"""Resolves"""
+"""Backend helpers for resolver."""
+
+"""Resolves."""
 
 import logging
 

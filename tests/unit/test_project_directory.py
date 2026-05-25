@@ -1,104 +1,146 @@
+"""Helpers for test project directory."""
+
 """Tests for project_directory and SkipReason functionality."""
 
 import json
 import tempfile
+from asyncio import Queue
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from packaging.version import Version
 
 from porringer.api import API
-from porringer.core.schema import Ecosystem, PluginKind
+from porringer.backend.command.core.discovery import DiscoveredPlugins
+from porringer.backend.command.core.execution import _execute_project_sync
+from porringer.core.plugin_schema.project_environment import ProjectCommandPlan
+from porringer.core.schema import Distribution, Ecosystem, PluginKind, PluginParameters
 from porringer.schema import (
     BatchSetupResults,
+    InspectionStatus,
     SetupAction,
     SetupActionResult,
     SetupParameters,
     SetupResults,
     SkipReason,
 )
+from porringer.test.mock.project_environment import MockProjectEnvironment
+from porringer.utility.utility import CommandResult
+
+
+class _AvailableProjectEnvironment(MockProjectEnvironment):
+    """Available project plugin for project-directory tests."""
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return True
+
+
+class _MultiStepProjectEnvironment(_AvailableProjectEnvironment):
+    """Project plugin that plans multiple command steps."""
+
+    @classmethod
+    def command_plan(cls, search_from: Path, *, runtime_context=None) -> ProjectCommandPlan:
+        return ProjectCommandPlan(
+            directory=search_from,
+            argv=['mock-project', 'second'],
+            steps=[['mock-project', 'first'], ['mock-project', 'second']],
+        )
+
+
+def _project_plugins() -> DiscoveredPlugins:
+    """Return a discovered plugin set with one available project plugin."""
+    plugin = _AvailableProjectEnvironment(PluginParameters(distribution=Distribution(version=Version('0.0.0'))))
+    return DiscoveredPlugins(
+        environments={},
+        project_environments={'mock-project': plugin},
+        scm_environments={},
+    )
 
 
 @pytest.mark.mock_packages
 class TestProjectDirectorySkip:
-    """Tests for project_directory=False skipping PROJECT_SYNC and RUN_COMMAND actions."""
+    """Tests for project_directory=False skipping project-sync actions."""
 
     @staticmethod
-    async def test_false_skips_project_sync_not_post_sync(session_api: API) -> None:
-        """Post-sync commands still execute when project_directory is False.
-
-        Only PROJECT_SYNC actions are skipped — `post_sync` commands are
-        independent of the project directory setting.
-        """
+    async def test_false_skips_project_sync_when_present(session_api: API) -> None:
+        """Relevant project-sync actions are skipped when project_directory is False."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
+            root = Path(tmpdir)
+            (root / 'pyproject.toml').write_text('[project]\nname = "demo"\n', encoding='utf-8')
+            manifest_path = root / 'porringer.json'
             manifest_data = {
                 'version': '1',
                 'packages': {'python': ['requests']},
-                'post_sync': ['echo hello'],
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
-            results = await session_api.sync.run(params)
+            params = SetupParameters(paths=root, project_directory=False)
+            report = await session_api.sync.inspect(params, plugins=_project_plugins())
 
-            # Should show all actions (1 package + 1 command)
-            expected_action_count = 2
-            assert results.total_actions == expected_action_count
-
-            # The RUN_COMMAND should NOT be skipped — post_sync is decoupled
-            command_skips = [r for r in results.skips if r.action.kind is None]
-            assert len(command_skips) == 0
-
-            # The RUN_COMMAND should succeed (dry-run always succeeds)
-            command_results = [r for mr in results.manifest_results for r in mr.results if r.action.kind is None]
-            assert len(command_results) == 1
-            assert command_results[0].success is True
+            project_actions = [
+                a for m in report.manifests for a in m.actions if a.action.kind == PluginKind.PROJECT.value
+            ]
+            assert project_actions
+            assert all(action.status == InspectionStatus.SKIPPED for action in project_actions)
 
     @staticmethod
     async def test_false_keeps_package_actions(session_api: API) -> None:
         """Package actions still execute when project_directory is False."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
+            root = Path(tmpdir)
+            (root / 'pyproject.toml').write_text('[project]\nname = "demo"\n', encoding='utf-8')
+            manifest_path = root / 'porringer.json'
             manifest_data = {
                 'version': '1',
                 'packages': {'python': ['requests']},
-                'post_sync': ['echo hello'],
             }
             manifest_path.write_text(json.dumps(manifest_data))
 
-            params = SetupParameters(paths=Path(tmpdir), project_directory=False, dry_run=True)
-            results = await session_api.sync.run(params)
+            params = SetupParameters(paths=root, project_directory=False)
+            report = await session_api.sync.inspect(params, plugins=_project_plugins())
 
-            # Package action should not be skipped due to project_directory
             package_results = [
-                r for mr in results.manifest_results for r in mr.results if r.action.kind == PluginKind.PACKAGE
+                a for mr in report.manifests for a in mr.actions if a.action.kind == PluginKind.PACKAGE.value
             ]
             assert len(package_results) == 1
-            project_skips = [
-                r for r in package_results if r.skipped and r.skip_reason == SkipReason.NO_PROJECT_DIRECTORY
-            ]
+            project_skips = [r for r in package_results if r.skip_reason == SkipReason.NO_PROJECT_DIRECTORY.name]
             assert len(project_skips) == 0
 
     @staticmethod
-    async def test_none_runs_post_sync(session_api: API) -> None:
-        """Post-sync commands execute normally when project_directory is None (default)."""
+    async def test_project_sync_executes_all_command_plan_steps() -> None:
+        """Project sync executes each plugin-planned command in order."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {
-                'version': '1',
-                'packages': {'python': ['requests']},
-                'post_sync': ['echo hello'],
-            }
-            manifest_path.write_text(json.dumps(manifest_data))
+            root = Path(tmpdir)
+            (root / 'pyproject.toml').touch()
+            action = SetupAction(
+                description='Sync project via mock-project',
+                kind=PluginKind.PROJECT,
+                ecosystem=Ecosystem('python'),
+                installer='mock-project',
+            )
+            plugin = _MultiStepProjectEnvironment(PluginParameters(distribution=Distribution(version=Version('0.0.0'))))
+            event_queue = Queue()
 
-            params = SetupParameters(paths=Path(tmpdir), dry_run=True)
-            assert params.project_directory is None
+            with patch(
+                'porringer.backend.command.core.execution.run_command',
+                new_callable=AsyncMock,
+                return_value=CommandResult(returncode=0, stdout='', stderr=''),
+            ) as mock_run:
+                result = await _execute_project_sync(
+                    action,
+                    {'mock-project': plugin},
+                    root,
+                    SetupParameters(),
+                    event_queue=event_queue,
+                )
 
-            results = await session_api.sync.run(params)
-
-            # The RUN_COMMAND should NOT be in skips
-            command_skips = [r for r in results.skips if r.action.kind is None]
-            assert len(command_skips) == 0
+            assert result.success is True
+            assert [call.args[0] for call in mock_run.await_args_list] == [
+                ['mock-project', 'first'],
+                ['mock-project', 'second'],
+            ]
 
 
 class TestBatchSetupResultsSkips:

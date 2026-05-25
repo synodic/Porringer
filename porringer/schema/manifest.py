@@ -1,3 +1,5 @@
+"""Data models and schemas for manifest."""
+
 """Manifest schemas."""
 
 from collections.abc import Iterator
@@ -12,6 +14,13 @@ from porringer.core.schema import Ecosystem, PackageRef, PlatformScoped, PluginK
 
 if TYPE_CHECKING:
     from porringer.utility.exception import ManifestValidationCode
+
+
+MANIFEST_SCHEMA_URL = 'https://synodic.github.io/porringer/schema.json'
+"""Canonical published URL (``$id``) for the porringer manifest JSON Schema."""
+
+MANIFEST_SCHEMA_DIALECT = 'https://json-schema.org/draft/2020-12/schema'
+"""JSON Schema dialect (``$schema``) the generated manifest schema conforms to."""
 
 
 class ManifestDiagnosticSeverity(Enum):
@@ -130,51 +139,14 @@ class PackageSpec(PlatformScoped):
         return data
 
 
-class WslDistroManifest(PorringerModel):
-    """Package/runtime/project/scm sections for a single WSL2 distribution.
-
-    Mirrors the kind-grouped sections of :class:`SetupManifest` so
-    users can declare per-distro packages using the same syntax::
-
-        "wsl2": {
-            "Ubuntu-22.04": {
-                "packages": {"apt": ["curl", "build-essential"]},
-                "runtimes": {"python": ["3.12"]}
-            }
-        }
-    """
-
-    packages: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='Packages to install per ecosystem'
-    )
-    tools: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='CLI tools to install per ecosystem'
-    )
-    projects: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='Project sync targets per ecosystem'
-    )
-    runtimes: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='Language runtimes to install per ecosystem'
-    )
-    scm: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='SCM repositories to clone per ecosystem'
-    )
-    preferences: dict[Ecosystem, str] = Field(default_factory=dict, description='Preferred installer per ecosystem')
-
-    def iter_sections(self) -> Iterator[tuple[PluginKind, Ecosystem, list[PackageSpec]]]:
-        """Yield `(kind, ecosystem, packages)` for every non-empty section."""
-        for kind in PluginKind:
-            section: dict[Ecosystem, list[PackageSpec]] = getattr(self, kind.value, {})
-            for ecosystem, packages in section.items():
-                yield kind, ecosystem, packages
-
-
 class SetupManifest(PorringerModel):
     """The setup manifest schema for .porringer files or pyproject.toml [tool.porringer].
 
     Manifest entries are grouped by **kind** (`packages`, `tools`,
-    `projects`, `runtimes`), each containing a dict keyed by
-    **ecosystem** (e.g. `"python"`, `"node"`, `"system"`).
+    `runtimes`), each containing a dict keyed by **ecosystem**
+    (e.g. `"python"`, `"node"`, `"system"`). Project sync is now
+    resolved implicitly from relevant project plugins based on the
+    repository contents.
 
     Ecosystem names are free-form strings declared by plugins — the core
     schema does not enumerate them.  A third-party Cargo plugin declaring
@@ -193,9 +165,6 @@ class SetupManifest(PorringerModel):
     tools: dict[Ecosystem, list[PackageSpec]] = Field(
         default_factory=dict, description='CLI tools to install per ecosystem (e.g. {"python": ["pdm"]})'
     )
-    projects: dict[Ecosystem, list[PackageSpec]] = Field(
-        default_factory=dict, description='Project sync targets per ecosystem (e.g. {"python": []})'
-    )
     runtimes: dict[Ecosystem, list[PackageSpec]] = Field(
         default_factory=dict, description='Language runtimes to install per ecosystem (e.g. {"python": ["3.12"]})'
     )
@@ -206,18 +175,6 @@ class SetupManifest(PorringerModel):
     preferences: dict[Ecosystem, str] = Field(
         default_factory=dict,
         description='Preferred installer per ecosystem (e.g. {"python": "uv"})',
-    )
-    extends: list[str] = Field(
-        default_factory=list,
-        description='Paths to other manifests whose state is merged (base layers)',
-    )
-    post_sync: list[str] = Field(default_factory=list, description='Commands to run after state synchronisation')
-    wsl2: dict[str, WslDistroManifest] = Field(
-        default_factory=dict,
-        description=(
-            'Per-distro WSL2 package/runtime/project/scm sections. '
-            'Keys are WSL distribution names (e.g. "Ubuntu-22.04").'
-        ),
     )
 
     @model_validator(mode='before')
@@ -244,19 +201,6 @@ class SetupManifest(PorringerModel):
             section: dict[Ecosystem, list[PackageSpec]] = getattr(self, kind.value, {})
             for ecosystem, packages in section.items():
                 yield kind, ecosystem, packages
-
-    def iter_wsl_sections(self) -> Iterator[tuple[str, PluginKind, Ecosystem, list[PackageSpec]]]:
-        """Yield `(distro, kind, ecosystem, packages)` for every non-empty WSL2 section.
-
-        Similar to :meth:`iter_sections` but includes the WSL distribution
-        name as the first element so the action builder can create
-        transport-aware plugin instances.
-        """
-        for distro, distro_manifest in self.wsl2.items():
-            for kind in PluginKind:
-                section: dict[Ecosystem, list[PackageSpec]] = getattr(distro_manifest, kind.value, {})
-                for ecosystem, packages in section.items():
-                    yield distro, kind, ecosystem, packages
 
 
 @dataclass(slots=True)

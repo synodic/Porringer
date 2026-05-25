@@ -1,4 +1,6 @@
-"""Plugin implementation"""
+"""Plugin integration for plugin."""
+
+"""Plugin implementation."""
 
 from pathlib import Path
 from typing import override

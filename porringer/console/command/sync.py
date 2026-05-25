@@ -1,9 +1,21 @@
-"""Porringer CLI sync command module."""
+"""CLI command implementation for sync."""
+
+"""Shared manifest execution helpers for Porringer CLI commands.
+
+The user-facing entry point is ``porringer install``; this module keeps the
+progress tracking, observable execution, and result rendering helpers it
+reuses.
+"""
 
 import asyncio
+import contextlib
+import json
+import tempfile
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Any
+from uuid import uuid4
 
 import typer
 from rich.panel import Panel
@@ -13,6 +25,9 @@ from porringer.api import API
 from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
     ActionCompletedEvent,
+    ActionProgress,
+    ActionProgressEvent,
+    ActionRef,
     ActionStartedEvent,
     BatchSetupResults,
     ManifestFailedEvent,
@@ -21,17 +36,11 @@ from porringer.schema import (
     SetupAction,
     SetupActionResult,
     SetupParameters,
-    SetupResults,
-    SubActionProgress,
-    SubActionProgressEvent,
     SyncStrategy,
+    progress_event_snapshot,
 )
+from porringer.utility.observability import batch_envelope, replay_record
 
-app = typer.Typer()
-
-# Exit codes
-EXIT_SUCCESS = 0
-EXIT_FAILURE = 1
 DEFAULT_TIMEOUT = 300
 
 # Arrow prefix for command display
@@ -40,41 +49,12 @@ ARROW = '→'
 
 @dataclass(slots=True)
 class _ProgressState:
-    """Execution progress state for streaming updates."""
+    """Execution progress state for event updates."""
 
     completed: int = 0
+    total_actions: int = 0
     active_tasks: dict[str, TaskID] = field(default_factory=dict)
-    collected_results: list[SetupActionResult] = field(default_factory=list)
-    manifests: list[SetupResults] = field(default_factory=list)
-    failed_paths: list[tuple[Path, str]] = field(default_factory=list)
     overall_task: TaskID | None = None
-
-
-@dataclass(slots=True)
-class _SyncOptions:
-    """Bundled options for manifest sync execution."""
-
-    path: Path | None = None
-    all_cached: bool = False
-    dry_run: bool = False
-    timeout: int = DEFAULT_TIMEOUT
-    fail_fast: bool = True
-    strategy: SyncStrategy = SyncStrategy.MINIMAL
-    project_directory: Path | None = None
-    plugins: set[str] | None = None
-    include_packages: set[str] | None = None
-
-
-def _create_api(configuration: ConsoleConfiguration) -> API:
-    """Create and return API instance.
-
-    Args:
-        configuration: CLI configuration.
-
-    Returns:
-        Initialized API instance.
-    """
-    return API(configuration.local_configuration)
 
 
 def _progress_label(strategy: SyncStrategy) -> str:
@@ -91,32 +71,37 @@ def _action_description(action: SetupAction) -> str:
     return str(action.package) if action.package else action.description[:30]
 
 
+def _action_event_key(action: SetupAction, action_ref: ActionRef | None) -> str:
+    """Return the stable progress-task key for an action event."""
+    if action_ref is not None:
+        return action_ref.action_id
+    return f'legacy:{id(action)}'
+
+
 @dataclass(slots=True)
 class _ProgressTracker:
-    """Tracks progress during streaming execution, reducing parameter passing."""
+    """Tracks progress during evented execution, reducing parameter passing."""
 
     progress: Progress
     setup_params: SetupParameters
     state: _ProgressState
 
-    def handle_action_started(self, action_desc: str, total_actions: int) -> None:
+    def handle_action_started(self, action_key: str, action_desc: str) -> None:
         """Record that an action has started."""
-        if total_actions > 0 and not self.setup_params.dry_run:
+        if self.state.total_actions > 0:
             task_id = self.progress.add_task(f'  {action_desc}', total=1)
-            self.state.active_tasks[action_desc] = task_id
+            self.state.active_tasks[action_key] = task_id
 
     def handle_action_completed(
         self,
+        action_key: str,
         action_desc: str,
+        action_ref: ActionRef | None,
         result: SetupActionResult | None,
-        total_actions: int,
     ) -> None:
         """Record that an action has completed and update the progress bar."""
-        if result:
-            self.state.collected_results.append(result)
-
-        if action_desc in self.state.active_tasks:
-            task_id = self.state.active_tasks.pop(action_desc)
+        if action_key in self.state.active_tasks:
+            task_id = self.state.active_tasks.pop(action_key)
             if result and result.success:
                 if result.skipped:
                     self.progress.update(task_id, description=f'  [dim]{action_desc} (skipped)[/dim]', completed=1)
@@ -127,66 +112,59 @@ class _ProgressTracker:
 
         self.state.completed += 1
         overall_task = self.state.overall_task
-        if total_actions > 0 and not self.setup_params.dry_run and overall_task is not None:
+        if self.state.total_actions > 0 and overall_task is not None:
             self.progress.update(overall_task, completed=self.state.completed)
 
-    def handle_sub_action_progress(self, action_desc: str, sub: SubActionProgress | None) -> None:
-        """Update the progress bar with sub-action detail."""
-        if sub is None or action_desc not in self.state.active_tasks:
+    def handle_action_progress(self, action_key: str, action_desc: str, progress_update: ActionProgress | None) -> None:
+        """Update the progress bar with action progress detail."""
+        if progress_update is None or action_key not in self.state.active_tasks:
             return
 
-        task_id = self.state.active_tasks[action_desc]
-        phase = sub.phase
+        task_id = self.state.active_tasks[action_key]
+        phase = progress_update.phase
 
-        desc = f'  {action_desc} [{phase}] {sub.message}' if sub.message else f'  {action_desc} [{phase}]'
+        desc = (
+            f'  {action_desc} [{phase}] {progress_update.message}'
+            if progress_update.message
+            else f'  {action_desc} [{phase}]'
+        )
 
         max_desc_len = 80
         if len(desc) > max_desc_len:
             desc = desc[: max_desc_len - 3] + '...'
 
-        if sub.progress is not None:
-            self.progress.update(task_id, description=desc, completed=sub.progress, total=1.0)
+        if progress_update.progress is not None:
+            self.progress.update(task_id, description=desc, completed=progress_update.progress, total=1.0)
         else:
             self.progress.update(task_id, description=desc)
 
-    def handle_progress_event(self, event: ProgressEvent, total_actions: int) -> None:
+    def handle_progress_event(self, event: ProgressEvent) -> None:
         """Dispatch a progress event to the appropriate handler."""
+        if isinstance(event, ManifestLoadedEvent):
+            self.state.total_actions += len(event.manifest.actions)
+            if self.state.overall_task is not None:
+                self.progress.update(self.state.overall_task, total=self.state.total_actions)
+            elif self.state.total_actions > 0:
+                self.state.overall_task = self.progress.add_task(
+                    _progress_label(self.setup_params.strategy), total=self.state.total_actions
+                )
+            return
+        if isinstance(event, ManifestFailedEvent):
+            return
         if isinstance(event, ActionStartedEvent):
+            action_key = _action_event_key(event.action, event.action_ref)
             action_desc = _action_description(event.action)
-            self.handle_action_started(action_desc, total_actions)
+            self.handle_action_started(action_key, action_desc)
             return
         if isinstance(event, ActionCompletedEvent):
+            action_key = _action_event_key(event.action, event.action_ref)
             action_desc = _action_description(event.action)
-            self.handle_action_completed(action_desc, event.result, total_actions)
+            self.handle_action_completed(action_key, action_desc, event.action_ref, event.result)
             return
-        if isinstance(event, SubActionProgressEvent):
+        if isinstance(event, ActionProgressEvent):
+            action_key = _action_event_key(event.action, event.action_ref)
             action_desc = _action_description(event.action)
-            self.handle_sub_action_progress(action_desc, event.sub_action)
-
-
-async def _run_stream_with_progress(api: API, tracker: _ProgressTracker) -> None:
-    """Stream sync events and update progress display.
-
-    Args:
-        api: The API instance.
-        tracker: Progress tracker with state and display.
-    """
-    async for event in api.sync.execute_stream(tracker.setup_params):
-        if isinstance(event, ManifestLoadedEvent):
-            tracker.state.manifests.append(event.manifest)
-            total = sum(len(m.actions) for m in tracker.state.manifests)
-            if tracker.state.overall_task is not None:
-                tracker.progress.update(tracker.state.overall_task, total=total)
-            elif total > 0 and not tracker.setup_params.dry_run:
-                tracker.state.overall_task = tracker.progress.add_task(
-                    _progress_label(tracker.setup_params.strategy), total=total
-                )
-            continue
-        if isinstance(event, ManifestFailedEvent):
-            tracker.state.failed_paths.append(event.failed_path)
-            continue
-        total_actions = sum(len(m.actions) for m in tracker.state.manifests)
-        tracker.handle_progress_event(event, total_actions)
+            self.handle_action_progress(action_key, action_desc, event.progress)
 
 
 def _format_cli_command(result: SetupActionResult) -> str:
@@ -207,7 +185,6 @@ def _format_cli_command(result: SetupActionResult) -> str:
 def _display_summary(
     configuration: ConsoleConfiguration,
     results: BatchSetupResults,
-    dry_run: bool,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
 ) -> None:
     """Display summary panel.
@@ -215,10 +192,9 @@ def _display_summary(
     Args:
         configuration: CLI configuration with console.
         results: Batch execution results.
-        dry_run: Whether this was a dry run.
         strategy: The sync strategy.
     """
-    configuration.console.print()
+    configuration.output.blank()
 
     # Count results by category
     package_results = [r for mr in results.manifest_results for r in mr.results]
@@ -226,32 +202,24 @@ def _display_summary(
     succeeded = sum(1 for r in package_results if r.success and not r.skipped)
     skipped = sum(1 for r in package_results if r.success and r.skipped)
     failed = sum(1 for r in package_results if not r.success)
-    total = len(package_results)
 
-    if dry_run:
-        configuration.console.print(
-            Panel(
-                f'[dim]Dry run complete.[/dim] {total} action(s) would be executed.',
-                border_style='dim',
-            )
-        )
-    elif results.success:
+    if results.success:
         skip_msg = f', {skipped} skipped' if skipped else ''
         # Use strategy to determine the verb
         detail = (
             f'{succeeded} upgraded' if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT} else f'{succeeded} synced'
         )
-        configuration.console.print(
+        configuration.output.print(
             Panel(
-                f'[green]Complete![/green] {detail}{skip_msg}.',
+                f'[success]Complete![/success] {detail}{skip_msg}.',
                 border_style='green',
             )
         )
     else:
         skip_msg = f', {skipped} skipped' if skipped else ''
-        configuration.console.print(
+        configuration.output.print(
             Panel(
-                f'[red]Failed![/red] {succeeded} succeeded{skip_msg}, {failed} failed.',
+                f'[error]Failed![/error] {succeeded} succeeded{skip_msg}, {failed} failed.',
                 border_style='red',
             )
         )
@@ -260,7 +228,6 @@ def _display_summary(
 def _display_results(
     configuration: ConsoleConfiguration,
     results: BatchSetupResults,
-    dry_run: bool,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
 ) -> None:
     """Display execution results with arrow-prefixed commands.
@@ -268,11 +235,10 @@ def _display_results(
     Args:
         configuration: CLI configuration with console.
         results: Batch execution results.
-        dry_run: Whether this was a dry run.
         strategy: The sync strategy.
     """
     for manifest_result in results.manifest_results:
-        configuration.console.print(f'\n[bold]Manifest:[/bold] {manifest_result.manifest_path}')
+        configuration.output.print(f'\n[heading]Manifest:[/heading] {manifest_result.manifest_path}')
 
         displayed_count = 0
         for result in manifest_result.results:
@@ -281,103 +247,100 @@ def _display_results(
 
             if result.skipped and result.skip_reason:
                 # Show skipped packages with reason (e.g., already installed)
-                configuration.console.print(f'  [dim]{ARROW} {command_str}[/dim]')
+                configuration.output.print(f'  [muted]{ARROW} {command_str}[/muted]')
                 if result.message:
-                    configuration.console.print(f'    [dim italic]{result.message}[/dim italic]')
+                    configuration.output.print(f'    [detail]{result.message}[/detail]')
             elif result.success:
-                if dry_run:
-                    configuration.console.print(f'  [dim]{ARROW}[/dim] {command_str}')
-                else:
-                    configuration.console.print(f'  [green]{ARROW}[/green] {command_str}')
+                configuration.output.print(f'  [success]{ARROW}[/success] {command_str}')
             else:
-                configuration.console.print(f'  [red]{ARROW}[/red] {command_str}')
+                configuration.output.print(f'  [error]{ARROW}[/error] {command_str}')
                 if result.message:
-                    configuration.console.print(f'    [dim]{result.message}[/dim]')
+                    configuration.output.print(f'    [muted]{result.message}[/muted]')
 
         if displayed_count == 0:
-            configuration.console.print('  [dim]No actions to perform[/dim]')
+            configuration.output.print('  [muted]No actions to perform[/muted]')
 
     for path, error in results.failed_paths:
-        configuration.console.print(f'\n[red]Failed:[/red] {path}')
-        configuration.console.print(f'  [dim]{error}[/dim]')
+        configuration.output.print(f'\n[error]Failed:[/error] {path}')
+        configuration.output.print(f'  [muted]{error}[/muted]')
 
-    _display_summary(configuration, results, dry_run, strategy)
+    _display_summary(configuration, results, strategy)
 
 
-def _handle_manifest(configuration: ConsoleConfiguration, options: _SyncOptions) -> None:
-    """Handle manifest install execution.
+def _dump_json_line(payload: dict) -> None:
+    """Emit one compact JSON line for machine readers."""
+    typer.echo(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
 
-    Args:
-        configuration: CLI configuration.
-        options: Bundled sync options.
 
-    Raises:
-        typer.Exit: On error.
-    """
-    api = _create_api(configuration)
-
-    # Determine what paths to use
-    if options.all_cached:
-        setup_params = SetupParameters(
-            paths=None,
-            project_directory=options.project_directory,
-            timeout=options.timeout,
-            fail_fast=options.fail_fast,
-            dry_run=options.dry_run,
-            strategy=options.strategy,
-            plugins=options.plugins,
-            include_packages=options.include_packages,
-        )
-    elif options.path:
-        if not options.path.exists():
-            configuration.console.print(f'[red]Error:[/red] Path does not exist: {options.path}')
-            raise typer.Exit(EXIT_FAILURE)
-        resolved_path = options.path.resolve()
-        setup_params = SetupParameters(
-            paths=resolved_path,
-            project_directory=options.project_directory,
-            timeout=options.timeout,
-            fail_fast=options.fail_fast,
-            dry_run=options.dry_run,
-            strategy=options.strategy,
-            plugins=options.plugins,
-            include_packages=options.include_packages,
-        )
-    else:
-        # Default to current directory
-        setup_params = SetupParameters(
-            paths=Path('.').resolve(),
-            project_directory=options.project_directory,
-            timeout=options.timeout,
-            fail_fast=options.fail_fast,
-            dry_run=options.dry_run,
-            strategy=options.strategy,
-            plugins=options.plugins,
-            include_packages=options.include_packages,
-        )
-
-    # Always use the streaming progress display — the Rich bar is
-    # automatically disabled for dry-runs via ``disable=setup_params.dry_run``.
+def _write_replay_record(record_path: Path, payload: dict[str, Any]) -> None:
+    """Write a replay record atomically within the destination directory."""
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
     try:
-        execute_results = _execute_with_progress(configuration, api, setup_params)
-    except ValueError as e:
-        configuration.console.print(f'[red]Error:[/red] {e}')
-        raise typer.Exit(EXIT_FAILURE) from e
+        with tempfile.NamedTemporaryFile(
+            'w',
+            encoding='utf-8',
+            dir=record_path.parent,
+            prefix=f'.{record_path.name}.',
+            suffix='.tmp',
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            json.dump(payload, temporary_file, indent=2)
+        temporary_path.replace(record_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            with contextlib.suppress(OSError):
+                temporary_path.unlink()
 
-    # Fast path: all manifests failed, no actions at all
-    if execute_results.failed_paths and execute_results.total_actions == 0:
-        for _path, error in execute_results.failed_paths:
-            typer.echo(f'Error: {error}', err=True)
-        raise typer.Exit(EXIT_FAILURE)
 
-    if execute_results.total_actions == 0:
-        configuration.console.print('[yellow]No actions to execute[/yellow]')
-        return
+def _execute_observable(
+    setup_params: SetupParameters,
+    *,
+    api: API,
+    emit_jsonl: bool,
+    record_path: Path | None,
+) -> BatchSetupResults:
+    """Execute setup while optionally emitting JSONL and a replay record."""
+    correlation_id = str(uuid4())
+    started_at = datetime.now(UTC)
+    event_payloads: list[dict] = []
 
-    _display_results(configuration, execute_results, options.dry_run, options.strategy)
+    def _on_event(event: ProgressEvent) -> None:
+        snapshot = progress_event_snapshot(event, correlation_id=correlation_id)
+        payload = snapshot.model_dump(mode='json')
+        event_payloads.append(payload)
+        if emit_jsonl:
+            _dump_json_line(payload)
 
-    if not execute_results.success:
-        raise typer.Exit(EXIT_FAILURE)
+    report = asyncio.run(api.sync.run(setup_params, on_event=_on_event))
+    batch = report.results
+    ended_at = datetime.now(UTC)
+    envelope = batch_envelope(
+        batch,
+        operation='sync.run',
+        correlation_id=correlation_id,
+        started_at=started_at,
+        ended_at=ended_at,
+    )
+
+    if emit_jsonl:
+        _dump_json_line(envelope.model_dump(mode='json'))
+
+    if record_path is not None:
+        record = replay_record(
+            operation='sync.run',
+            correlation_id=correlation_id,
+            parameters=setup_params,
+            events=event_payloads,
+            result=envelope,
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+        _write_replay_record(record_path, record.model_dump(mode='json'))
+
+    return batch
 
 
 def _execute_with_progress(
@@ -387,10 +350,9 @@ def _execute_with_progress(
 ) -> BatchSetupResults:
     """Execute installation with progress display.
 
-    Uses `execute_stream` to receive `ProgressEvent` items and updates
-    a Rich progress bar accordingly.  Manifests are discovered via
-    `MANIFEST_LOADED` events emitted by the stream — no separate preview
-    step is required.
+    Uses `api.sync.run(..., on_event=...)` to receive `ProgressEvent`
+    items and update a Rich progress bar. Manifests are discovered via
+    `MANIFEST_LOADED` events, so no separate preview step is required.
 
     Args:
         configuration: CLI configuration with console.
@@ -410,125 +372,6 @@ def _execute_with_progress(
         TextColumn('({task.completed}/{task.total})'),
         console=configuration.console,
         transient=True,
-        disable=setup_params.dry_run,
     ) as progress:
         tracker = _ProgressTracker(progress=progress, setup_params=setup_params, state=state)
-        asyncio.run(_run_stream_with_progress(api, tracker))
-
-    # Build BatchSetupResults from collected events
-    # Partition results by manifest using action identity
-    manifest_action_sets = [set(id(a) for a in m.actions) for m in state.manifests]
-    manifest_results: list[SetupResults] = []
-
-    for preview, action_ids in zip(state.manifests, manifest_action_sets, strict=False):
-        mr_results = [r for r in state.collected_results if id(r.action) in action_ids]
-        sr = SetupResults(
-            actions=preview.actions,
-            results=mr_results,
-            manifest_path=preview.manifest_path,
-            root_directory=preview.root_directory,
-            metadata=preview.metadata,
-        )
-        manifest_results.append(sr)
-
-    return BatchSetupResults(manifest_results=manifest_results, failed_paths=state.failed_paths)
-
-
-@app.callback(invoke_without_command=True)
-def sync_default(
-    context: typer.Context,
-    *,
-    path: Annotated[
-        Path | None,
-        typer.Option(
-            '--path',
-            '-p',
-            help='Path to manifest file (porringer.json) or directory containing one',
-        ),
-    ] = None,
-    project_dir: Annotated[
-        Path | None,
-        typer.Option(
-            '--project-dir',
-            '-d',
-            help='Working directory for project-sync and post-sync actions (inferred from --path by default)',
-        ),
-    ] = None,
-    all_cached: Annotated[
-        bool,
-        typer.Option('--all', '-a', help='Run on all cached directories'),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option('--dry-run', '-n', help='Preview actions without executing them'),
-    ] = False,
-    timeout: Annotated[
-        int,
-        typer.Option('--timeout', '-t', help='Timeout in seconds for post-sync commands'),
-    ] = DEFAULT_TIMEOUT,
-    fail_fast: Annotated[
-        bool,
-        typer.Option('--fail-fast/--no-fail-fast', help='Stop on first error'),
-    ] = True,
-    strategy: Annotated[
-        str,
-        typer.Option(
-            '--strategy',
-            '-s',
-            help='Sync strategy: minimal (default), latest, or exact',
-        ),
-    ] = 'minimal',
-    plugin: Annotated[
-        list[str] | None,
-        typer.Option(
-            '--plugin',
-            help='Only include actions from these plugins (repeatable). Omit to include all.',
-        ),
-    ] = None,
-) -> None:
-    """Synchronise the local environment with a manifest.
-
-    Reads the manifest from the specified path (or current directory) and
-    installs or upgrades packages according to the chosen strategy.
-
-    When --project-dir is omitted, project-sync and post-sync commands run in
-    the manifest's parent directory.  Pass --project-dir explicitly to override,
-    or use the API with `project_directory=False` to skip project backends.
-
-    Strategies:
-      minimal — Install packages that aren't already present (default).
-      latest  — Upgrade all packages; fall back to install if not present.
-      exact   — Check each package; upgrade if installed, install if not.
-
-    Use --dry-run to preview what would be executed without making changes.
-    Use --all to run on all cached directories at once.
-
-    Examples:
-        porringer sync                                  # Sync current directory
-        porringer sync --strategy latest --all          # Upgrade all cached manifests
-        porringer sync --strategy exact --path ./x      # Ensure exact in directory
-        porringer sync --dry-run                        # Preview without executing
-        porringer sync --path m.json --project-dir ./p  # Separate manifest & project
-    """
-    configuration = context.ensure_object(ConsoleConfiguration)
-
-    # Parse strategy string to enum
-    strategy_map = {'minimal': SyncStrategy.MINIMAL, 'latest': SyncStrategy.LATEST, 'exact': SyncStrategy.EXACT}
-    sync_strategy = strategy_map.get(strategy.lower())
-    if sync_strategy is None:
-        configuration.console.print(f"[red]Error:[/red] Invalid strategy '{strategy}'. Use: minimal, latest, or exact")
-        raise typer.Exit(EXIT_FAILURE)
-
-    _handle_manifest(
-        configuration,
-        _SyncOptions(
-            path=path,
-            all_cached=all_cached,
-            dry_run=dry_run,
-            timeout=timeout,
-            fail_fast=fail_fast,
-            strategy=sync_strategy,
-            project_directory=project_dir.resolve() if project_dir else None,
-            plugins=set(plugin) if plugin else None,
-        ),
-    )
+        return asyncio.run(api.sync.run(setup_params, on_event=tracker.handle_progress_event)).results

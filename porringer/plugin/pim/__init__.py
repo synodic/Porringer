@@ -1,3 +1,5 @@
+"""Public package exports for the plugin.pim module."""
+
 """Python Install Manager (pim) plugin package for Porringer.
 
 This package contains the implementation of the Python Install Manager environment plugin,

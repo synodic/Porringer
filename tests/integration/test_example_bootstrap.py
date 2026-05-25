@@ -1,8 +1,10 @@
+"""Helpers for test example bootstrap."""
+
 """Bootstrap example tests.
 
 Validates that the `examples/python-bootstrap/porringer.json` manifest
 produces the correct phased action plan, including deferred tool/runtime
-resolution and post-sync commands.
+resolution and implicit project sync.
 
 Runtime and tool actions may have `installer=None` (deferred) when
 the backing CLI tool is not on PATH — this is expected and correct.
@@ -12,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from porringer.backend.command.sync import SyncCommands
+from porringer.backend.command.core.action_builder import parse_manifest
 from porringer.core.schema import PluginKind
 from porringer.schema import SetupResults
 
@@ -31,7 +33,7 @@ class TestBootstrapPreview:
         Class-scoped: the manifest is parsed once and shared across
         every test in this class (all tests are read-only).
         """
-        return SyncCommands.parse_manifest(_BOOTSTRAP_DIR)
+        return parse_manifest(_BOOTSTRAP_DIR)
 
     @staticmethod
     def test_manifest_loads(preview: SetupResults) -> None:
@@ -78,11 +80,11 @@ class TestBootstrapPreview:
         assert tool_actions[1].plugin_target.name == 'pdm'
 
     @staticmethod
-    def test_post_sync_command_present(preview: SetupResults) -> None:
-        """A RUN_COMMAND action for `pdm install` should be in the plan."""
-        command_actions = [a for a in preview.actions if a.kind is None]
-        assert len(command_actions) == 1
-        assert command_actions[0].command == ('pdm', 'install')
+    def test_project_sync_action_present(preview: SetupResults) -> None:
+        """A PROJECT action for PDM project sync should be in the plan."""
+        project_actions = [a for a in preview.actions if a.kind == PluginKind.PROJECT and a.ecosystem == 'python']
+        assert len(project_actions) == 1
+        assert project_actions[0].installer in {'pdm', None}
 
     @staticmethod
     def test_scm_action_present(preview: SetupResults) -> None:
@@ -94,11 +96,12 @@ class TestBootstrapPreview:
         assert scm_actions[0].kind == PluginKind.SCM
 
     @staticmethod
-    def test_action_order_matches_phases(preview: SetupResults) -> None:
-        """Actions should be ordered: runtime, package, tool, scm, command.
+    def test_all_action_phases_present(preview: SetupResults) -> None:
+        """The plan should contain every action phase: runtime, package, tool, project, scm.
 
-        This validates the build order returned by preview. The execution
-        engine reorders into runtime → package → tool → scm → command phases.
+        The preview lists the actions the execution engine will later reorder
+        into runtime → package → tool → project → scm phases.  This verifies
+        each phase is represented.
         """
         kinds = []
         for a in preview.actions:
@@ -108,15 +111,15 @@ class TestBootstrapPreview:
                 kinds.append('package')
             elif a.kind == PluginKind.TOOL:
                 kinds.append('tool')
+            elif a.kind == PluginKind.PROJECT:
+                kinds.append('project')
             elif a.kind == PluginKind.SCM:
                 kinds.append('scm')
-            elif a.kind is None:
-                kinds.append('command')
             else:
                 kinds.append('other')
 
         assert 'runtime' in kinds
         assert 'package' in kinds
         assert 'tool' in kinds
+        assert 'project' in kinds
         assert 'scm' in kinds
-        assert 'command' in kinds

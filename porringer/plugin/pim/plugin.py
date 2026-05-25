@@ -1,11 +1,15 @@
-"""Plugin implementation for Python Install Manager (pymanager)"""
+"""Plugin integration for plugin."""
+
+"""Plugin implementation for Python Install Manager (pymanager)."""
 
 import asyncio
 import logging
+import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import override
+from typing import ClassVar, override
 
 from packaging.version import InvalidVersion, Version
 
@@ -15,8 +19,23 @@ from porringer.core.schema import Ecosystem, Package, PackageRef, PluginDependen
 
 # Architecture suffix pattern: a trailing dash followed by digits (e.g. "-64", "-32").
 _ARCH_SUFFIX = re.compile(r'-\d+$')
+_DEFAULT_EXECUTABLE_PROBE_LINE_COUNT = 2
 
 logger = logging.getLogger(__name__)
+
+
+async def _run_py(args: Sequence[str], *, timeout: float) -> tuple[int, str, str]:
+    """Run the ``py`` launcher with ``args`` and return (returncode, stdout, stderr)."""
+    proc = await asyncio.create_subprocess_exec(
+        'py',
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
+    stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
+    return proc.returncode or 0, stdout, stderr
 
 
 class PIMEnvironment(Environment, RuntimeProvider):
@@ -37,6 +56,8 @@ class PIMEnvironment(Environment, RuntimeProvider):
         - py uninstall [-y|--yes] <TAG>...  - Uninstall runtimes
         - pymanager install 9NQ7512CXL7T  - Install via winget (Store app ID)
     """
+
+    _default_executable_cache: ClassVar[Path | None] = None
 
     @staticmethod
     @override
@@ -74,6 +95,11 @@ class PIMEnvironment(Environment, RuntimeProvider):
         """PIM wraps the `py` CLI."""
         return 'py'
 
+    @classmethod
+    def invalidate_runtime_cache(cls) -> None:
+        """Clear process-local runtime resolution caches."""
+        cls._default_executable_cache = None
+
     @staticmethod
     @override
     def dependencies() -> list[PluginDependency]:
@@ -93,6 +119,50 @@ class PIMEnvironment(Environment, RuntimeProvider):
             ),
         ]
 
+    async def default_executable(self) -> Path | None:
+        """Return the launcher's default Python executable in one subprocess.
+
+        This is the fast path used by ``Builder.resolve_runtime_context``.
+        It avoids running ``py`` once to discover the default tag and then
+        again to resolve that tag to ``sys.executable``.
+        """
+        cached = type(self)._default_executable_cache
+        if cached is not None:
+            if cached.exists():
+                return cached
+            type(self)._default_executable_cache = None
+
+        logger = logging.getLogger('porringer.pim.default_executable')
+        try:
+            returncode, stdout, stderr = await _run_py(
+                [
+                    '-c',
+                    'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}"); print(sys.executable)',
+                ],
+                timeout=30,
+            )
+        except Exception as e:
+            message = 'py launcher not found' if isinstance(e, FileNotFoundError) else f'default_executable failed: {e}'
+            logger.debug(message)
+            return None
+
+        if returncode != 0:
+            logger.debug('py (default executable) failed: %s', stderr.strip())
+            return None
+
+        lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+        if len(lines) < _DEFAULT_EXECUTABLE_PROBE_LINE_COUNT:
+            logger.debug('py default executable probe returned unexpected output: %r', stdout)
+            return None
+
+        tag, executable = lines[0], Path(lines[-1])
+        if not executable.exists():
+            logger.warning('py default resolved to %s but it does not exist', executable)
+            return None
+        type(self)._default_executable_cache = executable
+        logger.debug('Resolved default Python %s to %s', tag, executable)
+        return executable
+
     @override
     async def default_tag(self) -> str | None:
         """Return the tag of the launcher's default Python runtime.
@@ -108,25 +178,23 @@ class PIMEnvironment(Environment, RuntimeProvider):
         """
         logger = logging.getLogger('porringer.pim.default_tag')
         try:
-            proc = await asyncio.create_subprocess_exec(
-                'py',
-                '-c',
-                'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            returncode, stdout, stderr = await _run_py(
+                ['-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'],
+                timeout=30,
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode != 0:
-                stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ''
-                logger.debug('py (default) failed: %s', stderr)
-                return None
-            stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
-            if stdout:
-                return stdout
         except FileNotFoundError:
             logger.debug('py launcher not found')
+            return None
         except Exception as e:
             logger.debug('default_tag failed: %s', e)
+            return None
+
+        if returncode != 0:
+            logger.debug('py (default) failed: %s', stderr.strip())
+            return None
+        stdout = stdout.strip()
+        if stdout:
+            return stdout
         return None
 
     @override
@@ -144,29 +212,79 @@ class PIMEnvironment(Environment, RuntimeProvider):
         """
         logger = logging.getLogger('porringer.pim.resolve_executable')
         try:
-            proc = await asyncio.create_subprocess_exec(
-                'py',
-                f'-{tag}',
-                '-c',
-                'import sys; print(sys.executable)',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            returncode, stdout, stderr = await _run_py(
+                [f'-{tag}', '-c', 'import sys; print(sys.executable)'],
+                timeout=30,
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode != 0:
-                stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ''
-                logger.debug('py -%s failed: %s', tag, stderr)
-                return None
-            stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
-            path = Path(stdout)
-            if path.exists():
-                return path
-            logger.warning('py -%s resolved to %s but it does not exist', tag, path)
         except FileNotFoundError:
             logger.debug('py launcher not found')
+            return None
         except Exception as e:
             logger.debug('resolve_executable failed for tag %s: %s', tag, e)
+            return None
+
+        if returncode != 0:
+            logger.debug('py -%s failed: %s', tag, stderr.strip())
+            return None
+        path = Path(stdout.strip())
+        if path.exists():
+            return path
+        logger.warning('py -%s resolved to %s but it does not exist', tag, path)
         return None
+
+    @override
+    async def setup(self) -> None:
+        r"""Run ``py install --configure --yes`` once, if not already configured.
+
+        PIM's per-user shortcuts directory (``%LOCALAPPDATA%\\Python\\bin``)
+        contains shims like ``python.exe``, ``pip.exe``, ``pipx.exe``,
+        and ``python3.14.exe`` that are created and registered on the
+        user PATH by ``py install --configure``.  Without that step,
+        a freshly-installed PIM runtime is only reachable via ``py
+        -<tag>``, which breaks any downstream tool (pipx, pip, custom
+        scripts) that expects the canonical names on PATH.
+
+        The call is gated by a fast existence check so the subprocess
+        is only invoked the first time a runtime is installed on a
+        machine.  ``--yes`` accepts the long-path-support and PATH-
+        registration prompts non-interactively.
+
+        No-op on non-Windows platforms (PIM itself is Windows-only,
+        but this is a defensive guard).
+        """
+        if sys.platform != 'win32':
+            return
+
+        local_app_data = os.environ.get('LOCALAPPDATA')
+        if not local_app_data:
+            logger.debug('LOCALAPPDATA not set; skipping PIM --configure')
+            return
+
+        bin_dir = Path(local_app_data) / 'Python' / 'bin'
+        if (bin_dir / 'python.exe').exists():
+            logger.debug('PIM bin directory already populated at %s; skipping --configure', bin_dir)
+            return
+
+        configure_logger = logging.getLogger('porringer.pim.configure')
+        configure_logger.info('Running py install --configure --yes to register PIM shortcuts')
+        try:
+            returncode, stdout, stderr = await _run_py(
+                ['install', '--configure', '--yes'],
+                timeout=120,
+            )
+        except FileNotFoundError:
+            configure_logger.debug('py launcher not found; cannot run --configure')
+            return
+        except (TimeoutError, OSError) as exc:
+            configure_logger.warning('py install --configure --yes failed: %s', exc)
+            return
+
+        if returncode != 0:
+            configure_logger.warning('py install --configure --yes failed (rc=%s): %s', returncode, stderr.strip())
+            return
+        stdout = stdout.strip()
+        if stdout:
+            configure_logger.debug('py install --configure --yes output: %s', stdout)
 
     @override
     def install_command(
@@ -184,8 +302,12 @@ class PIMEnvironment(Environment, RuntimeProvider):
 
     @override
     def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
-        """Returns the CLI command to uninstall a Python runtime via pymanager."""
-        return ['py', 'uninstall', '-y', package.name]
+        """Returns the CLI command to uninstall a Python runtime via pymanager.
+
+        Uses ``--purge`` to remove the runtime's data directory in
+        addition to unregistering it, and ``-y`` to skip confirmation.
+        """
+        return ['py', 'uninstall', '--purge', '-y', package.name]
 
     @override
     def sort_tags(self, tags: list[str]) -> list[str]:
@@ -293,20 +415,3 @@ class PIMEnvironment(Environment, RuntimeProvider):
             version = runtime.get('sort-version') or tag
             packages.append(Package(name=tag, version=version))
         return packages
-
-    async def _get_runtime_version(self, tag: str) -> str | None:
-        """Gets the actual version string for an installed runtime.
-
-        Args:
-            tag: The Python version tag (e.g., "3.12")
-
-        Returns:
-            The version string, or None if not found
-        """
-        data = await self._run_json_command(['py', 'list', '--only-managed', '-f', 'json', tag])
-        if not isinstance(data, dict):
-            return None
-        runtimes = data.get('versions', [])
-        if runtimes:
-            return runtimes[0].get('sort-version') or runtimes[0].get('tag')
-        return None

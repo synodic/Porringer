@@ -1,4 +1,6 @@
-"""Mock project environment data"""
+"""Tests covering the project environment behavior."""
+
+"""Mock project environment data."""
 
 from typing import override
 

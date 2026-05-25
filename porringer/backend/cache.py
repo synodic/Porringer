@@ -1,9 +1,11 @@
 """Directory cache management for manifest directories."""
 
+import contextlib
 import json
 import logging
 from pathlib import Path
 
+from filelock import FileLock
 from pydantic import ValidationError
 
 from porringer.backend.command.manifest import has_manifest
@@ -69,32 +71,26 @@ class DirectoryCacheManager:
         return self._cache
 
     def _save(self) -> None:
-        """Save cache to disk atomically."""
+        """Save cache to disk atomically under a cross-process lock."""
         if self._cache is None:
             return
 
         self.data_directory.mkdir(parents=True, exist_ok=True)
 
-        # Write to temp file then rename for atomic write
         temp_path = self._cache_path.with_suffix('.tmp')
+        lock_path = self._cache_path.with_suffix(f'{self._cache_path.suffix}.lock')
         try:
-            temp_path.write_text(self._cache.model_dump_json(indent=2), encoding='utf-8')
-            temp_path.replace(self._cache_path)
+            with FileLock(lock_path):
+                temp_path.write_text(self._cache.model_dump_json(indent=2), encoding='utf-8')
+                temp_path.replace(self._cache_path)
             logger.debug(f'Saved directory cache to {self._cache_path}')
-        except PermissionError as e:
-            if temp_path.exists():
-                temp_path.unlink()
-            logger.error(f'Permission denied writing cache: {e}')
-            raise
         except OSError as e:
-            if temp_path.exists():
-                temp_path.unlink()
             logger.error(f'Failed to write cache: {e}')
             raise
-        except Exception:
+        finally:
             if temp_path.exists():
-                temp_path.unlink()
-            raise
+                with contextlib.suppress(OSError):
+                    temp_path.unlink()
 
     @staticmethod
     def _normalize_path(path: Path) -> Path:

@@ -1,3 +1,5 @@
+"""Helpers for test runtime propagation."""
+
 """Tests for runtime propagation across phase transitions and venv scoping."""
 
 import asyncio
@@ -13,14 +15,14 @@ from unittest.mock import patch
 from packaging.version import Version
 
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from porringer.backend.command.core.execution import ExecutionState
+from porringer.backend.command.core.execution import ExecutionState, invalidate_runtime_cache_after_mutation
 from porringer.backend.command.core.phase import PackagePhase, ToolPhase
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
-from porringer.schema import SetupAction, SetupParameters, SetupResults
+from porringer.schema import SetupAction, SetupActionResult, SetupParameters, SetupResults
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,6 +30,7 @@ from porringer.schema import SetupAction, SetupParameters, SetupResults
 
 _MOCK_DIST = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
 _MOCK_RUNTIME_EXE = Path('/mock/runtimes/python3.14/python')
+EXPECTED_RUNTIME_CACHE_INVALIDATIONS = 1
 
 _RUNTIME_ACTION = SetupAction(
     description='Install python 3.14',
@@ -51,6 +54,7 @@ class _MockRuntimeProvider(Environment, RuntimeProvider):
     """An environment that provides a Python runtime."""
 
     _resolved: Path | None = _MOCK_RUNTIME_EXE
+    invalidations: int = 0
 
     @staticmethod
     @override
@@ -104,9 +108,39 @@ class _MockRuntimeProvider(Environment, RuntimeProvider):
     async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         return []
 
+    def invalidate_runtime_cache(self) -> None:
+        """Track runtime cache invalidation calls for tests."""
+        self.invalidations += 1
+
 
 # Register as RuntimeProvider via structural subtyping check
 assert isinstance(_MockRuntimeProvider(_MOCK_DIST), RuntimeProvider)
+
+
+class TestRuntimeCacheInvalidation:
+    """Runtime-provider caches are invalidated after successful mutations."""
+
+    @staticmethod
+    def test_successful_runtime_result_invalidates_provider_cache() -> None:
+        """A successful runtime install/upgrade/uninstall invalidates the provider cache."""
+        provider = _MockRuntimeProvider(_MOCK_DIST)
+        provider.invalidations = 0
+        result = SetupActionResult(action=_RUNTIME_ACTION, success=True)
+
+        invalidate_runtime_cache_after_mutation(_RUNTIME_ACTION, {'mock-pim': provider}, result)
+
+        assert provider.invalidations == EXPECTED_RUNTIME_CACHE_INVALIDATIONS
+
+    @staticmethod
+    def test_skipped_runtime_result_does_not_invalidate_provider_cache() -> None:
+        """Skipped results do not invalidate runtime provider caches."""
+        provider = _MockRuntimeProvider(_MOCK_DIST)
+        provider.invalidations = 0
+        result = SetupActionResult(action=_RUNTIME_ACTION, success=True, skipped=True)
+
+        invalidate_runtime_cache_after_mutation(_RUNTIME_ACTION, {'mock-pim': provider}, result)
+
+        assert provider.invalidations == 0
 
 
 class _MockPythonEnv(PythonEnvironment):

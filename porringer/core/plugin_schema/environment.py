@@ -1,10 +1,13 @@
-"""Plugin utilities for package environments"""
+"""Core helpers and types for environment."""
+
+"""Plugin utilities for package environments."""
 
 import contextlib
 import logging
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
+from typing import Literal
 
 import aiohttp
 from pydantic import Field
@@ -16,9 +19,12 @@ from porringer.core.schema import (
     PackageRef,
     PorringerModel,
 )
-from porringer.schema import SetupAction, SubActionProgress
+from porringer.schema import ActionProgress, SetupAction
 from porringer.utility import HTTP_TIMEOUT
-from porringer.utility.utility import StreamProgress, stream_command
+from porringer.utility.concurrency import gather_bounded
+from porringer.utility.utility import CommandProgress, run_command
+
+PackageVerb = Literal['install', 'upgrade', 'uninstall']
 
 
 class PackageParameters(PorringerModel):
@@ -32,10 +38,10 @@ class PackageParameters(PorringerModel):
         default=False,
         description='When True, allow pre-release versions during install/upgrade',
     )
-    progress_callback: Callable[[SubActionProgress], None] | None = Field(
+    progress_callback: Callable[[ActionProgress], None] | None = Field(
         default=None,
         exclude=True,
-        description='Optional callback for reporting sub-action progress (download %, install phase, etc.)',
+        description='Optional callback for reporting action progress (download %, install phase, etc.)',
     )
     runtime_context: RuntimeContext | None = Field(
         default=None,
@@ -55,6 +61,14 @@ class CheckUpdatesParameters(PorringerModel):
         default_factory=list, description='Packages to check for updates. Empty means check all installed packages.'
     )
     include_prereleases: bool = Field(default=False, description='Include pre-release versions')
+    max_concurrency: int = Field(
+        default=8,
+        description=(
+            'Maximum number of packages queried concurrently against a '
+            'remote registry. Set to 0 for unlimited concurrency. Applied '
+            'via an ``asyncio.Semaphore`` around each registry request.'
+        ),
+    )
     http_client: aiohttp.ClientSession | None = Field(
         default=None,
         exclude=True,
@@ -148,6 +162,18 @@ class Environment(ToolBasedPlugin):
         that would be used to remove a package.  This is used for
         displaying commands in dry-run / preview mode.
 
+        **Prefer reversal flags** when the package manager supports
+        them.  For example, prefer ``apt purge`` over ``apt remove``,
+        ``py uninstall --purge`` over plain ``py uninstall``, and
+        ``brew uninstall --zap`` over plain ``brew uninstall``.
+        Reversal flags keep per-package cleanup in the command layer
+        (where it naturally belongs) and avoid the need for a
+        ``teardown()`` override just to delete leftover files.
+
+        Reserve ``Plugin.teardown()`` for global, plugin-level state
+        that reversal flags cannot address (e.g. removing a PATH
+        entry that ``setup()`` created).
+
         Unlike ``install_command`` and ``upgrade_command``, there is no
         ``include_prereleases`` parameter because pre-release handling
         is irrelevant when removing a package.
@@ -175,14 +201,66 @@ class Environment(ToolBasedPlugin):
         """
         return True
 
+    # --- Optional plugin hooks --------------------------------------------
+
+    def dry_run_flags(self, verb: PackageVerb) -> Sequence[str]:  # noqa: PLR6301
+        """Return extra CLI flags that turn *verb* into a no-op rehearsal.
+
+        Override on plugins whose underlying tool supports a native
+        dry-run mode (e.g. pip's ``--dry-run``, apt's ``--simulate``).
+        When the returned sequence is empty, ``params.dry`` falls back
+        to the plugin-specific behaviour in its overridden
+        ``install`` / ``upgrade`` / ``uninstall`` methods (if any).
+
+        Args:
+            verb: Which package operation is being rehearsed.
+
+        Returns:
+            A sequence of extra arguments to append to the command,
+            or an empty sequence to indicate this hook does not apply.
+        """
+        del verb
+        return ()
+
+    async def post_action(  # noqa: PLR6301
+        self,
+        verb: PackageVerb,
+        params: PackageParameters,
+        success: bool,
+    ) -> None:
+        """Run plugin-specific bookkeeping after a package operation.
+
+        Default is a no-op.  Plugins use this to refresh OS caches,
+        regenerate aliases, or warm derived state after a successful
+        operation.  Always called once when the subprocess exits, even
+        on failure (``success`` reflects the exit status).
+        """
+        del verb, params, success
+
+    def parse_progress_line(  # noqa: PLR6301
+        self,
+        line: str,
+        channel: Literal['stdout', 'stderr'],
+        action: SetupAction,
+    ) -> ActionProgress | None:
+        """Translate a raw output line into a structured progress event.
+
+        Default returns ``None`` (no structured event).  Plugins
+        override this to parse their tool's output (download
+        percentages, install phases, etc.) and produce richer
+        ``ActionProgress`` events alongside the raw output channel.
+        """
+        del line, channel, action
+        return None
+
     async def install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs the given package identified by its name.
 
         Uses a native async subprocess via `install_command()`.  Output
-        is always streamed line-by-line; when `params.progress_callback`
+        is always observed line-by-line; when `params.progress_callback`
         is set, progress events are emitted to the caller.
 
-        Subclasses only need to override this when the streaming command
+        Subclasses only need to override this when the generated command
         differs from `install_command()` or when post-install logic
         (e.g. version retrieval) is required.
 
@@ -205,10 +283,10 @@ class Environment(ToolBasedPlugin):
         """Asynchronously upgrades the given package.
 
         Uses a native async subprocess via `upgrade_command()`.  Output
-        is always streamed line-by-line; when `params.progress_callback`
+        is always observed line-by-line; when `params.progress_callback`
         is set, progress events are emitted to the caller.
 
-        Subclasses only need to override this when the streaming command
+        Subclasses only need to override this when the generated command
         differs from `upgrade_command()` or when post-upgrade logic
         (e.g. version retrieval) is required.
 
@@ -231,10 +309,10 @@ class Environment(ToolBasedPlugin):
         """Asynchronously uninstalls the given package.
 
         Uses a native async subprocess via `uninstall_command()`.  Output
-        is always streamed line-by-line; when `params.progress_callback`
+        is always observed line-by-line; when `params.progress_callback`
         is set, progress events are emitted to the caller.
 
-        Subclasses only need to override this when the streaming command
+        Subclasses only need to override this when the generated command
         differs from `uninstall_command()` or when post-uninstall logic
         is required.
 
@@ -273,11 +351,11 @@ class Environment(ToolBasedPlugin):
         phase: str,
         verb: str,
     ) -> Package | None:
-        """Run *args* as an async subprocess with line-by-line streaming.
+        """Run *args* as an async subprocess with line-by-line progress.
 
         When ``params.progress_callback`` is set, progress events are
         emitted to the caller.  When it is ``None``, output is still
-        collected via streaming but no progress events are emitted.
+        collected through the same observed command path but no progress events are emitted.
 
         Args:
             args: Command and arguments to run.
@@ -293,26 +371,45 @@ class Environment(ToolBasedPlugin):
             description=f'{verb.capitalize()} {params.package.specifier}',
             package=params.package,
         )
-        callback = params.progress_callback if params.progress_callback is not None else lambda _: None
+        # Apply native dry-run flags when the plugin advertises them.
+        verb_literal: PackageVerb = verb  # type: ignore[assignment]
+        if params.dry:
+            extra = list(self.dry_run_flags(verb_literal))
+            if extra:
+                args = [*args, *extra]
+        # Wrap the user callback so each output line can also be
+        # parsed into a structured progress event by the plugin.
+        user_callback = params.progress_callback if params.progress_callback is not None else lambda _: None
+
+        def callback(progress: ActionProgress) -> None:
+            user_callback(progress)
+            if progress.output is not None and progress.channel is not None:
+                parsed = self.parse_progress_line(progress.output, progress.channel, action)
+                if parsed is not None:
+                    user_callback(parsed)
+
+        success = False
         try:
-            transformed = self._transport.transform_args(args)
-            result = await stream_command(
-                transformed,
-                progress=StreamProgress(
+            result = await run_command(
+                args,
+                progress=CommandProgress(
                     action=action,
                     callback=callback,
                     phase=phase,
                 ),
             )
             logger.info(result.stdout)
-            if result.returncode != 0:
+            success = result.returncode == 0
+            if not success:
                 logger.error(result.stderr)
-                return None
         except FileNotFoundError:
             logger.error(f'{self.tool_name()} not found')
-            return None
         except Exception as e:
             logger.error(f'Failed to {verb} {params.package.name}: {e}')
+        finally:
+            with contextlib.suppress(Exception):
+                await self.post_action(verb_literal, params, success)
+        if not success:
             return None
         return Package(name=params.package.name, version=None)
 
@@ -382,16 +479,17 @@ class Environment(ToolBasedPlugin):
         packages: list[PackageRef],
         *,
         include_prereleases: bool = False,
+        max_concurrency: int = 8,
         logger: logging.Logger | None = None,
         http_client: aiohttp.ClientSession | None = None,
     ) -> list[Package]:
         """Query the npm registry for the latest versions of the given packages.
 
         Shared helper for plugins that install from the npm registry
-        (npm, pnpm, bun, and the npm branch of deno).
+        (npm and pnpm).
 
         Uses ``aiohttp.ClientSession`` so the event loop is never blocked
-        by network I/O.
+        by network I/O.  Per-package queries run with bounded concurrency.
 
         For each package, fetches
         ``https://registry.npmjs.org/{name}`` and extracts:
@@ -402,6 +500,8 @@ class Environment(ToolBasedPlugin):
         Args:
             packages: Package references to look up.
             include_prereleases: When ``True``, return pre-release versions.
+            max_concurrency: Maximum number of concurrent registry requests.
+                ``0`` means unlimited.
             logger: Optional logger for debug messages. Falls back to
                 ``logging.getLogger('porringer.npm_registry')``.
             http_client: Shared ``aiohttp.ClientSession`` for connection pooling.
@@ -413,31 +513,47 @@ class Environment(ToolBasedPlugin):
         if logger is None:
             logger = logging.getLogger('porringer.npm_registry')
 
-        results: list[Package] = []
-
         async with (
             contextlib.nullcontext(http_client)
             if http_client is not None
             else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
         ) as session:
-            for pkg_ref in packages:
-                try:
-                    async with session.get(f'https://registry.npmjs.org/{pkg_ref.name}') as response:
-                        response.raise_for_status()
-                        data = await response.json()
-                except (aiohttp.ClientError, ValueError) as exc:
-                    logger.debug('npm registry query failed for %s: %s', pkg_ref.name, exc)
-                    continue
 
-                if include_prereleases:
-                    versions = data.get('versions', {})
-                    if versions:
-                        latest = list(versions.keys())[-1]
-                        results.append(Package(name=pkg_ref.name, version=latest))
-                else:
-                    dist_tags = data.get('dist-tags', {})
-                    latest = dist_tags.get('latest')
-                    if latest:
-                        results.append(Package(name=pkg_ref.name, version=latest))
+            def _make_check(pkg_ref: PackageRef) -> Callable[[], Awaitable[Package | None]]:
+                return lambda: Environment._check_single_npm_package(session, pkg_ref, include_prereleases, logger)
 
-        return results
+            gathered = await gather_bounded(
+                (_make_check(pkg_ref) for pkg_ref in packages),
+                limit=max_concurrency,
+            )
+
+        return [pkg for pkg in gathered if pkg is not None]
+
+    @staticmethod
+    async def _check_single_npm_package(
+        session: aiohttp.ClientSession,
+        pkg_ref: PackageRef,
+        include_prereleases: bool,
+        logger: logging.Logger,
+    ) -> Package | None:
+        """Fetch one package from the npm registry and return the latest version, or ``None``."""
+        try:
+            async with session.get(f'https://registry.npmjs.org/{pkg_ref.name}') as response:
+                response.raise_for_status()
+                data = await response.json()
+        except (aiohttp.ClientError, ValueError) as exc:
+            logger.debug('npm registry query failed for %s: %s', pkg_ref.name, exc)
+            return None
+
+        if include_prereleases:
+            versions = data.get('versions', {})
+            if versions:
+                latest = next(reversed(versions))
+                return Package(name=pkg_ref.name, version=latest)
+            return None
+
+        dist_tags = data.get('dist-tags', {})
+        latest = dist_tags.get('latest')
+        if latest:
+            return Package(name=pkg_ref.name, version=latest)
+        return None

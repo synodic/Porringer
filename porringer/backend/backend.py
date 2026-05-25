@@ -1,9 +1,11 @@
-"""Backend resolution for mapping (kind, ecosystem) pairs to installer plugins.
+"""Backend helpers for backend."""
 
-The `BackendResolver` determines which plugin should handle each
-`(PluginKind, ecosystem)` pair declared in a manifest.  For example,
-`(PACKAGE, "python")` might resolve to `uv` or `pip` depending
-on availability and user preferences.
+"""Backend resolution for mapping `(kind, ecosystem)` pairs to installer plugins.
+
+The `BackendResolver` chooses the plugin that should handle each
+`(PluginKind, ecosystem)` pair declared in a manifest. For example,
+`(PACKAGE, "python")` might resolve to `uv`, `pip`, or another matching
+plugin depending on availability and user preferences.
 """
 
 import logging
@@ -16,7 +18,7 @@ from porringer.core.schema import Ecosystem, Plugin, PluginKind
 
 logger = logging.getLogger(__name__)
 
-# Type alias for any plugin that participates in backend resolution.
+# A plugin that participates in backend resolution.
 BackendPlugin = Plugin
 
 
@@ -62,19 +64,18 @@ class BackendResolver:
         self._preferences = preferences or {}
         self._runtime_context = runtime_context
 
-        # Index: (kind, ecosystem) -> [plugin_name, ...]
+        # Index registered plugin names by `(kind, ecosystem)` pair.
         self._backend_plugins: dict[tuple[PluginKind, Ecosystem], list[str]] = defaultdict(list)
         for name, plugin in self._all_plugins.items():
             ecosystem = type(plugin).ecosystem()
             if ecosystem is not None:
                 self._backend_plugins[(type(plugin).plugin_kind(), ecosystem)].append(name)
 
-        # Resolve only the pairs the caller actually needs.  When
-        # *needed_pairs* is ``None`` every registered pair is resolved
-        # (existing behaviour).  Passing an explicit set avoids
-        # spurious "No available plugin" log messages for ecosystems
-        # that are registered via entry-points but irrelevant to the
-        # current manifest.
+        # Resolve only the pairs the caller needs right away. When
+        # *needed_pairs* is ``None``, every registered pair is resolved to
+        # preserve the existing behavior. Passing an explicit set avoids
+        # noisy "No available plugin" log messages for ecosystems that are
+        # registered via entry points but irrelevant to the current manifest.
         resolve_keys = needed_pairs if needed_pairs is not None else set(self._backend_plugins)
 
         # Resolve once and cache

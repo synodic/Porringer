@@ -1,3 +1,5 @@
+"""Helpers for test frozen app detection."""
+
 """Tests for python_command() behaviour in frozen (PyInstaller) applications.
 
 When ``sys.frozen`` is ``True``, ``sys.executable`` points to the

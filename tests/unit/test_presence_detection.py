@@ -1,3 +1,5 @@
+"""Helpers for test presence detection."""
+
 """Tests for presence detection edge cases.
 
 Covers the behaviour of ``is_package_installed()`` and

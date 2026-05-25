@@ -1,3 +1,5 @@
+"""Helpers for test auxiliary tools."""
+
 """Tests for auxiliary-tool interactions in the pip plugin."""
 
 from collections.abc import Generator
@@ -8,7 +10,7 @@ import pytest
 from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import PackageParameters
-from porringer.core.schema import Distribution, Package, PackageRef, PluginParameters
+from porringer.core.schema import Distribution, PackageRef, PluginParameters
 from porringer.plugin.pip.plugin import PIPEnvironment
 from porringer.test.pytest.tests import AuxiliaryToolTests, InstallContext
 from porringer.utility.utility import CommandResult
@@ -47,11 +49,10 @@ def _make_context(scenario: str) -> Generator[InstallContext]:
         mock_run = AsyncMock(return_value=CommandResult(returncode=0, stdout='', stderr=''))
 
     with (
-        patch.object(
-            PIPEnvironment,
-            '_install_simple',
+        patch(
+            'porringer.core.plugin_schema.environment.run_command',
             new_callable=AsyncMock,
-            return_value=Package(name='test-pkg', version=None),
+            return_value=CommandResult(returncode=0, stdout='', stderr=''),
         ),
         patch.object(env, 'install_command', return_value=['python', '-m', 'pip', 'install', 'test-pkg']),
         patch('porringer.plugin.pip.plugin.run_command', mock_run),
@@ -76,11 +77,10 @@ class TestPymanagerRefresh(AuxiliaryToolTests[PIPEnvironment]):
         params = PackageParameters(package=PackageRef(name='test-pkg'), dry=True)
 
         with (
-            patch.object(
-                PIPEnvironment,
-                '_install_simple',
+            patch(
+                'porringer.core.plugin_schema.environment.run_command',
                 new_callable=AsyncMock,
-                return_value=Package(name='test-pkg', version=None),
+                return_value=CommandResult(returncode=0, stdout='', stderr=''),
             ),
             patch.object(env, 'install_command', return_value=['python', '-m', 'pip', 'install', 'test-pkg']),
             patch(

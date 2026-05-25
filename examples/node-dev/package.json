@@ -1,0 +1,5 @@
+{
+    "name": "porringer-node-dev-example",
+    "private": true,
+    "packageManager": "npm@10.0.0"
+}

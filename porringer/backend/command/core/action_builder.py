@@ -1,3 +1,5 @@
+"""CLI command implementation for action builder."""
+
 """Action plan construction.
 
 Builds the list of `SetupAction` objects from a parsed manifest and
@@ -5,9 +7,7 @@ resolved plugins.  Also contains the preview/parse entry point that
 loads a manifest and returns a `SetupResults` without executing.
 """
 
-import asyncio
 import logging
-import shlex
 from pathlib import Path
 
 from porringer.backend.backend import BackendResolver
@@ -29,14 +29,13 @@ from .discovery import DiscoveredPlugins, discover_all_plugins
 logger = logging.getLogger(__name__)
 
 
-# Execution order for phased setup.  `None` represents post-sync commands.
-PHASE_ORDER: list[PluginKind | None] = [
+# Execution order for phased setup.
+PHASE_ORDER: list[PluginKind] = [
     PluginKind.RUNTIME,
     PluginKind.PACKAGE,
     PluginKind.TOOL,
     PluginKind.PROJECT,
     PluginKind.SCM,
-    None,
 ]
 
 
@@ -106,7 +105,7 @@ def _get_plugin_cli_command(
     """Return the native CLI command for a plugin-management action.
 
     Looks up the ``PluginManager`` for the plugin target and returns
-    the appropriate add or update command based on the strategy.
+    the appropriate install or upgrade command based on the strategy.
 
     Returns:
         The CLI command, or empty list when no manager is found.
@@ -116,8 +115,8 @@ def _get_plugin_cli_command(
     if manager is None or action.package is None:
         return []
     if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
-        return manager.plugin_update_command(action.package, include_prereleases=action.include_prereleases)
-    return manager.plugin_add_command(action.package, include_prereleases=action.include_prereleases)
+        return manager.plugin_upgrade_command(action.package, include_prereleases=action.include_prereleases)
+    return manager.plugin_install_command(action.package, include_prereleases=action.include_prereleases)
 
 
 def get_cli_command(
@@ -160,7 +159,7 @@ def get_cli_command(
                 scm_env = scm_envs[action.installer]
                 cmd = scm_env.clone_command(action.package.name, Path('.'))
         case None:
-            return action.command or ()
+            pass
     return tuple(cmd)
 
 
@@ -187,7 +186,7 @@ def get_uninstall_cli_command(
                 if action.plugin_target is not None:
                     manager = find_plugin_manager(action.plugin_target.name, project_environments)
                     if manager is not None and action.package is not None:
-                        return manager.plugin_remove_command(action.package)
+                        return manager.plugin_uninstall_command(action.package)
                     return []
                 return env.uninstall_command(action.package)
         case _:
@@ -227,24 +226,18 @@ def _emit_section_actions(
     installer: str | None,
     verb: str,
     is_registered: bool,
-    *,
-    distro: str | None = None,
 ) -> None:
     """Append actions for a single manifest section to *actions*.
 
     Handles project, SCM and package/tool/runtime kinds.
-    When *distro* is set the description is prefixed with ``[WSL:<distro>]``.
     """
-    prefix = f'[WSL:{distro}] ' if distro else ''
-
     if kind == PluginKind.PROJECT:
         actions.append(
             SetupAction(
-                description=prefix + action_description(kind, verb, installer, registered=is_registered),
+                description=action_description(kind, verb, installer, registered=is_registered),
                 kind=kind,
                 ecosystem=ecosystem,
                 installer=installer,
-                distro=distro,
             )
         )
         return
@@ -254,7 +247,7 @@ def _emit_section_actions(
             if not package.is_applicable():
                 continue
             scm_description = package.description or str(package.name)
-            desc = prefix + action_description(kind, verb, installer, package=package.name, registered=is_registered)
+            desc = action_description(kind, verb, installer, package=package.name, registered=is_registered)
             actions.append(
                 SetupAction(
                     description=desc,
@@ -263,7 +256,6 @@ def _emit_section_actions(
                     installer=installer,
                     package=package.name,
                     package_description=scm_description,
-                    distro=distro,
                 )
             )
         return
@@ -271,7 +263,7 @@ def _emit_section_actions(
     for package in packages:
         if not package.is_applicable():
             continue
-        desc = prefix + action_description(kind, verb, installer, package=package.name, registered=is_registered)
+        desc = action_description(kind, verb, installer, package=package.name, registered=is_registered)
         actions.append(
             SetupAction(
                 description=desc,
@@ -281,15 +273,13 @@ def _emit_section_actions(
                 package=package.name,
                 package_description=package.description,
                 include_prereleases=package.include_prereleases,
-                distro=distro,
             )
         )
 
         for plugin_spec in package.plugins:
             actions.append(
                 SetupAction(
-                    description=prefix
-                    + action_description(
+                    description=action_description(
                         kind,
                         verb,
                         installer,
@@ -303,15 +293,85 @@ def _emit_section_actions(
                     package=plugin_spec.name,
                     plugin_target=package.name,
                     include_prereleases=plugin_spec.include_prereleases,
-                    distro=distro,
                 )
             )
+
+
+def _build_implicit_project_actions(
+    plugins: DiscoveredPlugins,
+    resolver: BackendResolver,
+    preferences: dict[Ecosystem, str],
+    *,
+    search_from: Path,
+) -> list[SetupAction]:
+    """Add one implicit project-sync action for each relevant ecosystem."""
+    actions: list[SetupAction] = []
+    project_environments = plugins.project_environments or {}
+    by_ecosystem: dict[Ecosystem, list[str]] = {}
+    evidence_by_ecosystem: dict[Ecosystem, list[str]] = {}
+
+    for installer, plugin in sorted(project_environments.items()):
+        if not plugin.project_relevance(search_from):
+            continue
+        ecosystem = plugin.ecosystem()
+        by_ecosystem.setdefault(ecosystem, []).append(installer)
+        if plugin.project_evidence(search_from):
+            evidence_by_ecosystem.setdefault(ecosystem, []).append(installer)
+
+    for ecosystem, candidates in sorted(by_ecosystem.items(), key=lambda item: str(item[0])):
+        preferred = preferences.get(ecosystem)
+        selected: str | None = None
+        if preferred in candidates:
+            selected = resolver.resolve(PluginKind.PROJECT, ecosystem)
+        else:
+            evidence_candidates = evidence_by_ecosystem.get(ecosystem, [])
+            if evidence_candidates:
+                suitable_evidence = sorted(
+                    name for name in evidence_candidates if project_environments[name].query_availability()
+                )
+                selected = suitable_evidence[0] if suitable_evidence else None
+            elif len(candidates) == 1:
+                selected = resolver.resolve(PluginKind.PROJECT, ecosystem)
+            else:
+                logger.warning(
+                    "Multiple project plugins are relevant for ecosystem '%s' but none has project-specific "
+                    'evidence: %s. Set a preference to choose explicitly.',
+                    ecosystem,
+                    ', '.join(candidates),
+                )
+                continue
+
+        if selected is None:
+            if resolver.is_registered(PluginKind.PROJECT, ecosystem):
+                actions.append(
+                    SetupAction(
+                        description=action_description(PluginKind.PROJECT, 'Sync', None, registered=True),
+                        kind=PluginKind.PROJECT,
+                        ecosystem=ecosystem,
+                        installer=None,
+                    )
+                )
+            else:
+                _log_unresolved(resolver, PluginKind.PROJECT, ecosystem)
+            continue
+
+        actions.append(
+            SetupAction(
+                description=action_description(PluginKind.PROJECT, 'Sync', selected),
+                kind=PluginKind.PROJECT,
+                ecosystem=ecosystem,
+                installer=selected,
+            )
+        )
+    return actions
 
 
 def build_actions(
     manifest: SetupManifest,
     plugins: DiscoveredPlugins | dict[str, Environment],
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
+    *,
+    search_from: Path | None = None,
 ) -> list[SetupAction]:
     """Builds the list of actions from a manifest.
 
@@ -338,18 +398,27 @@ def build_actions(
 
     actions: list[SetupAction] = []
 
-    # Only resolve ecosystems actually referenced by this manifest so
-    # the resolver doesn't warn about irrelevant registered plugins.
+    if search_from is None:
+        search_from = Path('.')
+
+    # Only resolve ecosystems actually referenced by this manifest or relevant
+    # project plugins so the resolver doesn't warn about unrelated plugins.
     needed_pairs: set[tuple[PluginKind, Ecosystem]] = set()
     for kind, ecosystem, _packages in manifest.iter_sections():
         needed_pairs.add((kind, ecosystem))
+    for plugin in (plugins.project_environments or {}).values():
+        if plugin.project_relevance(search_from):
+            needed_pairs.add((PluginKind.PROJECT, plugin.ecosystem()))
 
     resolver = BackendResolver(plugins.all_plugins, manifest.preferences, needed_pairs=needed_pairs)
 
     verb = STRATEGY_VERB[strategy]
 
-    # Iterate each kind section
+    # Iterate each non-project section from the manifest.
     for kind, ecosystem, packages in manifest.iter_sections():
+        if kind == PluginKind.PROJECT:
+            continue
+
         installer = resolver.resolve(kind, ecosystem)
 
         if installer is None:
@@ -358,35 +427,14 @@ def build_actions(
         is_registered = installer is not None or resolver.is_registered(kind, ecosystem)
         _emit_section_actions(actions, kind, ecosystem, packages, installer, verb, is_registered)
 
-    # ---- WSL2 distro sections -------------------------------------------
-    for distro, distro_manifest in manifest.wsl2.items():
-        wsl_needed: set[tuple[PluginKind, Ecosystem]] = set()
-        for kind, ecosystem, _packages in distro_manifest.iter_sections():
-            wsl_needed.add((kind, ecosystem))
-
-        wsl_resolver = BackendResolver(
-            plugins.all_plugins,
-            distro_manifest.preferences,
-            needed_pairs=wsl_needed,
-        )
-
-        for kind, ecosystem, packages in distro_manifest.iter_sections():
-            installer = wsl_resolver.resolve(kind, ecosystem)
-            if installer is None:
-                _log_unresolved(wsl_resolver, kind, ecosystem)
-
-            is_registered = installer is not None or wsl_resolver.is_registered(kind, ecosystem)
-            _emit_section_actions(actions, kind, ecosystem, packages, installer, verb, is_registered, distro=distro)
-
-    # Add post-sync command actions (kind=None)
-    for command_str in manifest.post_sync:
-        command_parts = tuple(shlex.split(command_str))
-        actions.append(
-            SetupAction(
-                description=f'Run: {command_str}',
-                command=command_parts,
-            )
-        )
+    implicit_project_actions = _build_implicit_project_actions(
+        plugins,
+        resolver,
+        dict(manifest.preferences),
+        search_from=search_from,
+    )
+    if implicit_project_actions:
+        actions.extend(implicit_project_actions)
 
     return actions
 
@@ -428,6 +476,7 @@ def _build_preview(
         result.manifest,
         resolved_plugins,
         strategy,
+        search_from=result.root_directory,
     )
     metadata = ManifestMetadata(
         name=result.manifest.name,
@@ -445,63 +494,6 @@ def _build_preview(
     )
 
 
-async def async_load_manifest(
-    path: Path,
-    strategy: SyncStrategy = SyncStrategy.MINIMAL,
-    *,
-    plugins: DiscoveredPlugins | None = None,
-) -> SetupResults:
-    """Async version of :func:`load_manifest`.
-
-    Offloads blocking manifest I/O and plugin discovery to a thread.
-    When *plugins* is provided, discovery is skipped and only the
-    manifest file read is threaded.
-
-    This is the preferred entry-point for async callers (GUI, API).
-
-    Args:
-        path: Path to manifest file or directory containing one.
-        strategy: The sync strategy.
-        plugins: Pre-discovered plugins.  ``None`` triggers cached
-            discovery internally.
-
-    Returns:
-        SetupResults containing the action plan.
-
-    Raises:
-        ManifestError: If the manifest cannot be found or parsed.
-    """
-    return await asyncio.to_thread(
-        _build_preview, path, strategy, use_cache=True, log_label='Loading manifest (fast)', plugins=plugins
-    )
-
-
-async def async_parse_manifest(
-    path: Path,
-    strategy: SyncStrategy = SyncStrategy.MINIMAL,
-    *,
-    plugins: DiscoveredPlugins | None = None,
-) -> SetupResults:
-    """Async version of :func:`parse_manifest`.
-
-    Offloads blocking manifest I/O and plugin discovery to a thread.
-
-    Args:
-        path: Path to manifest file or directory containing one.
-        strategy: The sync strategy.
-        plugins: Pre-discovered plugins.
-
-    Returns:
-        SetupResults containing the list of actions that would be performed.
-
-    Raises:
-        ManifestError: If the manifest cannot be found or parsed.
-    """
-    return await asyncio.to_thread(
-        _build_preview, path, strategy, use_cache=True, log_label='Parsing manifest', plugins=plugins
-    )
-
-
 def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
     """Parse a manifest and build the action plan without executing.
 
@@ -510,12 +502,13 @@ def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) ->
 
     * `installer` — canonical plugin name (e.g. `"uv"`, `"brew"`).
     * `kind` — `PluginKind` enum (`PACKAGE`, `TOOL`, `RUNTIME`,
-      `PROJECT`, `SCM`) or `None` for post-sync commands.
+            `PROJECT`, `SCM`).
     * `ecosystem` — ecosystem identifier (e.g. `"python"`, `"node"`).
     * `package` — `PackageRef` with name and optional version constraint.
 
-    This method is also available as a module-level convenience:
-    `porringer.parse_manifest(path)`.
+    This is an internal helper for tests and implementation code. Public
+    callers should use `api.sync.inspect(...)` for read-only manifest
+    information.
 
     Args:
         path: Path to manifest file or directory containing one.
@@ -530,7 +523,12 @@ def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) ->
     return _build_preview(path, strategy, use_cache=True, log_label='Parsing manifest')
 
 
-def load_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
+def load_manifest(
+    path: Path,
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
+    *,
+    plugins: DiscoveredPlugins | None = None,
+) -> SetupResults:
     """Load a manifest using cached plugin knowledge.
 
     This is the fast path for GUI clients: it reads JSON, builds
@@ -547,6 +545,8 @@ def load_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> 
     Args:
         path: Path to manifest file or directory containing one.
         strategy: The sync strategy.
+        plugins: Pre-discovered plugins. ``None`` uses cached
+            discovery internally.
 
     Returns:
         SetupResults containing the action plan.  Actions with
@@ -555,4 +555,4 @@ def load_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> 
     Raises:
         ManifestError: If the manifest cannot be found or parsed.
     """
-    return _build_preview(path, strategy, use_cache=True, log_label='Loading manifest (fast)')
+    return _build_preview(path, strategy, use_cache=True, log_label='Loading manifest (fast)', plugins=plugins)

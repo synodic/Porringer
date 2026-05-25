@@ -1,3 +1,5 @@
+"""Helpers for test project root."""
+
 """Tests for per-ecosystem project root auto-discovery.
 
 The `ProjectEnvironment.resolve_project_root()` method walks ancestor
@@ -12,7 +14,9 @@ from pathlib import Path
 from porringer.core.plugin_schema.project_environment import (
     ECOSYSTEM_MARKERS,
 )
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem
+from porringer.plugin.poetry.plugin import PoetryEnvironment
 from porringer.test.mock.project_environment import MockProjectEnvironment
 
 # ---------------------------------------------------------------------------
@@ -32,18 +36,6 @@ class _NodeProjectEnv(MockProjectEnvironment):
         return 'node'
 
 
-class _DenoProjectEnv(MockProjectEnvironment):
-    """Mock project environment for the `deno` ecosystem."""
-
-    @staticmethod
-    def ecosystem() -> Ecosystem:
-        return Ecosystem('deno')
-
-    @classmethod
-    def consumed_runtime_kind(cls) -> str:
-        return 'deno'
-
-
 class _UnknownProjectEnv(MockProjectEnvironment):
     """Mock project environment for an unregistered ecosystem."""
 
@@ -54,6 +46,12 @@ class _UnknownProjectEnv(MockProjectEnvironment):
     @classmethod
     def consumed_runtime_kind(cls) -> str:
         return 'unknown_ecosystem'
+
+
+class _EvidenceProjectEnv(MockProjectEnvironment):
+    """Mock project environment with pyproject.toml table evidence."""
+
+    _pyproject_tool_tables = (('tool', 'mock-project'),)
 
 
 # ---------------------------------------------------------------------------
@@ -75,11 +73,6 @@ class TestProjectMarker:
         assert _NodeProjectEnv.project_marker() == 'package.json'
 
     @staticmethod
-    def test_deno_marker() -> None:
-        """Deno ecosystem maps to deno.json."""
-        assert _DenoProjectEnv.project_marker() == 'deno.json'
-
-    @staticmethod
     def test_unknown_ecosystem_returns_none() -> None:
         """An ecosystem with no registered marker returns None."""
         assert _UnknownProjectEnv.project_marker() is None
@@ -87,7 +80,7 @@ class TestProjectMarker:
     @staticmethod
     def test_all_known_ecosystems_covered() -> None:
         """Every entry in ECOSYSTEM_MARKERS is reachable."""
-        assert set(ECOSYSTEM_MARKERS.keys()) == {Ecosystem('python'), Ecosystem('node'), Ecosystem('deno')}
+        assert set(ECOSYSTEM_MARKERS.keys()) == {Ecosystem('python'), Ecosystem('node')}
 
 
 # ---------------------------------------------------------------------------
@@ -164,15 +157,6 @@ class TestResolveProjectRoot:
         assert result == tmp_path
 
     @staticmethod
-    def test_deno_marker_deno_json(tmp_path: Path) -> None:
-        """Deno plugin finds deno.json as project root."""
-        (tmp_path / 'deno.json').write_text('{}')
-        sub = tmp_path / 'sub'
-        sub.mkdir()
-        result = _DenoProjectEnv.resolve_project_root(sub)
-        assert result == tmp_path
-
-    @staticmethod
     def test_unknown_ecosystem_returns_none(tmp_path: Path) -> None:
         """Plugin with no marker mapping always returns None."""
         result = _UnknownProjectEnv.resolve_project_root(tmp_path)
@@ -210,3 +194,25 @@ class TestResolveProjectRoot:
         assert python_root == tmp_path
         # Node finds package.json at frontend
         assert node_root == frontend
+
+    @staticmethod
+    def test_project_evidence_from_pyproject_tool_table(tmp_path: Path) -> None:
+        """Tool-specific pyproject.toml config identifies the project manager."""
+        (tmp_path / 'pyproject.toml').write_text('[tool.mock-project]\n', encoding='utf-8')
+
+        assert _EvidenceProjectEnv.project_evidence(tmp_path) is True
+
+    @staticmethod
+    def test_poetry_command_plan_sets_runtime_before_install(tmp_path: Path) -> None:
+        """Poetry sync keeps its separate runtime-selection step."""
+        (tmp_path / 'pyproject.toml').touch()
+        python = tmp_path / 'python.exe'
+
+        plan = PoetryEnvironment.command_plan(tmp_path, runtime_context=RuntimeContext({'python': python}))
+
+        assert plan.directory == tmp_path
+        assert plan.steps == [
+            ['poetry', 'env', 'use', str(python)],
+            ['poetry', 'install'],
+        ]
+        assert plan.argv == ['poetry', 'install']

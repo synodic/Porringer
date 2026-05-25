@@ -1,17 +1,24 @@
-"""API for Porringer"""
+"""Helpers for api."""
+
+"""Public API surface for Porringer."""
 
 import asyncio
 import logging
 
 from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
+from porringer.backend.command.client import ClientCommands
 from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins
 from porringer.backend.command.package import PackageCommands
 from porringer.backend.command.plugin import PluginCommands
+from porringer.backend.command.profile import ProfileCommands
+from porringer.backend.command.project import ProjectCommands
 from porringer.backend.command.self import check_self_updates
 from porringer.backend.command.sync import SyncCommands
+from porringer.backend.command.tool import ToolCommands
 from porringer.backend.resolver import resolve_configuration
 from porringer.backend.schema import GlobalConfiguration
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.schema import (
     DownloadParameters,
     DownloadResult,
@@ -25,19 +32,14 @@ logger = logging.getLogger(__name__)
 
 
 class API:
-    """API for programmatic access to Porringer's functionality.
+    """Programmatic interface for Porringer's core operations.
 
-    Provides namespace sub-APIs:
-
-    * ``api.plugin``  — porringer extension management (install,
-      update, remove extension packages).
-    * ``api.package`` — managed-package operations (list, install,
-      upgrade, uninstall packages, check for updates).
-    * ``api.sync``    — manifest loading, streaming execution.
-    * ``api.cache``   — directory registration and validation.
+    The class exposes stable sub-APIs for manifest inspection and execution,
+    package management, project registration, cached tool operations, and
+    profile handling.
 
     Cross-cutting helpers live directly on the ``API`` class:
-    :meth:`discover_plugins`, :meth:`check_self_updates`,
+    :meth:`discover_plugins`, :meth:`check_self_updates`, and
     :meth:`download`.
     """
 
@@ -46,7 +48,7 @@ class API:
         local_configuration: LocalConfiguration,
         global_configuration: GlobalConfiguration | None = None,
     ) -> None:
-        """Initializes the API
+        """Initializes the API.
 
         Args:
             local_configuration: The local configuration.
@@ -57,13 +59,17 @@ class API:
 
         configuration = resolve_configuration(local_configuration, global_configuration)
 
-        self.cache = DirectoryCacheManager(configuration.data_directory)
+        self._cache = DirectoryCacheManager(configuration.data_directory)
 
-        self.plugin = PluginCommands()
+        self.extension = PluginCommands()
         self.package = PackageCommands()
-        self.sync = SyncCommands(self.cache)
+        self.sync = SyncCommands(self._cache)
+        self.project = ProjectCommands(self._cache, self.sync)
+        self.tool = ToolCommands(self.sync, self.package)
+        self.profile = ProfileCommands(self.sync)
+        self.client = ClientCommands(self.project, self.tool)
 
-    # --- Discovery & runtime resolution ---
+    # Discover plugins and resolve runtime information.
 
     @staticmethod
     async def discover_plugins(
@@ -76,14 +82,14 @@ class API:
         This is the recommended entry-point for GUI callers.  It
         returns a :class:`DiscoveredPlugins` object that can be
         forwarded to every subsequent operation
-        (``api.sync.execute_stream``, ``api.package.list``,
+        (``api.sync.inspect``, ``api.sync.run``, ``api.package.list``,
         ``api.package.upgrade``, etc.) so that plugin discovery and
         runtime resolution happen exactly once.
 
         Args:
             use_cache: Reuse cached entry-point scan metadata when
                 ``True`` (the default).  Pass ``False`` to force a
-                fresh scan after installing/removing plugin packages.
+                fresh scan after installing or uninstalling extension packages.
             resolve_runtime: When ``True`` (the default), resolve a
                 :class:`RuntimeContext` from available
                 ``RuntimeProvider`` plugins and attach it to the
@@ -96,14 +102,28 @@ class API:
         """
         plugins = await asyncio.to_thread(discover_all_plugins, use_cache=use_cache)
         if resolve_runtime:
-            plugins.runtime_context = await Builder.resolve_runtime_context(plugins.environments)
-            logger.debug(
-                'discover_plugins: runtime_context=%s',
-                {k: str(v) for k, v in plugins.runtime_context.executables.items()}
-                if plugins.runtime_context.executables
-                else '<empty>',
-            )
+            await API.resolve_runtime_context(plugins)
         return plugins
+
+    @staticmethod
+    async def resolve_runtime_context(plugins: DiscoveredPlugins) -> RuntimeContext:
+        """Resolve and attach runtime context for previously discovered plugins.
+
+        Args:
+            plugins: A :class:`DiscoveredPlugins` object, usually from
+                :meth:`discover_plugins` with ``resolve_runtime=False``.
+
+        Returns:
+            The resolved :class:`RuntimeContext` attached to ``plugins``.
+        """
+        plugins.runtime_context = await Builder.resolve_runtime_context(plugins.environments)
+        logger.debug(
+            'resolve_runtime_context: runtime_context=%s',
+            {k: str(v) for k, v in plugins.runtime_context.executables.items()}
+            if plugins.runtime_context.executables
+            else '<empty>',
+        )
+        return plugins.runtime_context
 
     @staticmethod
     async def check_self_updates() -> PackageUpdateInfo:

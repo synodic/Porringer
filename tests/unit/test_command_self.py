@@ -1,4 +1,6 @@
-"""Test the command 'self'"""
+"""Helpers for test command self."""
+
+"""Test the command 'self'."""
 
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -18,11 +20,11 @@ from porringer.schema import (
 
 
 class TestCommandSelf:
-    """Test the command 'self'"""
+    """Test the command 'self'."""
 
     @staticmethod
     async def test_self_check_returns_package_info() -> None:
-        """Test that check() returns PackageUpdateInfo"""
+        """Test that check() returns PackageUpdateInfo."""
         config = LocalConfiguration()
         api = API(config)
 
@@ -45,11 +47,11 @@ class TestCommandSelf:
 
 
 class TestVersionHelpers:
-    """Test the version helper functions"""
+    """Test the version helper functions."""
 
     @staticmethod
     def test_get_current_version_returns_version() -> None:
-        """Test that get_current_version returns a Version object"""
+        """Test that get_current_version returns a Version object."""
         # porringer should be installed in test environment
         version = get_current_version()
         # Should return a Version or None
@@ -57,7 +59,7 @@ class TestVersionHelpers:
 
     @staticmethod
     async def test_get_latest_pypi_version_success() -> None:
-        """Test successful PyPI version fetch"""
+        """Test successful PyPI version fetch."""
         mock_response = Mock()
         mock_response.json = AsyncMock(return_value={'info': {'version': '1.2.3'}})
         mock_response.raise_for_status = Mock()
@@ -76,7 +78,7 @@ class TestVersionHelpers:
 
     @staticmethod
     async def test_get_latest_pypi_version_network_error() -> None:
-        """Test that network errors return None"""
+        """Test that network errors return None."""
         mock_response = MagicMock()
         mock_response.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError('Network error'))
         mock_response.__aexit__ = AsyncMock(return_value=False)
@@ -92,7 +94,7 @@ class TestVersionHelpers:
 
     @staticmethod
     async def test_check_update_available() -> None:
-        """Test that check() correctly identifies available updates"""
+        """Test that check() correctly identifies available updates."""
         config = LocalConfiguration()
         api = API(config)
 
@@ -111,7 +113,7 @@ class TestVersionHelpers:
 
     @staticmethod
     async def test_check_no_update_available() -> None:
-        """Test that check() correctly identifies when already up to date"""
+        """Test that check() correctly identifies when already up to date."""
         config = LocalConfiguration()
         api = API(config)
 

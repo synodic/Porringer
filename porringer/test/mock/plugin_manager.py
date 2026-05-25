@@ -1,7 +1,9 @@
+"""Tests covering the plugin manager behavior."""
+
 """Mock plugin manager for testing routing logic without real tool dependencies.
 
 Provides a ``MockPluginManager`` that records which operations were
-requested (add vs update) so tests can assert on semantic intent
+requested (install vs upgrade) so tests can assert on semantic intent
 rather than exact CLI command strings.
 """
 
@@ -22,7 +24,7 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
 
     Attributes:
         operations: Chronological list of ``(verb, PackageRef)`` tuples
-            recorded by ``plugin_add`` and ``plugin_update``.
+            recorded by ``plugin_install`` and ``plugin_upgrade``.
     """
 
     def __init__(
@@ -56,16 +58,16 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
     # -- command builders (never executed, only used by get_cli_command) ------
 
     @override
-    def plugin_add_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
-        return ['mock-pm', 'add', plugin.specifier]
+    def plugin_install_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+        return ['mock-pm', 'install', plugin.specifier]
 
     @override
-    def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
-        return ['mock-pm', 'update', plugin.specifier]
+    def plugin_upgrade_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+        return ['mock-pm', 'upgrade', plugin.specifier]
 
     @override
-    def plugin_remove_command(self, plugin: PackageRef) -> list[str]:
-        return ['mock-pm', 'remove', plugin.name]
+    def plugin_uninstall_command(self, plugin: PackageRef) -> list[str]:
+        return ['mock-pm', 'uninstall', plugin.name]
 
     @override
     def plugin_list_command(self) -> list[str]:
@@ -78,18 +80,18 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
         return list(self._plugins)
 
     @override
-    async def plugin_add(self, params: PackageParameters) -> Package | None:
-        self.operations.append(('add', params.package))
+    async def plugin_install(self, params: PackageParameters) -> Package | None:
+        self.operations.append(('install', params.package))
         return Package(name=params.package.name, version=None)
 
     @override
-    async def plugin_update(self, params: PackageParameters) -> Package | None:
-        self.operations.append(('update', params.package))
+    async def plugin_upgrade(self, params: PackageParameters) -> Package | None:
+        self.operations.append(('upgrade', params.package))
         return Package(name=params.package.name, version=None)
 
     @override
-    async def plugin_remove(self, params: PackageParameters) -> Package | None:
-        self.operations.append(('remove', params.package))
+    async def plugin_uninstall(self, params: PackageParameters) -> Package | None:
+        self.operations.append(('uninstall', params.package))
         return Package(name=params.package.name, version=None)
 
     @override

@@ -1,5 +1,7 @@
 """Download utilities with hash verification and progress reporting."""
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import hashlib
@@ -10,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import aiohttp
+import stamina
 
 from porringer.schema import (
     CancellationToken,
@@ -23,9 +26,33 @@ from porringer.utility import HTTP_TIMEOUT
 logger = logging.getLogger(__name__)
 
 # Retry configuration for transient network errors.
-_MAX_RETRIES = 3
-_RETRY_BACKOFF_BASE = 1.0  # seconds; doubles each attempt
+_DOWNLOAD_ATTEMPTS = 3
 _SERVER_ERROR_THRESHOLD = 500  # HTTP status codes >= this are retryable
+
+
+def _is_retryable_download_error(exc: Exception) -> bool:
+    """Return whether stamina should retry a failed download attempt."""
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.status >= _SERVER_ERROR_THRESHOLD
+    return isinstance(exc, (aiohttp.ClientError, OSError))
+
+
+@stamina.retry(
+    on=_is_retryable_download_error,
+    attempts=_DOWNLOAD_ATTEMPTS,
+    timeout=None,
+    wait_initial=1.0,
+    wait_jitter=0.0,
+)
+async def _download_with_retries(
+    session: aiohttp.ClientSession,
+    state: _DownloadState,
+    cancellation_token: CancellationToken | None,
+) -> DownloadResult:
+    """Run one download attempt under stamina's retry policy."""
+    return await _download_attempt(session, state, cancellation_token)
 
 
 @dataclass(slots=True)
@@ -209,6 +236,8 @@ async def download_file(
     parameters: DownloadParameters,
     progress_callback: ProgressCallback | None = None,
     cancellation_token: CancellationToken | None = None,
+    *,
+    http_client: aiohttp.ClientSession | None = None,
 ) -> DownloadResult:
     """Asynchronously downloads a file with optional hash verification.
 
@@ -216,8 +245,8 @@ async def download_file(
     that need to keep their event loop responsive during downloads.
 
     Downloads to a temporary file first, verifies hash if provided,
-    then atomically moves to the destination.  Transient network errors
-    are retried up to ``_MAX_RETRIES`` times with exponential back-off.
+    then atomically moves to the destination. Transient network errors
+    are retried with exponential back-off.
 
     Note: Callbacks are invoked from the asyncio event loop thread.
     GUI applications must marshal updates to their UI thread.
@@ -226,6 +255,9 @@ async def download_file(
         parameters: Download parameters.
         progress_callback: Optional callback for progress updates (downloaded, total).
         cancellation_token: Optional token for cooperative cancellation.
+        http_client: Optional shared ``aiohttp.ClientSession`` for connection
+            pooling across multiple downloads.  When ``None`` a temporary
+            session is created for this single download.
 
     Returns:
         DownloadResult with success status and details.
@@ -252,43 +284,25 @@ async def download_file(
         progress_callback=progress_callback,
     )
 
-    last_result: DownloadResult | None = None
-
-    async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as session:
-        for attempt in range(_MAX_RETRIES):
-            try:
-                result = await _download_attempt(session, state, cancellation_token)
-                if not result.success:
-                    return result
-                return result
-
-            except asyncio.CancelledError:
-                logger.info('Download cancelled')
-                raise
-            except TimeoutError:
-                last_result = DownloadResult(
-                    success=False, message=f'Download timed out after {parameters.timeout} seconds'
-                )
-                logger.warning('Timeout on attempt %d/%d', attempt + 1, _MAX_RETRIES)
-            except aiohttp.ClientResponseError as e:
-                last_result = DownloadResult(success=False, message=str(e))
-                if e.status < _SERVER_ERROR_THRESHOLD:
-                    logger.error(f'HTTP error: {e}')
-                    return last_result
-                logger.warning('Retryable HTTP %d on attempt %d/%d', e.status, attempt + 1, _MAX_RETRIES)
-            except (aiohttp.ClientError, OSError) as e:
-                last_result = DownloadResult(success=False, message=str(e))
-                logger.warning('Network error on attempt %d/%d: %s', attempt + 1, _MAX_RETRIES, e)
-            except Exception as e:
-                logger.error(f'Download failed: {e}')
-                return DownloadResult(success=False, message=str(e))
-
-            if attempt < _MAX_RETRIES - 1:
-                delay = _RETRY_BACKOFF_BASE * (2**attempt)
-                logger.debug('Waiting %.1fs before retry', delay)
-                await asyncio.sleep(delay)
-
-    return last_result or DownloadResult(success=False, message='Download failed after retries')
+    async with (
+        contextlib.nullcontext(http_client) if http_client is not None else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
+    ) as session:
+        try:
+            return await _download_with_retries(session, state, cancellation_token)
+        except asyncio.CancelledError:
+            logger.info('Download cancelled')
+            raise
+        except TimeoutError:
+            return DownloadResult(success=False, message=f'Download timed out after {parameters.timeout} seconds')
+        except aiohttp.ClientResponseError as e:
+            logger.error(f'HTTP error: {e}')
+            return DownloadResult(success=False, message=str(e))
+        except (aiohttp.ClientError, OSError) as e:
+            logger.warning('Network error: %s', e)
+            return DownloadResult(success=False, message=str(e))
+        except Exception as e:
+            logger.error(f'Download failed: {e}')
+            return DownloadResult(success=False, message=str(e))
 
 
 async def _perform_download(
@@ -314,40 +328,41 @@ async def _perform_download(
 
     downloaded = 0
 
-    try:
-        async with (
-            asyncio.timeout(state.parameters.timeout),
-            session.get(state.parameters.url, allow_redirects=True) as response,
-        ):
-            response.raise_for_status()
+    # ``aiohttp.ClientResponseError`` is intentionally left to propagate so the
+    # caller's retry logic can handle HTTP errors.
+    async with (
+        asyncio.timeout(state.parameters.timeout),
+        session.get(state.parameters.url, allow_redirects=True) as response,
+    ):
+        response.raise_for_status()
 
-            total_size: int | None = None
-            content_length = response.headers.get('Content-Length')
-            if content_length:
-                total_size = int(content_length)
+        total_size: int | None = None
+        content_length = response.headers.get('Content-Length')
+        if content_length:
+            total_size = int(content_length)
 
-            # Validate size from headers
-            if state.parameters.expected_size and total_size and total_size != state.parameters.expected_size:
-                return DownloadResult(
-                    success=False,
-                    message=f'Size mismatch: expected {state.parameters.expected_size}, got {total_size}',
-                )
+        # Validate size from headers
+        if state.parameters.expected_size and total_size and total_size != state.parameters.expected_size:
+            return DownloadResult(
+                success=False,
+                message=f'Size mismatch: expected {state.parameters.expected_size}, got {total_size}',
+            )
 
-            with open(temp_fd, 'wb') as f:
-                async for chunk in response.content.iter_chunked(state.parameters.chunk_size):
-                    if cancellation_token is not None:
-                        cancellation_token.raise_if_cancelled()
+        # ``temp_fd`` is an already-open descriptor from ``mkstemp``; ``open`` only
+        # wraps it (no blocking filesystem open). Chunk writes are offloaded below.
+        with open(temp_fd, 'wb') as f:  # noqa: ASYNC230
+            async for chunk in response.content.iter_chunked(state.parameters.chunk_size):
+                if cancellation_token is not None:
+                    cancellation_token.raise_if_cancelled()
 
-                    f.write(chunk)
-                    downloaded += len(chunk)
+                await asyncio.to_thread(f.write, chunk)
+                downloaded += len(chunk)
 
-                    if hasher:
-                        hasher.update(chunk)
+                if hasher:
+                    hasher.update(chunk)
 
-                    if state.progress_callback:
-                        state.progress_callback(downloaded, total_size)
-    except aiohttp.ClientResponseError:
-        raise  # Let the caller's retry logic handle HTTP errors
+                if state.progress_callback:
+                    state.progress_callback(downloaded, total_size)
 
     logger.info(f'Downloaded {downloaded} bytes')
 

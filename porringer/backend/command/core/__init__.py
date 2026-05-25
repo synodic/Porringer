@@ -1,3 +1,5 @@
+"""Public package exports for the backend.command.core module."""
+
 """Core backend command modules.
 
 This package contains the core implementation modules for the

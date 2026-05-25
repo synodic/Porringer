@@ -1,12 +1,14 @@
+"""Helpers for test uninstall."""
+
 """Tests for the package uninstall feature.
 
 Covers:
 - resolve_uninstall_operation (presence → UNINSTALL or SKIP/NOT_INSTALLED)
-- execute_uninstall (routing to environment.uninstall / plugin_manager.plugin_remove)
+- execute_uninstall (routing to environment.uninstall / plugin_manager.plugin_uninstall)
 - get_uninstall_cli_command (preview command generation)
 - SkipReason.NOT_INSTALLED enum value
 - uninstall_command on MockEnvironment
-- plugin_remove_command / plugin_remove on MockPluginManager
+- plugin_uninstall_command / plugin_uninstall on MockPluginManager
 - PackageCommands.uninstall() auto-resolves runtime_context
 """
 
@@ -80,7 +82,7 @@ def _make_mock_env(*, installed: list[Package] | None = None) -> MockEnvironment
 
 
 # ---------------------------------------------------------------------------
-# MockPluginManager.plugin_remove_command / plugin_remove
+# MockPluginManager.plugin_uninstall_command / plugin_uninstall
 # ---------------------------------------------------------------------------
 
 
@@ -88,26 +90,26 @@ class TestMockPluginManagerRemove:
     """Verify MockPluginManager remove operations."""
 
     @staticmethod
-    def test_plugin_remove_command_returns_list() -> None:
-        """plugin_remove_command returns a list containing 'remove'."""
+    def test_plugin_uninstall_command_returns_list() -> None:
+        """plugin_uninstall_command returns a list containing 'uninstall'."""
         pm = MockPluginManager(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
-        cmd = pm.plugin_remove_command(ref)
+        cmd = pm.plugin_uninstall_command(ref)
         assert isinstance(cmd, list)
-        assert 'remove' in cmd
+        assert 'uninstall' in cmd
         assert 'cppython' in cmd
 
     @staticmethod
-    async def test_async_plugin_remove_records_operation() -> None:
-        """plugin_remove records a ('remove', ref) operation."""
+    async def test_async_plugin_uninstall_records_operation() -> None:
+        """plugin_uninstall records an ('uninstall', ref) operation."""
         pm = MockPluginManager(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         params = PackageParameters(package=ref)
-        result = await pm.plugin_remove(params)
+        result = await pm.plugin_uninstall(params)
         assert result is not None
         assert result.name == 'cppython'
         assert len(pm.operations) == 1
-        assert pm.operations[0] == ('remove', ref)
+        assert pm.operations[0] == ('uninstall', ref)
 
 
 # ---------------------------------------------------------------------------
@@ -259,8 +261,8 @@ class TestExecuteUninstall:
         assert result.skipped is True
 
     @staticmethod
-    async def test_plugin_target_routes_to_plugin_remove() -> None:
-        """execute_uninstall routes plugin-target to plugin_remove."""
+    async def test_plugin_target_routes_to_plugin_uninstall() -> None:
+        """execute_uninstall routes plugin-target to plugin_uninstall."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
@@ -269,7 +271,7 @@ class TestExecuteUninstall:
         result = await execute_uninstall(action, {}, asyncio.Queue(), context)
         assert result.success is True
         assert len(mock_pm.operations) == 1
-        assert mock_pm.operations[0][0] == 'remove'
+        assert mock_pm.operations[0][0] == 'uninstall'
 
     @staticmethod
     async def test_plugin_target_skips_when_not_installed() -> None:
@@ -324,12 +326,12 @@ class TestUninstallCliCommand:
         assert cmd == []
 
     @staticmethod
-    def test_plugin_target_returns_remove_command() -> None:
-        """get_uninstall_cli_command returns plugin_remove_command for plugin-target."""
+    def test_plugin_target_returns_uninstall_command() -> None:
+        """get_uninstall_cli_command returns plugin_uninstall_command for plugin-target."""
         mock_pm = MockPluginManager(_MOCK_PARAMS)
         ref = PackageRef.model_validate('cppython')
         action = SetupAction(
-            description="Remove 'cppython' from 'mock-pm'",
+            description="Uninstall 'cppython' from 'mock-pm'",
             kind=PluginKind.TOOL,
             ecosystem=_PY,
             installer='pipx',
@@ -342,7 +344,7 @@ class TestUninstallCliCommand:
             project_environments={'mockpmproject': mock_pm},
         )
         cmd = get_uninstall_cli_command(action, plugins)
-        assert cmd == mock_pm.plugin_remove_command(ref)
+        assert cmd == mock_pm.plugin_uninstall_command(ref)
 
     @staticmethod
     def test_returns_empty_for_project_kind() -> None:
@@ -367,7 +369,7 @@ class TestUninstallAutoResolveRuntimeContext:
     """PackageCommands.uninstall() auto-resolves RuntimeContext when none is provided.
 
     This ensures that RuntimeConsumer plugins (e.g. pip) can
-    locate and remove packages using the correct interpreter even
+    locate and uninstall packages using the correct interpreter even
     when the caller does not supply a runtime context.
     """
 

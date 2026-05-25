@@ -92,6 +92,22 @@ class ResolvedRuntime:
 
 
 @runtime_checkable
+class DefaultRuntimeExecutableProvider(Protocol):
+    """Optional runtime-provider hook for cheap default executable resolution.
+
+    Runtime providers can implement this when the provider's default
+    runtime executable can be resolved directly, without first resolving a
+    tag and then resolving that tag to an executable. Providers that do not
+    implement it continue to use ``default_tag`` and ``available_tags``.
+    """
+
+    @abstractmethod
+    async def default_executable(self) -> Path | None:
+        """Return the provider's default runtime executable, if available."""
+        ...
+
+
+@runtime_checkable
 class RuntimeProvider(Protocol):
     """A plugin that can resolve a managed interpreter path.
 

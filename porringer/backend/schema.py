@@ -1,4 +1,6 @@
-"""Backend schema"""
+"""Backend helpers for schema."""
+
+"""Backend schema."""
 
 from pathlib import Path
 
@@ -7,7 +9,7 @@ from pydantic import BaseModel, DirectoryPath, Field
 
 
 class GlobalConfiguration(BaseModel):
-    """Global configuration that Porringer manages"""
+    """Global configuration that Porringer manages."""
 
     config_directory: Path = Field(
         default=Path(user_config_dir('porringer', 'synodic')),
@@ -21,7 +23,7 @@ class GlobalConfiguration(BaseModel):
 
 
 class ResolvedDirectories(BaseModel):
-    """Resolved configuration directories"""
+    """Resolved configuration directories."""
 
     cache_directory: DirectoryPath
     config_directory: DirectoryPath

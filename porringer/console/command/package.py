@@ -1,3 +1,5 @@
+"""CLI command implementation for package."""
+
 """Porringer CLI package command module for managed-package operations."""
 
 import asyncio
@@ -19,9 +21,9 @@ app = typer.Typer()
 def _print_result(configuration: ConsoleConfiguration, result: SetupActionResult, fallback_verb: str) -> None:
     """Print a success/failure message and exit on failure."""
     if result.success:
-        configuration.console.print(f'[green]{result.message or result.action.description}[/green]')
+        configuration.output.success(result.message or result.action.description)
     else:
-        configuration.console.print(f'[red]{result.message or f"{fallback_verb} failed"}[/red]')
+        configuration.output.error(result.message or f'{fallback_verb} failed', prefix=None)
         raise typer.Exit(code=1)
 
 
@@ -46,11 +48,11 @@ def package_list(
     try:
         packages = asyncio.run(PackageCommands.list(plugin_name, resolved_path))
     except PluginError as e:
-        configuration.console.print(f'[red]Error: {e.error}[/red]')
+        configuration.output.error(str(e.error))
         raise typer.Exit(code=1) from None
 
     if not packages:
-        configuration.console.print(f'[yellow]No packages found for plugin: {plugin_name}[/yellow]')
+        configuration.output.warning(f'No packages found for plugin: {plugin_name}')
     else:
         table = Table(title=f'Packages ({plugin_name})')
         table.add_column('Name', style='cyan')
@@ -63,7 +65,7 @@ def package_list(
                 host_text = f'{pkg.relation.host} ({pkg.relation.kind.value})'
             table.add_row(pkg.name, pkg.version or 'n/a', host_text)
 
-        configuration.console.print(table)
+        configuration.output.print(table)
 
 
 @app.command('install')

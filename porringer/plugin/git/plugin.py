@@ -1,3 +1,5 @@
+"""Plugin integration for plugin."""
+
 """Git SCM plugin implementation."""
 
 import asyncio

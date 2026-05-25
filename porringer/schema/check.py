@@ -1,10 +1,14 @@
+"""Data models and schemas for check."""
+
 """Check/update schemas."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from packaging.version import Version
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from porringer.core.schema import PorringerModel
 
 
 @dataclass(slots=True)
@@ -70,10 +74,18 @@ class RuntimeCheckResult:
     results: list[CheckResult] = field(default_factory=list)
 
 
-class CheckParameters(BaseModel):
+class CheckParameters(PorringerModel):
     """Parameters for checking updates via plugins."""
 
     plugins: list[str] | None = Field(
         default=None, description='List of plugin names to check. None means all plugins.'
     )
     include_prereleases: bool = Field(default=False, description='Include pre-release versions')
+    max_concurrency: int = Field(
+        default=8,
+        description=(
+            'Maximum number of plugins checked concurrently. Set to 0 for '
+            'unlimited concurrency. Applied via an ``asyncio.Semaphore`` around '
+            'each dispatched check.'
+        ),
+    )

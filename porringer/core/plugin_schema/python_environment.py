@@ -1,3 +1,5 @@
+"""Core helpers and types for python environment."""
+
 """Intermediate base for Python-ecosystem environment plugins.
 
 Plugins that install Python packages (pip, uv, pipx) share several
@@ -19,6 +21,7 @@ import logging
 import shutil
 import subprocess
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import aiohttp
@@ -28,6 +31,8 @@ from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Env
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 from porringer.utility import HTTP_TIMEOUT
+from porringer.utility.concurrency import gather_bounded
+from porringer.utility.trace import CommandTrace
 
 
 def _pick_highest_version(releases: dict[str, object], *, stable_only: bool) -> Version | None:
@@ -139,15 +144,19 @@ class PythonEnvironment(Environment, RuntimeConsumer):
         Returns:
             ``True`` if the import succeeds, ``False`` otherwise.
         """
+        args = [python, '-c', f'import {module}']
+        trace = CommandTrace.start(args)
         try:
             result = subprocess.run(
-                [python, '-c', f'import {module}'],
+                args,
                 capture_output=True,
                 timeout=10,
                 check=False,
             )
+            trace.finish(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
             return result.returncode == 0
-        except OSError, subprocess.SubprocessError:
+        except (OSError, subprocess.SubprocessError) as exc:
+            trace.finish(returncode=None, error=f'{type(exc).__name__}: {exc}')
             return False
 
     def python_command(self, runtime_context: RuntimeContext | None = None) -> str:
@@ -253,19 +262,22 @@ class PythonEnvironment(Environment, RuntimeConsumer):
             available on PyPI.
         """
         logger = logging.getLogger(f'porringer.{self.tool_name()}.check_pypi')
-        results: list[Package] = []
 
         async with (
             contextlib.nullcontext(params.http_client)
             if params.http_client is not None
             else aiohttp.ClientSession(timeout=HTTP_TIMEOUT)
         ) as session:
-            for pkg_ref in params.packages:
-                pkg = await self._check_single_pypi_package(session, pkg_ref, params.include_prereleases, logger)
-                if pkg is not None:
-                    results.append(pkg)
 
-        return results
+            def _make_check(pkg_ref: PackageRef) -> Callable[[], Awaitable[Package | None]]:
+                return lambda: self._check_single_pypi_package(session, pkg_ref, params.include_prereleases, logger)
+
+            gathered = await gather_bounded(
+                (_make_check(pkg_ref) for pkg_ref in params.packages),
+                limit=params.max_concurrency,
+            )
+
+        return [pkg for pkg in gathered if pkg is not None]
 
     @staticmethod
     async def _check_single_pypi_package(

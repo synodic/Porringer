@@ -1,3 +1,5 @@
+"""Plugin integration for plugin."""
+
 """Plugin implementation for APT (Advanced Package Tool) package manager."""
 
 import logging
@@ -62,24 +64,14 @@ class APTEnvironment(Environment):
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to install a package via apt."""
-        # apt uses name=version for exact pinning
-        if package.constraint:
-            return ['apt', 'install', f'{package.name}={package.constraint}']
-        return ['apt', 'install', package.name]
+        return ['apt', 'install', package.specifier_for('equals')]
 
     @override
     def upgrade_command(
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to upgrade a package via apt."""
-        if package.constraint:
-            return [
-                'apt',
-                'install',
-                '--only-upgrade',
-                f'{package.name}={package.constraint}',
-            ]
-        return ['apt', 'install', '--only-upgrade', package.name]
+        return ['apt', 'install', '--only-upgrade', package.specifier_for('equals')]
 
     @override
     def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
@@ -121,9 +113,6 @@ class APTEnvironment(Environment):
         Overrides the base to use `-y` auto-confirm and resolve
         the installed version afterward.
         """
-        if params.progress_callback is None:
-            return await super().install(params)
-
         logger = logging.getLogger('porringer.apt.install')
         package = params.package.name
 
@@ -150,9 +139,6 @@ class APTEnvironment(Environment):
         Overrides the base to use `-y --only-upgrade` and resolve
         the installed version afterward.
         """
-        if params.progress_callback is None:
-            return await super().upgrade(params)
-
         logger = logging.getLogger('porringer.apt.upgrade')
         package = params.package.name
 

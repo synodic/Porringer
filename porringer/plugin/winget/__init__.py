@@ -1,3 +1,5 @@
+"""Public package exports for the plugin.winget module."""
+
 """Winget plugin package for Porringer.
 
 This package contains the implementation of the Winget environment plugin,

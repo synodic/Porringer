@@ -1,17 +1,24 @@
+"""Public package exports for the schema module."""
+
 """Schema package for Porringer.
 
 All public types are re-exported here for flat access via
 ``from porringer.schema import X``.
 """
 
-from porringer.schema.cache import DirectoryCache, DirectoryValidationResult, ManifestDirectory
+from porringer.schema.cache import (
+    DirectoryCache,
+    DirectoryValidationResult,
+    LocalConfiguration,
+    ManifestDirectory,
+)
 from porringer.schema.check import CheckParameters, CheckResult, PackageUpdateInfo, RuntimeCheckResult
-from porringer.schema.config import LocalConfiguration
 from porringer.schema.download import DownloadParameters, DownloadResult, HashAlgorithm, ProgressCallback
 from porringer.schema.execution import (
     BatchSetupResults,
     CloneStatus,
     CloneStatusKind,
+    InspectionMode,
     Install,
     InstallReason,
     Operation,
@@ -21,11 +28,26 @@ from porringer.schema.execution import (
     SetupResults,
     Skip,
     SkipReason,
+    SyncRunReport,
     SyncStrategy,
     Uninstall,
     Upgrade,
 )
+from porringer.schema.inspection import (
+    ActionInspection,
+    ActionSnapshot,
+    DiscoveredPluginSnapshot,
+    FailedPathInspection,
+    InspectionStatus,
+    InspectionSummary,
+    ManifestDiagnosticSnapshot,
+    ManifestInspection,
+    ManifestMetadataSnapshot,
+    SyncInspectionReport,
+)
 from porringer.schema.manifest import (
+    MANIFEST_SCHEMA_DIALECT,
+    MANIFEST_SCHEMA_URL,
     ManifestDiagnostic,
     ManifestDiagnosticSeverity,
     ManifestMetadata,
@@ -34,6 +56,21 @@ from porringer.schema.manifest import (
     PluginSpec,
     SetupManifest,
 )
+from porringer.schema.observability import (
+    SCHEMA_VERSION,
+    ActionRef,
+    ActionRisk,
+    Diagnostic,
+    DiagnosticSeverity,
+    DiagnosticTarget,
+    FollowUpAction,
+    Remediation,
+    ReplayRecord,
+    ResultEnvelope,
+    ResultStatus,
+    ResultSummary,
+    action_id_for,
+)
 from porringer.schema.plugin import (
     PluginCapability,
     PluginInfo,
@@ -41,24 +78,44 @@ from porringer.schema.plugin import (
     RuntimePackageResult,
     ScopedPackage,
 )
+from porringer.schema.profile import SetupProfile, SetupProfileExecution, SetupProfileInspection, SetupProfileManifest
 from porringer.schema.progress import (
     ActionCompletedEvent,
+    ActionProgress,
+    ActionProgressEvent,
+    ActionProgressSnapshot,
     ActionStartedEvent,
     CancellationToken,
     DiscoveredPluginEntry,
+    FailedPathProgressSnapshot,
     ManifestFailedEvent,
     ManifestLoadedEvent,
-    ManifestParsedEvent,
+    ManifestProgressSnapshot,
     PluginsDiscoveredEvent,
     ProgressEvent,
-    SubActionProgress,
-    SubActionProgressEvent,
+    ProgressEventSnapshot,
+    SetupActionResultSnapshot,
+    progress_event_snapshot,
 )
+from porringer.schema.project import (
+    ProjectDirectorySnapshot,
+    ProjectInspection,
+    ProjectInspectionReport,
+    ProjectInspectionSummary,
+    ProjectState,
+)
+from porringer.schema.snapshot import ClientSnapshot
+from porringer.schema.tool import ManagedPackageResult, ManagedToolReport
 from porringer.utility.exception import ManifestValidationCode
 
 __all__ = [
     'ActionCompletedEvent',
+    'ActionInspection',
+    'ActionRef',
+    'ActionRisk',
     'ActionStartedEvent',
+    'ActionSnapshot',
+    'FollowUpAction',
     'BatchSetupResults',
     'CancellationToken',
     'CheckParameters',
@@ -68,22 +125,38 @@ __all__ = [
     'CloneStatusKind',
     'DirectoryCache',
     'DirectoryValidationResult',
+    'Diagnostic',
+    'DiagnosticSeverity',
+    'DiagnosticTarget',
+    'DiscoveredPluginSnapshot',
     'DiscoveredPluginEntry',
     'DownloadParameters',
     'DownloadResult',
+    'FailedPathInspection',
+    'FailedPathProgressSnapshot',
     'HashAlgorithm',
     'Install',
     'InstallReason',
+    'InspectionStatus',
+    'InspectionMode',
+    'InspectionSummary',
     'LocalConfiguration',
     'ManifestDiagnostic',
+    'ManifestDiagnosticSnapshot',
     'ManifestDiagnosticSeverity',
     'ManifestDirectory',
     'ManifestFailedEvent',
     'ManifestLoadedEvent',
     'ManifestMetadata',
-    'ManifestParsedEvent',
+    'ManifestMetadataSnapshot',
+    'ManifestInspection',
+    'ManifestProgressSnapshot',
     'ManifestValidationCode',
     'ManifestValidationResult',
+    'MANIFEST_SCHEMA_DIALECT',
+    'MANIFEST_SCHEMA_URL',
+    'ManagedPackageResult',
+    'ManagedToolReport',
     'Operation',
     'PackageSpec',
     'PackageUpdateInfo',
@@ -93,19 +166,42 @@ __all__ = [
     'PluginsDiscoveredEvent',
     'PluginSpec',
     'RuntimePackageResult',
+    'Remediation',
+    'ReplayRecord',
+    'ResultEnvelope',
+    'ResultStatus',
+    'ResultSummary',
     'ProgressCallback',
     'ProgressEvent',
+    'ProgressEventSnapshot',
+    'ProjectDirectorySnapshot',
+    'ProjectInspection',
+    'ProjectInspectionReport',
+    'ProjectInspectionSummary',
+    'ProjectState',
+    'SCHEMA_VERSION',
     'ScopedPackage',
     'SetupAction',
     'SetupActionResult',
+    'SetupActionResultSnapshot',
+    'SetupProfile',
+    'SetupProfileExecution',
+    'SetupProfileInspection',
+    'SetupProfileManifest',
     'SetupManifest',
     'SetupParameters',
     'SetupResults',
     'Skip',
     'SkipReason',
-    'SubActionProgress',
-    'SubActionProgressEvent',
+    'ActionProgress',
+    'ActionProgressEvent',
+    'ActionProgressSnapshot',
+    'SyncInspectionReport',
+    'SyncRunReport',
     'SyncStrategy',
+    'ClientSnapshot',
     'Uninstall',
     'Upgrade',
+    'action_id_for',
+    'progress_event_snapshot',
 ]

@@ -1,17 +1,24 @@
-"""Progress streaming schemas."""
+"""Progress event schemas."""
+
+from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from porringer.core.schema import PluginKind
+from pydantic import Field
+
+from porringer.core.schema import PluginKind, PorringerModel
 from porringer.schema.execution import SetupAction, SetupActionResult, SetupResults
+from porringer.schema.inspection import ActionSnapshot, DiscoveredPluginSnapshot
+from porringer.schema.observability import SCHEMA_VERSION, ActionRef
 from porringer.schema.plugin import PluginCapability
 
 
 @dataclass(slots=True)
-class SubActionProgress:
+class ActionProgress:
     """Fine-grained progress update from within a plugin operation.
 
     Plugins emit these to report phases and percentages during long-running
@@ -23,7 +30,7 @@ class SubActionProgress:
         progress: 0.0–1.0 completion fraction, or `None` if indeterminate.
         message: Human-readable status line (e.g. `"Downloading ruff-0.8.0.whl (2.1 MB)"`).
         output: Raw output line from the subprocess, for log panel display.
-        stream: Which subprocess stream the output came from (`"stdout"` or `"stderr"`).
+        channel: Which subprocess channel the output came from (`"stdout"` or `"stderr"`).
     """
 
     action: SetupAction
@@ -31,7 +38,7 @@ class SubActionProgress:
     progress: float | None = None
     message: str | None = None
     output: str | None = None
-    stream: Literal['stdout', 'stderr'] | None = None
+    channel: Literal['stdout', 'stderr'] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -61,6 +68,7 @@ class ManifestLoadedEvent:
     """Emitted when a manifest has been fully resolved and is ready for execution."""
 
     manifest: SetupResults
+    manifest_index: int | None = None
 
 
 @dataclass(slots=True)
@@ -68,6 +76,7 @@ class ManifestFailedEvent:
     """Emitted when a manifest path could not be loaded."""
 
     failed_path: tuple[Path, str]
+    manifest_index: int | None = None
 
 
 @dataclass(slots=True)
@@ -78,18 +87,17 @@ class PluginsDiscoveredEvent:
 
 
 @dataclass(slots=True)
-class ManifestParsedEvent:
-    """Emitted after a manifest is parsed but before execution (fast preview)."""
-
-    manifest: SetupResults
-
-
-@dataclass(slots=True)
 class ActionStartedEvent:
     """Emitted when an action begins execution."""
 
     action: SetupAction
+    action_ref: ActionRef | None = None
     action_index: int | None = None
+
+    def __post_init__(self) -> None:
+        """Keep legacy action_index populated when an action ref is available."""
+        if self.action_index is None and self.action_ref is not None:
+            self.action_index = self.action_ref.action_index
 
 
 @dataclass(slots=True)
@@ -98,25 +106,191 @@ class ActionCompletedEvent:
 
     action: SetupAction
     result: SetupActionResult
+    action_ref: ActionRef | None = None
     action_index: int | None = None
+
+    def __post_init__(self) -> None:
+        """Keep legacy action_index populated when an action ref is available."""
+        if self.action_index is None and self.action_ref is not None:
+            self.action_index = self.action_ref.action_index
 
 
 @dataclass(slots=True)
-class SubActionProgressEvent:
+class ActionProgressEvent:
     """Emitted for fine-grained progress within an action."""
 
     action: SetupAction
-    sub_action: SubActionProgress
+    progress: ActionProgress
+    action_ref: ActionRef | None = None
+
+
+class SetupActionResultSnapshot(PorringerModel):
+    """JSON-stable projection of an action result."""
+
+    success: bool
+    skipped: bool = False
+    skip_reason: str | None = None
+    message: str | None = None
+    installed_version: str | None = None
+    available_version: str | None = None
+    cli_command: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class ActionProgressSnapshot(PorringerModel):
+    """JSON-stable projection of fine-grained action progress."""
+
+    phase: str
+    progress: float | None = None
+    message: str | None = None
+    output: str | None = None
+    channel: Literal['stdout', 'stderr'] | None = None
+
+
+class ManifestProgressSnapshot(PorringerModel):
+    """JSON-stable projection of a loaded manifest progress event."""
+
+    manifest_index: int | None = None
+    manifest_path: Path | None = None
+    root_directory: Path | None = None
+    actions: int = 0
+
+
+class FailedPathProgressSnapshot(PorringerModel):
+    """JSON-stable projection of a failed manifest path event."""
+
+    manifest_index: int | None = None
+    path: Path
+    error: str
+
+
+class ProgressEventSnapshot(PorringerModel):
+    """Stable JSON envelope for progress events."""
+
+    schema_version: str = SCHEMA_VERSION
+    event_type: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    correlation_id: str | None = None
+    action_ref: ActionRef | None = None
+    action_id: str | None = None
+    action: ActionSnapshot | None = None
+    result: SetupActionResultSnapshot | None = None
+    action_progress: ActionProgressSnapshot | None = None
+    manifest: ManifestProgressSnapshot | None = None
+    failed_path: FailedPathProgressSnapshot | None = None
+    discovered_plugins: tuple[DiscoveredPluginSnapshot, ...] = Field(default_factory=tuple)
+
+
+def _snapshot_action(action: SetupAction, action_ref: ActionRef | None, action_index: int | None) -> ActionSnapshot:
+    """Project a setup action into the shared JSON action shape."""
+    package = str(action.package) if action.package is not None else None
+    index = action_ref.action_index if action_ref is not None else action_index or 0
+    return ActionSnapshot(
+        index=index,
+        ref=action_ref,
+        action_id=action_ref.action_id if action_ref is not None else None,
+        manifest_index=action_ref.manifest_index if action_ref is not None else None,
+        action_index=action_ref.action_index if action_ref is not None else action_index,
+        description=action.description,
+        kind=action.kind.value if action.kind is not None else None,
+        ecosystem=str(action.ecosystem) if action.ecosystem is not None else None,
+        installer=action.installer,
+        package=package,
+        package_name=action.package.name if action.package is not None else None,
+        package_constraint=action.package.constraint if action.package is not None else None,
+        plugin_target=str(action.plugin_target) if action.plugin_target is not None else None,
+        package_description=action.package_description,
+        include_prereleases=action.include_prereleases,
+        runtime_tag=action.runtime_tag,
+    )
+
+
+def _snapshot_result(result: SetupActionResult) -> SetupActionResultSnapshot:
+    """Project an action result into the stable JSON result shape."""
+    return SetupActionResultSnapshot(
+        success=result.success,
+        skipped=result.skipped,
+        skip_reason=result.skip_reason.name if result.skip_reason is not None else None,
+        message=result.message,
+        installed_version=result.installed_version,
+        available_version=result.available_version,
+        cli_command=result.cli_command or (),
+    )
+
+
+def progress_event_snapshot(event: ProgressEvent, *, correlation_id: str | None = None) -> ProgressEventSnapshot:
+    """Convert a runtime progress event to a stable JSON snapshot."""
+    if isinstance(event, ManifestLoadedEvent):
+        return ProgressEventSnapshot(
+            event_type='manifest_loaded',
+            correlation_id=correlation_id,
+            manifest=ManifestProgressSnapshot(
+                manifest_index=event.manifest_index,
+                manifest_path=event.manifest.manifest_path,
+                root_directory=event.manifest.root_directory,
+                actions=len(event.manifest.actions),
+            ),
+        )
+    if isinstance(event, ManifestFailedEvent):
+        path, error = event.failed_path
+        return ProgressEventSnapshot(
+            event_type='manifest_failed',
+            correlation_id=correlation_id,
+            failed_path=FailedPathProgressSnapshot(manifest_index=event.manifest_index, path=path, error=error),
+        )
+    if isinstance(event, PluginsDiscoveredEvent):
+        return ProgressEventSnapshot(
+            event_type='plugins_discovered',
+            correlation_id=correlation_id,
+            discovered_plugins=tuple(
+                DiscoveredPluginSnapshot(
+                    name=entry.name,
+                    available=entry.available,
+                    capabilities=tuple(sorted(capability.name.lower() for capability in entry.capabilities)),
+                    kind=entry.kind.value,
+                )
+                for entry in event.discovered_plugins
+            ),
+        )
+    if isinstance(event, ActionStartedEvent):
+        return ProgressEventSnapshot(
+            event_type='action_started',
+            correlation_id=correlation_id,
+            action_ref=event.action_ref,
+            action_id=event.action_ref.action_id if event.action_ref is not None else None,
+            action=_snapshot_action(event.action, event.action_ref, event.action_index),
+        )
+    if isinstance(event, ActionCompletedEvent):
+        return ProgressEventSnapshot(
+            event_type='action_completed',
+            correlation_id=correlation_id,
+            action_ref=event.action_ref,
+            action_id=event.action_ref.action_id if event.action_ref is not None else None,
+            action=_snapshot_action(event.action, event.action_ref, event.action_index),
+            result=_snapshot_result(event.result),
+        )
+    return ProgressEventSnapshot(
+        event_type='action_progress',
+        correlation_id=correlation_id,
+        action_ref=event.action_ref,
+        action_id=event.action_ref.action_id if event.action_ref is not None else None,
+        action=_snapshot_action(event.action, event.action_ref, None),
+        action_progress=ActionProgressSnapshot(
+            phase=event.progress.phase,
+            progress=event.progress.progress,
+            message=event.progress.message,
+            output=event.progress.output,
+            channel=event.progress.channel,
+        ),
+    )
 
 
 type ProgressEvent = (
     ManifestLoadedEvent
     | ManifestFailedEvent
     | PluginsDiscoveredEvent
-    | ManifestParsedEvent
     | ActionStartedEvent
     | ActionCompletedEvent
-    | SubActionProgressEvent
+    | ActionProgressEvent
 )
 
 

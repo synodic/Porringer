@@ -1,3 +1,5 @@
+"""Tests covering the scm behavior."""
+
 """Mock SCM environment data."""
 
 from pathlib import Path

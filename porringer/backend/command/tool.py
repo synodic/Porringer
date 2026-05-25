@@ -1,0 +1,268 @@
+"""CLI command implementation for tool."""
+
+"""Managed tool/package operations over cached manifests."""
+
+from collections.abc import Callable
+
+from porringer.backend.command.core.discovery import DiscoveredPlugins
+from porringer.backend.command.package import PackageCommands
+from porringer.backend.command.sync import SyncCommands
+from porringer.core.schema import PackageRef
+from porringer.schema import (
+    BatchSetupResults,
+    FailedPathInspection,
+    InspectionMode,
+    InspectionStatus,
+    ManagedPackageResult,
+    ManagedToolReport,
+    ProgressEvent,
+    SetupActionResult,
+    SetupParameters,
+    SetupResults,
+    SyncStrategy,
+)
+from porringer.schema.inspection import ActionInspection, SyncInspectionReport
+from porringer.utility.observability import (
+    batch_diagnostics,
+    batch_follow_up_actions,
+    result_status,
+)
+
+
+class ToolCommands:
+    """High-level managed package/tool operations for downstream clients."""
+
+    def __init__(self, sync_commands: SyncCommands, package_commands: PackageCommands) -> None:
+        """Initialize tool commands."""
+        self._sync = sync_commands
+        self._package = package_commands
+
+    async def check_updates(
+        self,
+        *,
+        plugins: DiscoveredPlugins | None = None,
+        plugin_names: set[str] | None = None,
+        include_packages: set[str] | None = None,
+    ) -> ManagedToolReport:
+        """Check cached manifests for managed packages with updates available."""
+        params = SetupParameters(
+            paths=None,
+            inspection_mode=InspectionMode.COMPLETE,
+            plugins=plugin_names,
+            include_packages=include_packages,
+            fail_fast=False,
+        )
+        report = await self._sync.inspect(params, plugins=plugins)
+        return _report_from_inspection('check_updates', report)
+
+    async def upgrade_cached(
+        self,
+        *,
+        plugins: DiscoveredPlugins | None = None,
+        plugin_names: set[str] | None = None,
+        include_packages: set[str] | None = None,
+        on_event: Callable[[ProgressEvent], object] | None = None,
+    ) -> ManagedToolReport:
+        """Upgrade managed packages declared by cached manifests.
+
+        Cached-manifest tool upgrades change package/tool state and do not
+        execute separate project-command hooks.
+        """
+        params = SetupParameters(
+            paths=None,
+            strategy=SyncStrategy.LATEST,
+            plugins=plugin_names,
+            include_packages=include_packages,
+            fail_fast=False,
+        )
+        report = await self._sync.run(params, plugins=plugins, on_event=on_event)
+        return _report_from_batch('upgrade_cached', report.results)
+
+    async def upgrade_plugin(
+        self,
+        plugin_name: str,
+        *,
+        package: str | PackageRef | None = None,
+        runtime_tag: str | None = None,
+        include_packages: set[str] | None = None,
+        plugins: DiscoveredPlugins | None = None,
+        on_event: Callable[[ProgressEvent], object] | None = None,
+    ) -> ManagedToolReport:
+        """Upgrade one plugin through cached manifests, or one package imperatively."""
+        if package is not None:
+            return await self.upgrade_package(plugin_name, package, runtime_tag=runtime_tag, plugins=plugins)
+        if runtime_tag is not None:
+            return await self._upgrade_runtime_plugin(
+                plugin_name,
+                runtime_tag,
+                include_packages=include_packages,
+                plugins=plugins,
+            )
+        return await self.upgrade_cached(
+            plugins=plugins,
+            plugin_names={plugin_name},
+            include_packages=include_packages,
+            on_event=on_event,
+        )
+
+    async def upgrade_package(
+        self,
+        plugin_name: str,
+        package: str | PackageRef,
+        *,
+        runtime_tag: str | None = None,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> ManagedToolReport:
+        """Upgrade or install one managed package."""
+        package_ref = package if isinstance(package, PackageRef) else PackageRef.model_validate(package)
+        result = await self._package.upgrade(
+            plugin_name,
+            package_ref,
+            runtime_tag=runtime_tag,
+            plugins=plugins,
+        )
+        return _report_from_results('upgrade_package', (result,))
+
+    async def uninstall_package(
+        self,
+        plugin_name: str,
+        package: str | PackageRef,
+        *,
+        runtime_tag: str | None = None,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> ManagedToolReport:
+        """Remove one managed package."""
+        package_ref = package if isinstance(package, PackageRef) else PackageRef.model_validate(package)
+        result = await self._package.uninstall(
+            plugin_name,
+            package_ref,
+            runtime_tag=runtime_tag,
+            plugins=plugins,
+        )
+        return _report_from_results('uninstall_package', (result,))
+
+    async def _upgrade_runtime_plugin(
+        self,
+        plugin_name: str,
+        runtime_tag: str,
+        *,
+        include_packages: set[str] | None = None,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> ManagedToolReport:
+        """Upgrade all packages for one runtime-scoped plugin."""
+        runtime_packages = await self._package.list_by_runtime(plugin_name, plugins=plugins)
+        if runtime_packages is None:
+            return ManagedToolReport(operation='upgrade_runtime_plugin')
+
+        results: list[ManagedPackageResult] = []
+        for runtime_result in runtime_packages:
+            if runtime_result.tag != runtime_tag:
+                continue
+            for package in runtime_result.packages:
+                package_name = package.name
+                if include_packages is not None and package_name not in include_packages:
+                    continue
+                action_result = await self._package.upgrade(
+                    plugin_name,
+                    PackageRef(name=package_name),
+                    runtime_tag=runtime_tag,
+                    plugins=plugins,
+                )
+                results.append(_result_snapshot(action_result))
+        success = all(result.success for result in results)
+        return ManagedToolReport(
+            operation='upgrade_runtime_plugin',
+            status=result_status(success),
+            results=tuple(results),
+        )
+
+
+def _report_from_inspection(operation: str, report: SyncInspectionReport) -> ManagedToolReport:
+    """Build a tool report from an inspection report."""
+    results = [
+        _inspection_snapshot(action)
+        for manifest in report.manifests
+        for action in manifest.actions
+        if action.status == InspectionStatus.UPDATE_AVAILABLE
+    ]
+    return ManagedToolReport(
+        operation=operation,
+        status=result_status(report.success, report.diagnostics),
+        manifests_processed=report.summary.manifests,
+        results=tuple(results),
+        failed_paths=report.failed_paths,
+        diagnostics=report.diagnostics,
+        follow_up_actions=tuple(
+            action
+            for action in report.follow_up_actions
+            if action.target is not None and action.target.kind in {'action', 'package'}
+        ),
+    )
+
+
+def _report_from_batch(operation: str, batch: BatchSetupResults) -> ManagedToolReport:
+    """Build a tool report from collected execution results."""
+    results = tuple(_result_snapshot(result) for manifest in batch.manifest_results for result in manifest.results)
+    failed_paths = tuple(FailedPathInspection(path=path, error=error) for path, error in batch.failed_paths)
+    diagnostics = batch_diagnostics(batch)
+    return ManagedToolReport(
+        operation=operation,
+        status=result_status(batch.success, diagnostics),
+        manifests_processed=len(batch.manifest_results),
+        results=results,
+        failed_paths=failed_paths,
+        diagnostics=diagnostics,
+        follow_up_actions=batch_follow_up_actions(batch),
+    )
+
+
+def _report_from_results(operation: str, results: tuple[SetupActionResult, ...]) -> ManagedToolReport:
+    """Build a tool report from imperative package command results."""
+    batch = BatchSetupResults(
+        manifest_results=[
+            SetupResults(
+                actions=[result.action for result in results],
+                results=list(results),
+            )
+        ]
+    )
+    diagnostics = batch_diagnostics(batch)
+    return ManagedToolReport(
+        operation=operation,
+        status=result_status(batch.success, diagnostics),
+        results=tuple(_result_snapshot(result) for result in results),
+        diagnostics=diagnostics,
+        follow_up_actions=batch_follow_up_actions(batch),
+    )
+
+
+def _inspection_snapshot(action: ActionInspection) -> ManagedPackageResult:
+    """Project an inspected package action into a tool result."""
+    return ManagedPackageResult(
+        plugin=action.action.installer,
+        package=action.action.package_name,
+        kind=action.action.kind,
+        action_id=action.action_id,
+        success=action.success,
+        skipped=action.skipped,
+        skip_reason=action.skip_reason,
+        message=action.message,
+        installed_version=action.installed_version,
+        available_version=action.available_version,
+    )
+
+
+def _result_snapshot(result: SetupActionResult) -> ManagedPackageResult:
+    """Project a setup action result into a tool result."""
+    action = result.action
+    return ManagedPackageResult(
+        plugin=action.installer,
+        package=action.package.name if action.package is not None else None,
+        kind=action.kind.value if action.kind is not None else None,
+        success=result.success,
+        skipped=result.skipped,
+        skip_reason=result.skip_reason.name if result.skip_reason is not None else None,
+        message=result.message,
+        installed_version=result.installed_version,
+        available_version=result.available_version,
+    )

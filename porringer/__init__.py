@@ -1,21 +1,60 @@
-"""Porringer package.
+"""Public package exports."""
 
-This package provides the core functionality for the Porringer application,
-including API definitions, backend processing, console commands, and utility functions.
+"""Public package entry points for Porringer.
+
+This package exposes the public API, backend helpers, CLI commands, and
+supporting utilities that applications use when integrating with Porringer.
 """
 
 import logging
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _metadata_version
 
 from porringer.api import API
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from porringer.schema.config import LocalConfiguration
+from porringer.schema.cache import LocalConfiguration
 from porringer.schema.execution import SetupParameters
 from porringer.schema.manifest import SetupManifest
+from porringer.utility.exception import (
+    CommandTimeoutError,
+    ManifestError,
+    ManifestValidationCode,
+    NotSupportedError,
+    PluginDependencyError,
+    PluginError,
+    PorringerError,
+    ProcessError,
+    SetupError,
+    UpdateError,
+)
 
-__all__ = ['API', 'DiscoveredPlugins', 'LocalConfiguration', 'RuntimeContext', 'SetupManifest', 'SetupParameters']
+__all__ = [
+    'API',
+    'CommandTimeoutError',
+    'DiscoveredPlugins',
+    'LocalConfiguration',
+    'ManifestError',
+    'ManifestValidationCode',
+    'NotSupportedError',
+    'PluginDependencyError',
+    'PluginError',
+    'PorringerError',
+    'ProcessError',
+    'RuntimeContext',
+    'SetupError',
+    'SetupManifest',
+    'SetupParameters',
+    'UpdateError',
+    '__version__',
+]
 
-# Library convention: add NullHandler so that consuming applications
-# can attach their own handlers to the "porringer" logger hierarchy.
+try:
+    __version__: str = _metadata_version('porringer')
+except PackageNotFoundError:
+    __version__ = '0.0.0'
+
+# Register a NullHandler so library consumers can attach their own logging
+# handlers without seeing warnings about an unconfigured logger.
 # See https://docs.python.org/3/howto/logging.html#configuring-logging-for-a-library
 logging.getLogger(__name__).addHandler(logging.NullHandler())

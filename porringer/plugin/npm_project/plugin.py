@@ -1,31 +1,21 @@
+"""Plugin integration for plugin."""
+
 """Plugin implementation for npm project environment."""
 
 from typing import override
 
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.schema import Ecosystem
+from porringer.core.plugin_schema.project_environment import NodeProjectEnvironment
 
 
-class NPMProjectEnvironment(ProjectEnvironment):
+class NPMProjectEnvironment(NodeProjectEnvironment):
     """Project environment managed by npm.
 
     Delegates dependency resolution and lock-file synchronisation to
     `npm install` inside the project directory.
     """
 
-    _sync_verb: str = 'install'
-
-    @staticmethod
-    @override
-    def ecosystem() -> Ecosystem:
-        """Npm project belongs to the `node` ecosystem."""
-        return Ecosystem('node')
-
-    @classmethod
-    @override
-    def consumed_runtime_kind(cls) -> str:
-        """Npm project consumes a Node runtime."""
-        return 'node'
+    _project_evidence_files = ('package-lock.json', 'npm-shrinkwrap.json')
+    _package_manager_names = ('npm@',)
 
     @classmethod
     @override

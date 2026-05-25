@@ -1,3 +1,5 @@
+"""Plugin integration for plugin."""
+
 """Plugin implementation for Homebrew (brew) package manager."""
 
 import sys
@@ -89,23 +91,35 @@ class BrewEnvironment(Environment):
             return []
 
         requested = {p.name.lower() for p in params.packages} if params.packages else None
-        results: list[Package] = []
+
+        # Collect the formulas we actually care about, preserving order.
+        selected: list[tuple[str, str | None]] = []
         for entry in outdated:
             name = entry.get('name', '')
             if requested is not None and name.lower() not in requested:
                 continue
-            # Resolve latest upstream version via brew info
-            info = await self._run_json_command(['brew', 'info', name, '--json=v2'])
-            if isinstance(info, dict):
-                formulas = info.get('formulae', [])
-                if formulas:
-                    latest = formulas[0].get('versions', {}).get('stable')
-                    if latest:
-                        results.append(Package(name=name, version=latest))
-                        continue
-            # Fallback: use current_version from outdated entry
-            current = entry.get('current_version')
-            if current:
+            selected.append((name, entry.get('current_version')))
+
+        if not selected:
+            return []
+
+        # Resolve latest upstream versions in a single ``brew info`` call rather
+        # than spawning one subprocess per formula (the old N+1 pattern).
+        info = await self._run_json_command(['brew', 'info', '--json=v2', *(name for name, _ in selected)])
+        stable_by_name: dict[str, str] = {}
+        if isinstance(info, dict):
+            for formula in info.get('formulae', []):
+                stable = formula.get('versions', {}).get('stable')
+                if stable:
+                    stable_by_name[formula.get('name', '')] = stable
+
+        results: list[Package] = []
+        for name, current in selected:
+            latest = stable_by_name.get(name)
+            if latest:
+                results.append(Package(name=name, version=latest))
+            elif current:
+                # Fallback: use current_version from the outdated entry.
                 results.append(Package(name=name, version=current))
         return results
 
@@ -113,7 +127,7 @@ class BrewEnvironment(Environment):
     async def install(self, params: PackageParameters) -> Package | None:
         """Asynchronously installs a formula using Homebrew.
 
-        Delegates streaming to the base class, then resolves the
+        Delegates command progress to the base class, then resolves the
         installed version via `brew info`.
         """
         result = await super().install(params)
@@ -128,7 +142,7 @@ class BrewEnvironment(Environment):
     async def upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrades a formula using Homebrew.
 
-        Delegates streaming to the base class, then resolves the
+        Delegates command progress to the base class, then resolves the
         installed version via `brew info`.
         """
         result = await super().upgrade(params)

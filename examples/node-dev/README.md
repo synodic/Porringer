@@ -1,39 +1,43 @@
 # Node.js Development Environment Example
 
-This example demonstrates using Porringer to set up a Node.js / Deno development environment with common tools.
+This example shows a Node.js development environment managed by Porringer. It installs common global packages and lets the Node project plugin sync project dependencies from `package.json`.
 
-## Manifest Overview
+## What the Manifest Declares
 
-The `porringer.json` manifest declares the desired environment using kind sections (`packages`, `projects`), each keyed by ecosystem. Porringer resolves each ecosystem to the best available installer at runtime.
+| Manifest section | Resolves to | Installs or runs |
+| --- | --- | --- |
+| `packages.node` | `pnpm` or `npm` | `typescript`, `@biomejs/biome`, `tsx` |
+| project sync | `npm`, `pnpm`, or `yarn` project plugin | The project's native install command |
 
-- **`packages.node`** (resolved to `pnpm`, `npm`, or `bun`): Global npm packages
-  - `typescript` – TypeScript compiler
-  - `@biomejs/biome` – Fast linter and formatter for JS/TS
-  - `tsx` – TypeScript execution engine
-- **`packages.deno`** (resolved to `deno`): Globally installed Deno scripts/tools
-  - `jsr:@std/cli` – Deno standard-library CLI helpers
-- **`projects.node`** (resolved to `pnpm`, `npm`, `yarn`, or `bun`): Project dependency sync (`install`)
-- **`projects.deno`** (resolved to `deno`): Project dependency sync for Deno projects
+Porringer passes Node package specifiers to the selected tool using that ecosystem's native syntax.
 
 ## Usage
 
-### Preview what will happen
+Preview the plan without changing the environment:
 
 ```shell
-porringer sync --path examples/node-dev --dry-run
+porringer preview examples/node-dev
 ```
 
-### Execute with confirmation
+Run the setup with confirmation:
 
 ```shell
-porringer sync --path examples/node-dev
+porringer install examples/node-dev
 ```
 
-## Notes
+Skip confirmation in a scripted flow:
 
-Package specifiers use each ecosystem's native syntax:
+```shell
+porringer install examples/node-dev --yes
+```
 
-- **npm-style**: `typescript`, `@biomejs/biome`, `lodash@^4.0.0`, `@types/node@latest`
-- **Deno-style**: `jsr:@std/cli`, `npm:chalk`, bare names (auto-prefixed with `npm:`)
+## Package Specifiers
 
-Porringer passes constraints to the underlying tool verbatim — no version wrangling.
+Use normal npm-style specifiers:
+
+- `typescript`
+- `@biomejs/biome`
+- `lodash@^4.0.0`
+- `@types/node@latest`
+
+Porringer passes version constraints to the underlying tool. The selected Node package manager owns the exact interpretation.

@@ -1,4 +1,6 @@
-"""Plugin implementation"""
+"""Plugin integration for plugin."""
+
+"""Plugin implementation."""
 
 from pathlib import Path
 from typing import override
@@ -32,19 +34,14 @@ class NPMEnvironment(Environment):
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to install a package via npm."""
-        # npm uses name@constraint syntax for version pinning
-        if package.constraint:
-            return ['npm', 'install', '-g', f'{package.name}@{package.constraint}']
-        return ['npm', 'install', '-g', package.name]
+        return ['npm', 'install', '-g', package.specifier_for('at')]
 
     @override
     def upgrade_command(
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to upgrade a package via npm."""
-        if package.constraint:
-            return ['npm', 'update', '-g', f'{package.name}@{package.constraint}']
-        return ['npm', 'update', '-g', package.name]
+        return ['npm', 'update', '-g', package.specifier_for('at')]
 
     @override
     def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
@@ -66,6 +63,7 @@ class NPMEnvironment(Environment):
         return await self._check_npm_registry(
             params.packages,
             include_prereleases=params.include_prereleases,
+            max_concurrency=params.max_concurrency,
             http_client=params.http_client,
         )
 

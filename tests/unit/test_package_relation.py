@@ -1,3 +1,5 @@
+"""Helpers for test package relation."""
+
 """Tests for PackageRelation, pipx injection metadata, PluginManager relation, and PackageCache."""
 
 import asyncio
@@ -20,6 +22,7 @@ from porringer.core.schema import (
     PluginParameters,
 )
 from porringer.plugin.pipx.plugin import PIPXEnvironment
+from tests.fixtures.factories import make_environment
 
 _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
 
@@ -224,9 +227,7 @@ class TestPackageCache:
     @staticmethod
     async def test_single_call_per_installer() -> None:
         """packages() is called once even with multiple cache.get_packages() calls."""
-        env = MagicMock(spec=Environment)
-        env.packages = AsyncMock(return_value=[Package(name='ruff', version='0.8.0')])
-        type(env).package_name_validator = MagicMock(return_value='pep440')
+        env = make_environment(installed=[Package(name='ruff', version='0.8.0')])
 
         cache = PackageCache()
 
@@ -242,14 +243,16 @@ class TestPackageCache:
         # But env.packages was only called once
         env.packages.assert_awaited_once()
 
+        stats = cache.stats()
+        assert stats.package_misses == 1
+        assert stats.package_hits == _EXPECTED_TWO_CALLS
+        assert stats.plugin_misses == 0
+
     @staticmethod
     async def test_different_installers_cached_separately() -> None:
         """Different installers get separate cache entries."""
-        env_pip = MagicMock(spec=Environment)
-        env_pip.packages = AsyncMock(return_value=[Package(name='ruff', version='0.8.0')])
-
-        env_uv = MagicMock(spec=Environment)
-        env_uv.packages = AsyncMock(return_value=[Package(name='black', version='24.0')])
+        env_pip = make_environment(installed=[Package(name='ruff', version='0.8.0')])
+        env_uv = make_environment(installed=[Package(name='black', version='24.0')])
 
         cache = PackageCache()
 
@@ -285,11 +288,14 @@ class TestPackageCache:
         assert result2[0].version == '0.2.0'
         assert call_count == _EXPECTED_TWO_CALLS
 
+        stats = cache.stats()
+        assert stats.package_misses == _EXPECTED_TWO_CALLS
+        assert stats.package_invalidations == 1
+
     @staticmethod
     async def test_invalidate_all_clears_everything() -> None:
         """invalidate_all clears all cached data."""
-        env = MagicMock(spec=Environment)
-        env.packages = AsyncMock(return_value=[Package(name='ruff', version='0.8.0')])
+        env = make_environment(installed=[Package(name='ruff', version='0.8.0')])
 
         cache = PackageCache()
 
@@ -312,6 +318,10 @@ class TestPackageCache:
 
         assert result1 == result2
         manager.installed_plugins.assert_awaited_once()
+
+        stats = cache.stats()
+        assert stats.plugin_misses == 1
+        assert stats.plugin_hits == 1
 
     @staticmethod
     async def test_concurrent_access_serializes() -> None:
@@ -345,6 +355,10 @@ class TestPackageCache:
 
         # But the underlying function was only called once
         assert call_count == 1
+
+        stats = cache.stats()
+        assert stats.package_misses == 1
+        assert stats.package_hits == len(results) - 1
 
 
 # ---------------------------------------------------------------------------

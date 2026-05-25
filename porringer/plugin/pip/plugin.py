@@ -1,4 +1,6 @@
-"""Plugin implementation"""
+"""Plugin integration for plugin."""
+
+"""Plugin implementation."""
 
 import asyncio
 import json
@@ -7,16 +9,17 @@ import re
 import shutil
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import override
+from typing import Literal, override
 
 from porringer.core.plugin_schema.environment import (
     CheckUpdatesParameters,
     PackageParameters,
+    PackageVerb,
 )
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from porringer.core.schema import Package, PackageRef, PluginKind
-from porringer.schema import SetupAction, SubActionProgress
+from porringer.core.schema import Package, PackageRef
+from porringer.schema import ActionProgress, SetupAction
 from porringer.utility.utility import run_command
 
 # Regex patterns for parsing pip output
@@ -127,36 +130,41 @@ class PIPEnvironment(PythonEnvironment):
         return False
 
     @override
-    async def install(self, params: PackageParameters) -> Package | None:
-        """Asynchronously installs the given package using pip.
+    def dry_run_flags(self, verb: PackageVerb) -> Sequence[str]:
+        """Pip natively supports ``--dry-run`` for install / upgrade."""
+        if verb in {'install', 'upgrade'}:
+            return ('--dry-run',)
+        return ()
 
-        When a progress_callback is provided, streams stderr line-by-line to
-        report download and install phases. Otherwise falls back to the simple
-        `run_command` path for zero overhead.
+    @override
+    def parse_progress_line(
+        self,
+        line: str,
+        channel: Literal['stdout', 'stderr'],
+        action: SetupAction,
+    ) -> ActionProgress | None:
+        """Translate a pip stderr line into a structured progress event."""
+        if channel != 'stderr':
+            return None
+        captured: list[ActionProgress] = []
+        self._parse_progress_line(line, action, captured.append)
+        return captured[0] if captured else None
 
-        On Windows, if the Python Install Manager (pymanager) is available,
-        runs ``pymanager install --refresh`` after a successful install to
-        regenerate global aliases for newly installed entry points.
+    @override
+    async def post_action(
+        self,
+        verb: PackageVerb,
+        params: PackageParameters,
+        success: bool,
+    ) -> None:
+        """On Windows, refresh ``pymanager`` global aliases after install/upgrade.
+
+        Best-effort.  Skipped on dry-run, on failure, and for
+        uninstall.  Failures never block the calling action.
         """
-        logger = logging.getLogger('porringer.pip.install')
-        args = list(
-            self.install_command(
-                params.package, include_prereleases=params.include_prereleases, runtime_context=params.runtime_context
-            )
-        )
-        if params.dry:
-            args.append('--dry-run')
-
-        if params.progress_callback is None:
-            # Fast path — no streaming needed
-            result = await self._install_simple(args, params.package, logger)
-        else:
-            result = await self._install_with_progress(args, params, logger)
-
-        if not params.dry:
-            await self._refresh_pymanager_aliases(logger)
-
-        return result
+        if not success or params.dry or verb == 'uninstall':
+            return
+        await self._refresh_pymanager_aliases(logging.getLogger(f'porringer.pip.{verb}'))
 
     @staticmethod
     async def _refresh_pymanager_aliases(logger: logging.Logger) -> None:
@@ -175,131 +183,12 @@ class PIPEnvironment(PythonEnvironment):
             logger.warning('Failed to refresh pymanager aliases: %s', exc)
 
     @staticmethod
-    async def _install_simple(args: list[str], package: PackageRef, logger: logging.Logger) -> Package | None:
-        """Install without progress streaming."""
-        try:
-            result = await run_command(args)
-            logger.info(result.stdout)
-            if result.returncode != 0:
-                logger.error(result.stderr)
-                return None
-        except TimeoutError:
-            logger.error(f'Timeout installing {package.name}')
-            return None
-        except Exception as e:
-            logger.error(f'Failed to install {package.name}: {e}')
-            return None
-        return Package(name=package.name, version=None)
-
-    @staticmethod
-    async def _install_with_progress(
-        args: list[str],
-        params: PackageParameters,
-        logger: logging.Logger,
-    ) -> Package | None:
-        """Install with line-by-line stderr streaming for progress reporting."""
-        assert params.progress_callback is not None  # guaranteed by caller
-
-        action = SetupAction(
-            description=f'Install {params.package.specifier}',
-            kind=PluginKind.PACKAGE,
-            installer='pip',
-            package=params.package,
-        )
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            logger.error(f'Python not found while installing {params.package.name}')
-            return None
-
-        # Report initial phase
-        params.progress_callback(
-            SubActionProgress(
-                action=action,
-                phase='resolving',
-                progress=None,
-                message=f'Resolving {params.package.specifier}...',
-            )
-        )
-
-        stderr_lines: list[str] = []
-        stdout_data = b''
-
-        async def read_stdout() -> None:
-            nonlocal stdout_data
-            assert process.stdout is not None
-            stdout_data = await process.stdout.read()
-
-        async def read_stderr_lines() -> None:
-            assert process.stderr is not None
-            assert params.progress_callback is not None
-            async for raw_line in process.stderr:
-                line = raw_line.decode('utf-8', errors='replace').rstrip()
-                stderr_lines.append(line)
-
-                # Emit raw output line for log panel display
-                params.progress_callback(
-                    SubActionProgress(
-                        action=action,
-                        phase='running',
-                        output=line,
-                        stream='stderr',
-                    )
-                )
-
-                # Also emit parsed progress events for structured updates
-                PIPEnvironment._parse_progress_line(line, action, params.progress_callback)
-
-        try:
-            await asyncio.gather(read_stdout(), read_stderr_lines())
-            await process.wait()
-        except Exception as e:
-            logger.error(f'Failed to install {params.package.name}: {e}')
-            return None
-
-        # Emit stdout lines as output events
-        stdout_text = stdout_data.decode('utf-8', errors='replace')
-        logger.info(stdout_text)
-        for line in stdout_text.splitlines():
-            stripped = line.rstrip()
-            if stripped:
-                params.progress_callback(
-                    SubActionProgress(
-                        action=action,
-                        phase='running',
-                        output=stripped,
-                        stream='stdout',
-                    )
-                )
-
-        if process.returncode != 0:
-            logger.error('\n'.join(stderr_lines))
-            return None
-
-        # Report completion
-        params.progress_callback(
-            SubActionProgress(
-                action=action,
-                phase='done',
-                progress=1.0,
-                message=f'Installed {params.package.name}',
-            )
-        )
-
-        return Package(name=params.package.name, version=None)
-
-    @staticmethod
     def _parse_progress_line(
         line: str,
         action: SetupAction,
-        callback: Callable[[SubActionProgress], None],
+        callback: Callable[[ActionProgress], None],
     ) -> None:
-        """Parse a single pip stderr line and emit sub-action progress if relevant.
+        """Parse a single pip stderr line and emit action progress if relevant.
 
         This is extracted as a static method for testability.
         """
@@ -310,7 +199,7 @@ class PIPEnvironment(PythonEnvironment):
             size = match.group(2)
             filename = url.rsplit('/', 1)[-1].split('#')[0]
             callback(
-                SubActionProgress(
+                ActionProgress(
                     action=action,
                     phase='downloading',
                     progress=0.0,
@@ -324,7 +213,7 @@ class PIPEnvironment(PythonEnvironment):
         if match:
             pct = int(match.group(2))
             callback(
-                SubActionProgress(
+                ActionProgress(
                     action=action,
                     phase='downloading',
                     progress=pct / 100.0,
@@ -338,7 +227,7 @@ class PIPEnvironment(PythonEnvironment):
         if match:
             packages_str = match.group(1).strip()
             callback(
-                SubActionProgress(
+                ActionProgress(
                     action=action,
                     phase='installing',
                     progress=None,
@@ -350,7 +239,7 @@ class PIPEnvironment(PythonEnvironment):
         # Requirement already satisfied
         if _ALREADY_SATISFIED_PATTERN.search(line):
             callback(
-                SubActionProgress(
+                ActionProgress(
                     action=action,
                     phase='verifying',
                     progress=1.0,
@@ -392,8 +281,7 @@ class PIPEnvironment(PythonEnvironment):
             stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
             if proc.returncode != 0:
                 raise RuntimeError('pip list --outdated exited with non-zero status')
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
-            entries: list[dict[str, str]] = json.loads(stdout)
+            entries: list[dict[str, str]] = json.loads(stdout_bytes.decode('utf-8', errors='replace') or '[]')
         except (OSError, RuntimeError, json.JSONDecodeError) as exc:
             logger.debug('pip list --outdated failed, falling back to PyPI: %s', exc)
             return await self._check_pypi_updates(params)
@@ -474,11 +362,16 @@ class PIPEnvironment(PythonEnvironment):
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode != 0:
-                logger.debug('pip list failed (pip module may not be installed)')
-                return None
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
-            entries: list[dict[str, str]] = json.loads(stdout)
+        except FileNotFoundError:
+            logger.warning('Python not found on PATH; cannot list pip packages')
+            return []
+
+        if proc.returncode != 0:
+            logger.debug('pip list failed (pip module may not be installed)')
+            return None
+
+        try:
+            entries: list[dict[str, str]] = json.loads(stdout_bytes.decode('utf-8', errors='replace') or '[]')
             return [
                 Package(name=entry['name'], version=entry.get('version'))
                 for entry in entries
@@ -486,9 +379,6 @@ class PIPEnvironment(PythonEnvironment):
             ]
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning(f'Failed to parse pip package list: {e}')
-            return []
-        except FileNotFoundError:
-            logger.warning('Python not found on PATH; cannot list pip packages')
             return []
 
     @staticmethod
@@ -523,11 +413,16 @@ class PIPEnvironment(PythonEnvironment):
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode != 0:
-                logger.debug('importlib.metadata fallback failed (returncode=%s)', proc.returncode)
-                return []
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
-            entries: list[dict[str, str]] = json.loads(stdout)
+        except FileNotFoundError:
+            logger.warning('Python not found on PATH; cannot list packages via importlib.metadata')
+            return []
+
+        if proc.returncode != 0:
+            logger.debug('importlib.metadata fallback failed (returncode=%s)', proc.returncode)
+            return []
+
+        try:
+            entries: list[dict[str, str]] = json.loads(stdout_bytes.decode('utf-8', errors='replace') or '[]')
             return [
                 Package(name=entry['name'], version=entry.get('version'))
                 for entry in entries
@@ -535,7 +430,4 @@ class PIPEnvironment(PythonEnvironment):
             ]
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning('Failed to parse importlib.metadata package list: %s', e)
-            return []
-        except FileNotFoundError:
-            logger.warning('Python not found on PATH; cannot list packages via importlib.metadata')
             return []

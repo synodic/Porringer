@@ -1,3 +1,5 @@
+"""Helpers for test path sync."""
+
 """Tests for :mod:`porringer.core.path` — system PATH synchronization."""
 
 import os

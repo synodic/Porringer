@@ -1,3 +1,5 @@
+"""Helpers for test upgrade."""
+
 """Tests for the imperative package upgrade feature (PackageCommands.upgrade).
 
 Covers:
@@ -120,18 +122,17 @@ class TestExecutePackageUpgrade:
         assert result.success is False
 
     @staticmethod
-    async def test_runtime_tag_flows_through() -> None:
-        """execute_package respects runtime_tag on the action."""
+    async def test_runtime_tag_without_provider_fails() -> None:
+        """execute_package fails clearly when a runtime_tag cannot be resolved."""
         env = _make_mock_env(installed=[])
         env.install = AsyncMock(return_value=Package(name='requests', version='2.32.0'))
         envs: dict[str, Environment] = {'mock': env}
 
         action = _make_action(runtime_tag='3.12')
         assert action.runtime_tag == '3.12'
-        # The action carries the tag; execute_package will attempt to resolve it.
-        # Without a matching runtime provider, it should return an error.
+        # No runtime provider is available, so tag resolution must fail with a
+        # descriptive message rather than silently installing.
         result = await execute_package(action, envs, SyncStrategy.LATEST, asyncio.Queue())
-        # runtime_tag resolution will fail since no runtime provider is available
         assert result.success is False
         assert 'runtime tag' in (result.message or '').lower()
 

@@ -1,3 +1,5 @@
+"""CLI command implementation for manifest."""
+
 """Manifest loading, parsing, and validation.
 
 Handles finding, loading, and validating porringer manifests.
@@ -5,8 +7,8 @@ Supports three modes:
 
 1. **Native** — a standalone ``porringer.json`` file.
 2. **Inline embed** — a ``[tool.porringer]`` (or equivalent) section
-   inside a host config file (``pyproject.toml``, ``package.json``,
-   ``deno.json``), contributed by project plugins via the
+   inside a host config file (``pyproject.toml``, ``package.json``),
+   contributed by project plugins via the
    ``ManifestContributor`` protocol.
 3. **Reference** — a host config section containing only a
    ``manifest = "relative/path.json"`` key that redirects to an
@@ -36,7 +38,7 @@ from porringer.schema import (
     ManifestValidationResult,
     SetupManifest,
 )
-from porringer.schema.manifest import ManifestResult
+from porringer.schema.manifest import MANIFEST_SCHEMA_DIALECT, MANIFEST_SCHEMA_URL, ManifestResult
 from porringer.utility.exception import ManifestError, ManifestValidationCode
 
 from .core.discovery import discover_all_plugins, register_invalidation_hook
@@ -95,7 +97,7 @@ def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
     seen_filenames: set[str] = set()
     contributions: list[ManifestContribution] = []
 
-    infos = Builder.find_plugins('project_environment', ProjectEnvironment)
+    infos, _ = Builder.find_plugins('project_environment', ProjectEnvironment)
     for info in infos:
         cls = info.type
         if isinstance(cls, type) and issubclass(cls, ManifestContributor):
@@ -614,8 +616,8 @@ def manifest_schema() -> dict:
     schema = SetupManifest.model_json_schema()
 
     # --- Root meta-fields ---
-    schema['$schema'] = 'https://json-schema.org/draft/2020-12/schema'
-    schema['$id'] = 'https://synodic.github.io/porringer/schema.json'
+    schema['$schema'] = MANIFEST_SCHEMA_DIALECT
+    schema['$id'] = MANIFEST_SCHEMA_URL
 
     # --- Expose $schema as an optional property ---
     if 'properties' in schema:

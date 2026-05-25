@@ -87,15 +87,13 @@ def probe_unix_paths() -> list[str]:
     """Return well-known tool directories that exist on disk.
 
     These cover standard locations for tools installed outside of
-    the user's shell profile (Homebrew, pip --user, Bun, Deno, etc.).
+    the user's shell profile (Homebrew, pip --user, etc.).
     Only directories that actually exist are returned.
     """
     home = Path.home()
     candidates = [
         '/usr/local/bin',
         str(home / '.local' / 'bin'),
-        str(home / '.bun' / 'bin'),
-        str(home / '.deno' / 'bin'),
         str(home / '.volta' / 'bin'),
         str(home / '.cargo' / 'bin'),
     ]

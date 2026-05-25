@@ -1,3 +1,5 @@
+"""Helpers for test check updates."""
+
 """Tests for check_updates implementations across all environment plugins.
 
 Validates that each plugin's ``check_updates`` method correctly queries
@@ -15,7 +17,6 @@ from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Env
 from porringer.core.schema import Distribution, Package, PackageRef, PluginParameters
 from porringer.plugin.apt.plugin import APTEnvironment
 from porringer.plugin.brew.plugin import BrewEnvironment
-from porringer.plugin.deno.plugin import DenoEnvironment
 from porringer.plugin.npm.plugin import NPMEnvironment
 from porringer.plugin.pim.plugin import PIMEnvironment
 from porringer.plugin.pip.plugin import PIPEnvironment
@@ -318,69 +319,12 @@ class TestNpmCheckUpdates:
 
 
 # =========================================================================
-# PNPMEnvironment / BunEnvironment â€” same shared helper, tested via npm
+# PNPMEnvironment â€” same shared helper, tested via npm
 # =========================================================================
-# These plugins delegate identically to _check_npm_registry.
-# The abstract method enforcement ensures they override check_updates.
+# This plugin delegates identically to _check_npm_registry.
+# The abstract method enforcement ensures it overrides check_updates.
 # The shared helper is tested in TestNpmRegistryHelper below.
 # No per-plugin tests needed.
-
-
-# =========================================================================
-# DenoEnvironment â€” npm and JSR registries
-# =========================================================================
-
-
-class TestDenoCheckUpdates:
-    """DenoEnvironment.check_updates handles npm: and jsr: prefixes."""
-
-    @staticmethod
-    async def test_npm_package() -> None:
-        """npm-prefixed package queries npm registry."""
-        env = DenoEnvironment(_MOCK_PARAMS)
-
-        with patch.object(
-            env, '_check_npm_registry', new_callable=AsyncMock, return_value=[Package(name='chalk', version='2.0.0')]
-        ) as mock_npm:
-            result = await env.check_updates(_make_params(['npm:chalk']))
-
-        mock_npm.assert_called_once()
-        assert len(result) == 1
-        assert result[0].name == 'npm:chalk'
-        assert result[0].version == '2.0.0'
-
-    @staticmethod
-    async def test_jsr_package() -> None:
-        """jsr-prefixed package queries JSR registry."""
-        env = DenoEnvironment(_MOCK_PARAMS)
-        jsr_data = {'latest': '0.5.0'}
-        response = MagicMock()
-        response.json.return_value = jsr_data
-        response.raise_for_status = MagicMock()
-
-        with (
-            patch.object(env, '_check_npm_registry', new_callable=AsyncMock, return_value=[]),
-            patch('porringer.plugin.deno.plugin.aiohttp.ClientSession') as mock_client,
-        ):
-            _setup_async_client(mock_client, response)
-            result = await env.check_updates(_make_params(['jsr:@std/path']))
-
-        assert len(result) == 1
-        assert result[0].version == '0.5.0'
-
-    @staticmethod
-    async def test_bare_name_queries_npm() -> None:
-        """Bare names (no prefix) should route to _check_npm_registry."""
-        env = DenoEnvironment(_MOCK_PARAMS)
-
-        with patch.object(
-            env, '_check_npm_registry', new_callable=AsyncMock, return_value=[Package(name='chalk', version='4.0.0')]
-        ) as mock_npm:
-            result = await env.check_updates(_make_params(['chalk']))
-
-        mock_npm.assert_called_once()
-        assert len(result) == 1
-        assert result[0].version == '4.0.0'
 
 
 # =========================================================================
@@ -396,7 +340,7 @@ class TestBrewCheckUpdates:
         """Outdated packages include info version."""
         env = BrewEnvironment(_MOCK_PARAMS)
         outdated_data = [{'name': 'git', 'current_version': '2.43.0'}]
-        info_data = {'formulae': [{'versions': {'stable': '2.44.0'}}]}
+        info_data = {'formulae': [{'name': 'git', 'versions': {'stable': '2.44.0'}}]}
 
         with patch.object(env, '_run_json_command', new_callable=AsyncMock) as mock_cmd:
             mock_cmd.side_effect = [outdated_data, info_data]
@@ -414,7 +358,7 @@ class TestBrewCheckUpdates:
             {'name': 'git', 'current_version': '2.43.0'},
             {'name': 'wget', 'current_version': '1.21'},
         ]
-        info_data = {'formulae': [{'versions': {'stable': '2.44.0'}}]}
+        info_data = {'formulae': [{'name': 'git', 'versions': {'stable': '2.44.0'}}]}
 
         with patch.object(env, '_run_json_command', new_callable=AsyncMock) as mock_cmd:
             mock_cmd.side_effect = [outdated_data, info_data]

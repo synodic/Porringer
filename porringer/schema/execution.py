@@ -1,15 +1,18 @@
+"""Data models and schemas for execution."""
+
 """Execution schemas."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
-from porringer.core.schema import Ecosystem, PackageRef, PluginKind
+from porringer.core.schema import Ecosystem, PackageRef, PluginKind, PorringerModel
 from porringer.schema.manifest import ManifestMetadata
+from porringer.schema.observability import SCHEMA_VERSION, Diagnostic, FollowUpAction, ResultStatus
 
 # ---------------------------------------------------------------------------
 # Operation union — discriminated by type
@@ -50,7 +53,7 @@ class Install:
 class Upgrade:
     """Resolved operation: upgrade a package to a newer version.
 
-    Version metadata is carried so that both the dry-run reporter
+    Version metadata is carried so that both the inspection reporter
     and the real execution path can surface it on the result.
     """
 
@@ -144,6 +147,7 @@ class SkipReason(Enum):
     NO_PROJECT_DIRECTORY = auto()
     UPDATE_AVAILABLE = auto()
     ALREADY_LATEST = auto()
+    GUARD_SATISFIED = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +160,6 @@ class SetupAction:
       `PluginKind.RUNTIME` — install/upgrade a single package.
     * `PluginKind.PROJECT` — sync a project lock-file / venv.
     * `PluginKind.SCM` — clone a repository.
-    * `None` — run a post-sync shell command.
 
     When `plugin_target` is set the action is a *plugin-management*
     action: the `package` is added to the `plugin_target` parent
@@ -167,12 +170,11 @@ class SetupAction:
 
     Args:
         description: Human-readable description of the action.
-        kind: The plugin kind, or `None` for post-sync commands.
+        kind: The plugin kind.
         ecosystem: The ecosystem identifier (e.g. `"python"`, `"node"`).
         installer: The plugin name (for PACKAGE/TOOL/RUNTIME/PROJECT/SCM).
         package: The package reference (for PACKAGE/TOOL/RUNTIME/SCM).
         plugin_target: The parent tool for plugin actions, or `None`.
-        command: The command to run (for post-sync commands).
         package_description: Optional per-package description from the manifest.
         include_prereleases: Per-package opt-in for pre-release update detection.
     """
@@ -183,11 +185,9 @@ class SetupAction:
     installer: str | None = None
     package: PackageRef | None = None
     plugin_target: PackageRef | None = None
-    command: tuple[str, ...] | None = None
     package_description: str | None = None
     include_prereleases: bool = False
     runtime_tag: str | None = None
-    distro: str | None = None
 
 
 @dataclass(slots=True)
@@ -232,7 +232,17 @@ class SyncStrategy(Enum):
     EXACT = auto()
 
 
-class SetupParameters(BaseModel):
+class InspectionMode(StrEnum):
+    """Controls how much system probing an inspect request performs."""
+
+    COMPLETE = 'complete'
+    """Perform package presence, update, extras, and SCM presence checks."""
+
+    FAST = 'fast'
+    """Report manifest/plugin shape without expensive presence/update probing."""
+
+
+class SetupParameters(PorringerModel):
     """Parameters for the setup command."""
 
     paths: Path | Sequence[str | Path] | None = Field(
@@ -246,7 +256,7 @@ class SetupParameters(BaseModel):
     project_directory: Path | Literal[False] | None = Field(
         default=None,
         description=(
-            'Controls where project-sync and post-sync actions run. '
+            'Controls where project-sync actions run. '
             'None (default) lets each project-environment plugin auto-discover '
             'its project root by walking ancestor directories from the manifest '
             'location looking for an ecosystem-specific marker file '
@@ -256,11 +266,15 @@ class SetupParameters(BaseModel):
             'False skips project-sync actions entirely.'
         ),
     )
-    timeout: int = Field(default=300, description='Timeout in seconds for post-sync commands')
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
-    dry_run: bool = Field(default=False, description='Preview actions without executing them')
     strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal, latest, or exact')
-
+    inspection_mode: InspectionMode = Field(
+        default=InspectionMode.COMPLETE,
+        description=(
+            'Inspection depth. ``complete`` performs presence/update checks; '
+            '``fast`` reports manifest/plugin shape without expensive probing.'
+        ),
+    )
     prerelease_packages: set[str] | None = Field(
         default=None,
         description=(
@@ -276,8 +290,19 @@ class SetupParameters(BaseModel):
             'Set of package names to include.  When set, only actions '
             'whose ``action.package.name`` appears in this set '
             '(case-insensitive) are executed.  ``None`` means all '
-            'packages.  Non-package actions (post-sync commands, etc.) '
+            'packages.  Non-package actions '
             'are always included regardless of this filter.'
+        ),
+    )
+    action_ids: set[str] | None = Field(
+        default=None,
+        description=(
+            'Stable action ids to include (for example ``0:2``). '
+            'Ids are matched against the resolved input path index and original '
+            'manifest action order, after path resolution but before other '
+            'filters can renumber actions. Failed paths keep their resolved '
+            'input slot, so later manifest ids stay stable when '
+            '``fail_fast=False``.'
         ),
     )
     max_concurrency: int = Field(
@@ -312,11 +337,13 @@ class SetupResults:
     """
 
     actions: list[SetupAction] = field(default_factory=list)
+    action_indices: list[int] = field(default_factory=list)
     results: list[SetupActionResult] = field(default_factory=list)
     manifest_path: Path | None = None
     root_directory: Path | None = None
     metadata: ManifestMetadata | None = None
     preferences: dict[Ecosystem, str] = field(default_factory=dict)
+    manifest_index: int | None = None
 
 
 @dataclass(slots=True)
@@ -368,3 +395,19 @@ class BatchSetupResults:
         inspection.
         """
         return [r for m in self.manifest_results for r in m.results if r.skipped]
+
+
+class SyncRunReport(PorringerModel):
+    """Structured report for manifest execution."""
+
+    schema_version: str = SCHEMA_VERSION
+    operation: str = 'sync.run'
+    status: ResultStatus = ResultStatus.SUCCESS
+    results: BatchSetupResults
+    diagnostics: tuple[Diagnostic, ...] = Field(default_factory=tuple)
+    follow_up_actions: tuple[FollowUpAction, ...] = Field(default_factory=tuple)
+
+    @property
+    def success(self) -> bool:
+        """Whether execution completed without failed paths or failed action results."""
+        return self.results.success
