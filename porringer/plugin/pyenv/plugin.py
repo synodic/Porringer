@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Plugin implementation for pyenv-managed Python runtimes."""
+Plugin implementation for pyenv-managed Python runtimes.
+"""
 
 import asyncio
 import logging

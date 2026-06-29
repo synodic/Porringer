@@ -1,6 +1,6 @@
-"""Core helpers and types for scm."""
+"""Core helpers and types for scm.
 
-"""Plugin utilities for source-control management (SCM) environments.
+Plugin utilities for source-control management (SCM) environments.
 
 An `ScmEnvironment` plugin wraps an SCM tool (e.g. Git) and
 provides clone and presence-check operations.  The sync engine invokes

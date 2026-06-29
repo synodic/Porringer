@@ -1,6 +1,6 @@
-"""Helpers for test bootstrap presence."""
+"""Helpers for test bootstrap presence.
 
-"""Presence test using the python-bootstrap example manifest.
+Presence test using the python-bootstrap example manifest.
 
 Verifies that the inspection presence check works correctly for the
 `examples/python-bootstrap/porringer.json` manifest.

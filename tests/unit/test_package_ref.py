@@ -1,6 +1,7 @@
-"""Helpers for test package ref."""
+"""Helpers for test package ref.
 
-"""Tests for PackageRef model."""
+Tests for PackageRef model.
+"""
 
 import pytest
 from pydantic import ValidationError

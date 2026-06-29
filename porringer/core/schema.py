@@ -1,6 +1,7 @@
-"""Core helpers and types for schema."""
+"""Core helpers and types for schema.
 
-"""Schema for Porringer."""
+Schema for Porringer.
+"""
 
 import re
 import sys
@@ -472,7 +473,7 @@ class Plugin(Protocol):
 
     @property
     def distribution(self) -> Distribution:
-        """Retrieves plugin information that complements the packaged project metadata.
+        """Additional plugin information that complements the packaged project metadata.
 
         Returns:
             The plugin's information

@@ -1,6 +1,7 @@
-"""CLI command implementation for download."""
+"""CLI command implementation for download.
 
-"""Porringer CLI download command module for downloading files."""
+Porringer CLI download command module for downloading files.
+"""
 
 import asyncio
 from pathlib import Path

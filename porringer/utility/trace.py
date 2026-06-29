@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 import time
 import uuid
 from collections.abc import Generator, Sequence
@@ -40,10 +41,10 @@ def _warn_trace_io_failure(message: str, error: OSError) -> None:
     gets zero artifacts.  Emit one warning per process so the failure
     is visible without flooding the log on every subprocess.
     """
-    global _TRACE_IO_WARNED  # noqa: PLW0603
-    if _TRACE_IO_WARNED:
+    module: Any = sys.modules[__name__]
+    if getattr(module, '_TRACE_IO_WARNED', False):
         return
-    _TRACE_IO_WARNED = True
+    module._TRACE_IO_WARNED = True
     logger.warning('%s: %s', message, error)
 
 

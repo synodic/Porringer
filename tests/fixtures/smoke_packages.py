@@ -29,7 +29,7 @@ class PythonSmokePackage:
 
     @property
     def requirement(self) -> str:
-        """Return the package requirement used by installer smoke tests."""
+        """The package requirement used by installer smoke tests."""
         return f'{self.name}=={self.version}'
 
 

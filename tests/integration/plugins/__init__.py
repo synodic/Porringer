@@ -1,6 +1,6 @@
-"""Public package exports for the integration.plugins module."""
+"""Public package exports for the integration.plugins module.
 
-"""Integration tests for Porringer plugins.
+Integration tests for Porringer plugins.
 
 This package contains integration tests for the various Porringer plugins,
 ensuring their functionality and correctness.

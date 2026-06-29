@@ -1,3 +1,4 @@
-"""Public package exports."""
+"""Public package exports.
 
-"""Tests package for Porringer."""
+Tests package for Porringer.
+"""

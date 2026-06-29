@@ -1,6 +1,6 @@
-"""Public package exports for the backend.command.core module."""
+"""Public package exports for the backend.command.core module.
 
-"""Core backend command modules.
+Core backend command modules.
 
 This package contains the core implementation modules for the
 backend command system: action building, execution, plugin

@@ -1,6 +1,6 @@
-"""CLI command implementation for resolution."""
+"""CLI command implementation for resolution.
 
-"""Unified operation resolution for inspection and real execution.
+Unified operation resolution for inspection and real execution.
 
 Determines the correct operation (install, upgrade, or skip) for a
 given action based on the sync strategy and current system state.
@@ -485,7 +485,7 @@ async def _resolve_package_operation(
 _VERSION_PATTERN = re.compile(r'v?(\d+\.\d+(?:\.\d+)*)')
 
 
-async def _capture_subprocess(args: list[str], *, timeout: int) -> tuple[int | None, bytes, bytes] | None:
+async def _capture_subprocess(args: list[str], *, timeout_seconds: int) -> tuple[int | None, bytes, bytes] | None:
     """Run *args*, capturing stdout/stderr under a command trace.
 
     Returns ``(returncode, stdout, stderr)`` on completion, or ``None``
@@ -498,7 +498,7 @@ async def _capture_subprocess(args: list[str], *, timeout: int) -> tuple[int | N
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
         trace.finish(returncode=proc.returncode, stdout=stdout_bytes, stderr=stderr_bytes)
         return proc.returncode, stdout_bytes or b'', stderr_bytes or b''
     except (FileNotFoundError, OSError, TimeoutError) as exc:
@@ -516,7 +516,7 @@ async def probe_tool_version(name: str) -> str | None:
     Returns the version string on success, or ``None`` when the
     subprocess fails, times out, or the output cannot be parsed.
     """
-    result = await _capture_subprocess([name, '--version'], timeout=5)
+    result = await _capture_subprocess([name, '--version'], timeout_seconds=5)
     if result is None:
         return None
     _, stdout_bytes, stderr_bytes = result
@@ -538,13 +538,19 @@ _REQUIRES_SCRIPT = (
 ``Requires-Dist`` entries as a JSON list of strings."""
 
 
-async def _run_metadata_script(python: str, script: str, package_name: str, *, timeout: int = 10) -> bytes | None:
+async def _run_metadata_script(
+    python: str,
+    script: str,
+    package_name: str,
+    *,
+    timeout_seconds: int = 10,
+) -> bytes | None:
     """Run a metadata-introspection one-liner in *python* and return stdout.
 
     Returns raw stdout bytes on success, or ``None`` when the
     subprocess fails, times out, or cannot be started.
     """
-    result = await _capture_subprocess([python, '-c', script, package_name], timeout=timeout)
+    result = await _capture_subprocess([python, '-c', script, package_name], timeout_seconds=timeout_seconds)
     if result is None:
         return None
     returncode, stdout_bytes, _ = result
@@ -654,7 +660,7 @@ async def fetch_plugin_extras_context(
     Returns ``(requires, installed_names)`` on success, or ``None``
     when introspection fails.
     """
-    raw = await _run_metadata_script(python, _PLUGIN_EXTRAS_SCRIPT, package_name, timeout=15)
+    raw = await _run_metadata_script(python, _PLUGIN_EXTRAS_SCRIPT, package_name, timeout_seconds=15)
     if raw is None:
         return None
     try:

@@ -1,6 +1,6 @@
-"""Helpers for test action filtering."""
+"""Helpers for test action filtering.
 
-"""Tests for action-plan filtering via SetupParameters.
+Tests for action-plan filtering via SetupParameters.
 
 Covers ``include_packages`` (filter by package name) and ``plugins`` (filter by
 resolved installer), plus their composition.  These filters are applied

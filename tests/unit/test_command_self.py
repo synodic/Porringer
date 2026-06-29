@@ -1,6 +1,7 @@
-"""Helpers for test command self."""
+"""Helpers for test command self.
 
-"""Test the command 'self'."""
+Test the command 'self'.
+"""
 
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 

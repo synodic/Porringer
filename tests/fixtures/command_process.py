@@ -103,7 +103,7 @@ class CommandProcess:
 
     @property
     def calls(self) -> list[CommandCall]:
-        """Return all observed registered calls in process creation order."""
+        """Observed registered calls in process creation order."""
         processes = [process for recorder in self._recorders for process in recorder.calls]
         return [
             CommandCall(
@@ -119,7 +119,7 @@ class CommandProcess:
 
     @property
     def argv_list(self) -> list[list[str]]:
-        """Return observed argv lists in process creation order."""
+        """Observed argv lists in process creation order."""
         return [list(call.argv) for call in self.calls]
 
     def assert_called_with(
@@ -131,7 +131,7 @@ class CommandProcess:
     ) -> None:
         """Assert that a matching command was observed."""
         expected_argv = tuple(str(_command_argument(part)) for part in command)
-        expected_env = {str(key): str(value) for key, value in env.items()} if env is not None else None
+        expected_env = dict(env) if env is not None else None
         for call in self.calls:
             if call.argv != expected_argv:
                 continue

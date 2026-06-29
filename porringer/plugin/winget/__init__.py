@@ -1,6 +1,6 @@
-"""Public package exports for the plugin.winget module."""
+"""Public package exports for the plugin.winget module.
 
-"""Winget plugin package for Porringer.
+Winget plugin package for Porringer.
 
 This package contains the implementation of the Winget environment plugin,
 providing functionalities for installing, uninstalling, upgrading, and searching packages.

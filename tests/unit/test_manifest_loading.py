@@ -1,6 +1,7 @@
-"""Helpers for test manifest loading."""
+"""Helpers for test manifest loading.
 
-"""Test manifest loading, preview, batch operations, metadata, and sync CLI."""
+Test manifest loading, preview, batch operations, metadata, and sync CLI.
+"""
 
 import json
 import sys
@@ -163,7 +164,8 @@ class TestSetupPreview:
 
             assert len(results.actions) == THREE_ACTIONS
 
-    def test_build_actions_adds_implicit_project_sync_for_relevant_plugins(self) -> None:
+    @staticmethod
+    def test_build_actions_adds_implicit_project_sync_for_relevant_plugins() -> None:
         """Relevant project plugins should add project-sync actions without manifest entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
@@ -183,7 +185,8 @@ class TestSetupPreview:
 
             assert any(action.kind == PluginKind.PROJECT and action.installer == 'mock-project' for action in actions)
 
-    def test_build_actions_uses_preferred_project_plugin_when_multiple_are_relevant(self) -> None:
+    @staticmethod
+    def test_build_actions_uses_preferred_project_plugin_when_multiple_are_relevant() -> None:
         """Preferences select one project-sync owner when markers match multiple plugins."""
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
@@ -205,7 +208,8 @@ class TestSetupPreview:
             assert len(project_actions) == 1
             assert project_actions[0].installer == 'other-project'
 
-    def test_build_actions_uses_project_evidence_when_multiple_are_relevant(self) -> None:
+    @staticmethod
+    def test_build_actions_uses_project_evidence_when_multiple_are_relevant() -> None:
         """Manager-specific files select one project-sync owner without a preference."""
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
@@ -227,7 +231,8 @@ class TestSetupPreview:
             assert len(project_actions) == 1
             assert project_actions[0].installer == 'other-project'
 
-    def test_build_actions_skips_ambiguous_project_plugins_without_evidence(self) -> None:
+    @staticmethod
+    def test_build_actions_skips_ambiguous_project_plugins_without_evidence() -> None:
         """Ambiguous marker-only project plugins do not all run implicitly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)

@@ -1,6 +1,7 @@
-"""Helpers for test environment."""
+"""Helpers for test environment.
 
-"""Unit tests for the PIMEnvironment plugin."""
+Unit tests for the PIMEnvironment plugin.
+"""
 
 import sys
 from pathlib import Path

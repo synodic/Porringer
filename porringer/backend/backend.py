@@ -1,6 +1,6 @@
-"""Backend helpers for backend."""
+"""Backend helpers for backend.
 
-"""Backend resolution for mapping `(kind, ecosystem)` pairs to installer plugins.
+Backend resolution for mapping `(kind, ecosystem)` pairs to installer plugins.
 
 The `BackendResolver` chooses the plugin that should handle each
 `(PluginKind, ecosystem)` pair declared in a manifest. For example,

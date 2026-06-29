@@ -1,6 +1,7 @@
-"""CLI command implementation for profile."""
+"""CLI command implementation for profile.
 
-"""Portable setup profile commands."""
+Portable setup profile commands.
+"""
 
 import json
 import shutil
@@ -31,7 +32,12 @@ class ProfileCommands:
         self._sync = sync_commands
 
     @staticmethod
-    async def resolve(url: str, *, timeout: int = 300, expected_hash: str | None = None) -> SetupProfile:
+    async def resolve(
+        url: str,
+        *,
+        timeout_seconds: int = 300,
+        expected_hash: str | None = None,
+    ) -> SetupProfile:
         """Download, parse, and validate a setup profile."""
         validate_profile_url(url)
         tmp_dir = Path(tempfile.mkdtemp(prefix='porringer_profile_'))
@@ -41,7 +47,7 @@ class ProfileCommands:
                 DownloadParameters(
                     url=url,
                     destination=destination,
-                    timeout=timeout,
+                    timeout=timeout_seconds,
                     expected_hash=expected_hash,
                 )
             )
@@ -58,7 +64,11 @@ class ProfileCommands:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     @staticmethod
-    async def _download_profile_manifests(profile: SetupProfile, *, timeout: int = 300) -> tuple[Path, list[Path]]:
+    async def _download_profile_manifests(
+        profile: SetupProfile,
+        *,
+        timeout_seconds: int = 300,
+    ) -> tuple[Path, list[Path]]:
         """Download profile manifests into a temporary directory.
 
         Each manifest is optionally hash-verified when ``expected_hash`` is
@@ -73,7 +83,7 @@ class ProfileCommands:
                     DownloadParameters(
                         url=manifest.url,
                         destination=destination,
-                        timeout=timeout,
+                        timeout=timeout_seconds,
                         expected_hash=manifest.expected_hash,
                     )
                 )

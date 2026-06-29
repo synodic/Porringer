@@ -1,6 +1,7 @@
-"""Utility helpers for exception."""
+"""Utility helpers for exception.
 
-"""Exception definitions."""
+Exception definitions.
+"""
 
 from enum import Enum
 
@@ -35,7 +36,7 @@ class PorringerError(Exception):
 
     @property
     def error(self) -> str:
-        """Returns the underlying error.
+        """The underlying error message.
 
         Returns:
             The underlying error message
@@ -102,7 +103,7 @@ class ManifestError(SetupError):
 
     @property
     def code(self) -> ManifestValidationCode | None:
-        """Return the machine-readable error code, if set."""
+        """The machine-readable error code, when present."""
         return self._code
 
 
@@ -136,7 +137,7 @@ class PluginDependencyError(PluginError):
 
     @property
     def plugin(self) -> str:
-        """Returns the plugin that has the unmet dependency.
+        """The plugin that has the unmet dependency.
 
         Returns:
             str -- The plugin name
@@ -145,7 +146,7 @@ class PluginDependencyError(PluginError):
 
     @property
     def dependency(self) -> str:
-        """Returns the missing dependency plugin name.
+        """The missing dependency plugin name.
 
         Returns:
             str -- The dependency plugin name

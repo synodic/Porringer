@@ -1,6 +1,6 @@
-"""Helpers for strategies."""
+"""Helpers for strategies.
 
-"""Shared Hypothesis strategies for property-based tests.
+Shared Hypothesis strategies for property-based tests.
 
 These strategies generate :class:`~porringer.core.schema.PackageRef`
 inputs — both well-formed and adversarial — so invariants can be

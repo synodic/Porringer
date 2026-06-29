@@ -1,6 +1,7 @@
-"""Helpers for test sub action progress."""
+"""Helpers for test sub action progress.
 
-"""Tests for progress events and action progress."""
+Tests for progress events and action progress.
+"""
 
 import json
 import tempfile

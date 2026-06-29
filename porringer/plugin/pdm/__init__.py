@@ -1,3 +1,4 @@
-"""Public package exports for the plugin.pdm module."""
+"""Public package exports for the plugin.pdm module.
 
-"""PDM project plugin package for Porringer."""
+PDM project plugin package for Porringer.
+"""

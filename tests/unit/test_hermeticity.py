@@ -1,6 +1,6 @@
-"""Helpers for test hermeticity."""
+"""Helpers for test hermeticity.
 
-"""Hermeticity self-check for the offline unit lane.
+Hermeticity self-check for the offline unit lane.
 
 The unit lane runs with ``--disable-socket`` so tests cannot reach the
 network.  This module proves that guard is actually enforced rather than

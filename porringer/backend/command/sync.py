@@ -1,6 +1,6 @@
-"""CLI command implementation for sync."""
+"""CLI command implementation for sync.
 
-"""The sync command module.
+The sync command module.
 
 Thin facade that wires together manifest loading, action building,
 presence detection, and phased execution.  The heavy lifting lives

@@ -1,6 +1,7 @@
-"""CLI command implementation for tool."""
+"""CLI command implementation for tool.
 
-"""Managed tool/package operations over cached manifests."""
+Managed tool/package operations over cached manifests.
+"""
 
 from collections.abc import Callable
 

@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Plugin implementation for pnpm environment."""
+Plugin implementation for pnpm environment.
+"""
 
 from pathlib import Path
 from typing import override

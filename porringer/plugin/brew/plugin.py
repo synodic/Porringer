@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Plugin implementation for Homebrew (brew) package manager."""
+Plugin implementation for Homebrew (brew) package manager.
+"""
 
 import sys
 from pathlib import Path

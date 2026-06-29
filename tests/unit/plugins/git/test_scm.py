@@ -1,6 +1,7 @@
-"""Helpers for test scm."""
+"""Helpers for test scm.
 
-"""Unit tests for the Git SCM plugin."""
+Unit tests for the Git SCM plugin.
+"""
 
 import pytest
 

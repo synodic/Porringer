@@ -1,6 +1,6 @@
-"""CLI command implementation for plugin."""
+"""CLI command implementation for plugin.
 
-"""The plugin command module.
+The plugin command module.
 
 Manages *porringer extension* packages — installing, upgrading, and
 uninstalling plugins that extend porringer's capabilities (e.g.
@@ -182,7 +182,7 @@ class PluginCommands:
         *,
         verb: str,
         dry_run: bool,
-        timeout: int,
+        timeout_seconds: int,
     ) -> PluginOperationResult:
         """Execute a plugin subprocess operation with dry-run support.
 
@@ -195,7 +195,7 @@ class PluginCommands:
             args: Full command-line arguments.
             verb: Human-readable verb (``"install"``, ``"uninstall"``, ``"upgrade"``).
             dry_run: If ``True``, only report what would be done.
-            timeout: Subprocess timeout in seconds.
+            timeout_seconds: Subprocess timeout in seconds.
 
         Returns:
             PluginOperationResult indicating outcome.
@@ -212,7 +212,7 @@ class PluginCommands:
             )
 
         try:
-            result = await run_command(args, timeout=timeout)
+            result = await run_command(args, timeout=timeout_seconds)
             if result.returncode != 0:
                 logger.error('%s failed for %s: %s', verb.capitalize(), name, result.stderr)
                 return PluginOperationResult(
@@ -267,9 +267,21 @@ class PluginCommands:
         args = PluginCommands._build_install_args(name)
 
         if dry_run:
-            return await PluginCommands._run_plugin_operation(name, args, verb='install', dry_run=True, timeout=120)
+            return await PluginCommands._run_plugin_operation(
+                name,
+                args,
+                verb='install',
+                dry_run=True,
+                timeout_seconds=120,
+            )
 
-        result = await PluginCommands._run_plugin_operation(name, args, verb='install', dry_run=False, timeout=120)
+        result = await PluginCommands._run_plugin_operation(
+            name,
+            args,
+            verb='install',
+            dry_run=False,
+            timeout_seconds=120,
+        )
         if not result.success:
             return result
 
@@ -315,7 +327,13 @@ class PluginCommands:
             logger.info('Uninstalling plugin: %s', name)
             args = PluginCommands._build_uninstall_args(name)
             results.append(
-                await PluginCommands._run_plugin_operation(name, args, verb='uninstall', dry_run=dry_run, timeout=60)
+                await PluginCommands._run_plugin_operation(
+                    name,
+                    args,
+                    verb='uninstall',
+                    dry_run=dry_run,
+                    timeout_seconds=60,
+                )
             )
 
         return results
@@ -337,7 +355,13 @@ class PluginCommands:
             logger.info('Upgrading plugin: %s', name)
             args = PluginCommands._build_upgrade_args(name)
             results.append(
-                await PluginCommands._run_plugin_operation(name, args, verb='upgrade', dry_run=dry_run, timeout=120)
+                await PluginCommands._run_plugin_operation(
+                    name,
+                    args,
+                    verb='upgrade',
+                    dry_run=dry_run,
+                    timeout_seconds=120,
+                )
             )
 
         return results

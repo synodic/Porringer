@@ -1,6 +1,7 @@
-"""Helpers for test package relation."""
+"""Helpers for test package relation.
 
-"""Tests for PackageRelation, pipx injection metadata, PluginManager relation, and PackageCache."""
+Tests for PackageRelation, pipx injection metadata, PluginManager relation, and PackageCache.
+"""
 
 import asyncio
 import json

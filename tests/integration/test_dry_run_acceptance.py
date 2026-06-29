@@ -1,6 +1,6 @@
-"""Helpers for test dry run acceptance."""
+"""Helpers for test dry run acceptance.
 
-"""Real-tool dry-run acceptance smoke tests.
+Real-tool dry-run acceptance smoke tests.
 
 These verify that the *real* wrapped tool accepts the argv a plugin
 generates when run in the tool's native dry-run mode.  Porringer's own

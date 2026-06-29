@@ -1,6 +1,7 @@
-"""CLI command implementation for self."""
+"""CLI command implementation for self.
 
-"""Porringer CLI self command module."""
+Porringer CLI self command module.
+"""
 
 import asyncio
 

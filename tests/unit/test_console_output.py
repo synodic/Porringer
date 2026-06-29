@@ -1,6 +1,7 @@
-"""Helpers for test console output."""
+"""Helpers for test console output.
 
-"""Tests for the themed console output facade."""
+Tests for the themed console output facade.
+"""
 
 import io
 

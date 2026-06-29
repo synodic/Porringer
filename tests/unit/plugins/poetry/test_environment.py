@@ -1,6 +1,7 @@
-"""Helpers for test environment."""
+"""Helpers for test environment.
 
-"""Tests for the Poetry project environment plugin."""
+Tests for the Poetry project environment plugin.
+"""
 
 import pytest
 

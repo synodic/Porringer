@@ -1,6 +1,7 @@
-"""Data models and schemas for manifest."""
+"""Data models and schemas for manifest.
 
-"""Manifest schemas."""
+Manifest schemas.
+"""
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field

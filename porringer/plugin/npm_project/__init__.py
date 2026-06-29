@@ -1,3 +1,4 @@
-"""Public package exports for the plugin.npm_project module."""
+"""Public package exports for the plugin.npm_project module.
 
-"""npm project plugin package for Porringer."""
+npm project plugin package for Porringer.
+"""

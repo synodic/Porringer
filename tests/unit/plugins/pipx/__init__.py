@@ -1,3 +1,4 @@
-"""Public package exports for the unit.plugins.pipx module."""
+"""Public package exports for the unit.plugins.pipx module.
 
-"""Unit tests for the pipx plugin."""
+Unit tests for the pipx plugin.
+"""

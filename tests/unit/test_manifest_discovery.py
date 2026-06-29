@@ -1,6 +1,7 @@
-"""Helpers for test manifest discovery."""
+"""Helpers for test manifest discovery.
 
-"""Test manifest discovery, contributor protocol, has_manifest, and directory validation."""
+Test manifest discovery, contributor protocol, has_manifest, and directory validation.
+"""
 
 import json
 import tempfile

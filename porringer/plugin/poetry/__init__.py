@@ -1,3 +1,4 @@
-"""Public package exports for the plugin.poetry module."""
+"""Public package exports for the plugin.poetry module.
 
-"""Poetry project plugin package for Porringer."""
+Poetry project plugin package for Porringer.
+"""

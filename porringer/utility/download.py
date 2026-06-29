@@ -6,10 +6,11 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 import stamina
@@ -350,12 +351,13 @@ async def _perform_download(
 
         # ``temp_fd`` is an already-open descriptor from ``mkstemp``; ``open`` only
         # wraps it (no blocking filesystem open). Chunk writes are offloaded below.
-        with open(temp_fd, 'wb') as f:  # noqa: ASYNC230
+        file_handle = cast(Any, await asyncio.to_thread(os.fdopen, temp_fd, 'wb'))
+        try:
             async for chunk in response.content.iter_chunked(state.parameters.chunk_size):
                 if cancellation_token is not None:
                     cancellation_token.raise_if_cancelled()
 
-                await asyncio.to_thread(f.write, chunk)
+                await asyncio.to_thread(file_handle.write, chunk)
                 downloaded += len(chunk)
 
                 if hasher:
@@ -363,6 +365,8 @@ async def _perform_download(
 
                 if state.progress_callback:
                     state.progress_callback(downloaded, total_size)
+        finally:
+            await asyncio.to_thread(file_handle.close)
 
     logger.info(f'Downloaded {downloaded} bytes')
 

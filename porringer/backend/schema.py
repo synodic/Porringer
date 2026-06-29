@@ -1,6 +1,7 @@
-"""Backend helpers for schema."""
+"""Backend helpers for schema.
 
-"""Backend schema."""
+Backend schema.
+"""
 
 from pathlib import Path
 

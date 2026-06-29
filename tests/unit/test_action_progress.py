@@ -1,6 +1,7 @@
-"""Helpers for test action progress."""
+"""Helpers for test action progress.
 
-"""Tests for progress events and action progress."""
+Tests for progress events and action progress.
+"""
 
 import json
 import tempfile
@@ -417,5 +418,5 @@ class TestActionIdStability:
         ref = ActionRef.from_indices(2, 3)
         assert ref.action_id == '2:3'
         # The validator rejects mismatched ids.
-        with pytest.raises(ValueError):  # noqa: PT011
+        with pytest.raises(ValueError, match='action_id must be'):
             ActionRef(manifest_index=2, action_index=3, action_id='0:0')

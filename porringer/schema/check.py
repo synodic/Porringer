@@ -1,6 +1,7 @@
-"""Data models and schemas for check."""
+"""Data models and schemas for check.
 
-"""Check/update schemas."""
+Check/update schemas.
+"""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,12 +45,12 @@ class CheckResult:
 
     @property
     def success(self) -> bool:
-        """Returns True if the check completed without error."""
+        """True when the check completed without error."""
         return self.error is None
 
     @property
     def updates_available(self) -> int:
-        """Returns the count of packages with updates available."""
+        """The count of packages with updates available."""
         return sum(1 for p in self.packages if p.update_available)
 
 

@@ -1,6 +1,7 @@
-"""Tests covering the shared behavior."""
+"""Tests covering the shared behavior.
 
-"""Shared data between the exposed fixtures."""
+Shared data between the exposed fixtures.
+"""
 
 from abc import ABCMeta, abstractmethod
 from typing import LiteralString, cast

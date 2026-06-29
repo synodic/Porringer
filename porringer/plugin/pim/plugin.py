@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Plugin implementation for Python Install Manager (pymanager)."""
+Plugin implementation for Python Install Manager (pymanager).
+"""
 
 import asyncio
 import logging
@@ -24,7 +25,7 @@ _DEFAULT_EXECUTABLE_PROBE_LINE_COUNT = 2
 logger = logging.getLogger(__name__)
 
 
-async def _run_py(args: Sequence[str], *, timeout: float) -> tuple[int, str, str]:
+async def _run_py(args: Sequence[str], *, timeout_seconds: float) -> tuple[int, str, str]:
     """Run the ``py`` launcher with ``args`` and return (returncode, stdout, stderr)."""
     proc = await asyncio.create_subprocess_exec(
         'py',
@@ -32,7 +33,7 @@ async def _run_py(args: Sequence[str], *, timeout: float) -> tuple[int, str, str
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
     stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
     stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
     return proc.returncode or 0, stdout, stderr
@@ -139,7 +140,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
                     '-c',
                     'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}"); print(sys.executable)',
                 ],
-                timeout=30,
+                timeout_seconds=30,
             )
         except Exception as e:
             message = 'py launcher not found' if isinstance(e, FileNotFoundError) else f'default_executable failed: {e}'
@@ -156,7 +157,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
             return None
 
         tag, executable = lines[0], Path(lines[-1])
-        if not executable.exists():
+        if not await asyncio.to_thread(executable.exists):
             logger.warning('py default resolved to %s but it does not exist', executable)
             return None
         type(self)._default_executable_cache = executable
@@ -180,7 +181,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         try:
             returncode, stdout, stderr = await _run_py(
                 ['-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'],
-                timeout=30,
+                timeout_seconds=30,
             )
         except FileNotFoundError:
             logger.debug('py launcher not found')
@@ -214,7 +215,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         try:
             returncode, stdout, stderr = await _run_py(
                 [f'-{tag}', '-c', 'import sys; print(sys.executable)'],
-                timeout=30,
+                timeout_seconds=30,
             )
         except FileNotFoundError:
             logger.debug('py launcher not found')
@@ -227,7 +228,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
             logger.debug('py -%s failed: %s', tag, stderr.strip())
             return None
         path = Path(stdout.strip())
-        if path.exists():
+        if await asyncio.to_thread(path.exists):
             return path
         logger.warning('py -%s resolved to %s but it does not exist', tag, path)
         return None
@@ -270,7 +271,7 @@ class PIMEnvironment(Environment, RuntimeProvider):
         try:
             returncode, stdout, stderr = await _run_py(
                 ['install', '--configure', '--yes'],
-                timeout=120,
+                timeout_seconds=120,
             )
         except FileNotFoundError:
             configure_logger.debug('py launcher not found; cannot run --configure')

@@ -1,3 +1,4 @@
-"""Public package exports for the plugin.brew module."""
+"""Public package exports for the plugin.brew module.
 
-"""Brew package manager plugin for Porringer."""
+Brew package manager plugin for Porringer.
+"""

@@ -1,6 +1,7 @@
-"""Helpers for test auxiliary tools."""
+"""Helpers for test auxiliary tools.
 
-"""Tests for auxiliary-tool interactions in the pip plugin."""
+Tests for auxiliary-tool interactions in the pip plugin.
+"""
 
 from collections.abc import Generator
 from typing import override

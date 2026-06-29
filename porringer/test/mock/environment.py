@@ -1,6 +1,7 @@
-"""Tests covering the environment behavior."""
+"""Tests covering the environment behavior.
 
-"""Mock environment data."""
+Mock environment data.
+"""
 
 from pathlib import Path
 from typing import override

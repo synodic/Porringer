@@ -1,6 +1,7 @@
-"""Helpers for test disposable environment."""
+"""Helpers for test disposable environment.
 
-"""Tests for disposable tool-home smoke fixtures."""
+Tests for disposable tool-home smoke fixtures.
+"""
 
 import os
 from pathlib import Path

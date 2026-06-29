@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Git SCM plugin implementation."""
+Git SCM plugin implementation.
+"""
 
 import asyncio
 import logging

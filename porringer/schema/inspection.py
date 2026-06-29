@@ -1,6 +1,7 @@
-"""Data models and schemas for inspection."""
+"""Data models and schemas for inspection.
 
-"""Inspection report schemas for manifest previews and diagnostics."""
+Inspection report schemas for manifest previews and diagnostics.
+"""
 
 from enum import StrEnum
 from pathlib import Path

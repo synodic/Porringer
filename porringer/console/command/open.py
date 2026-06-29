@@ -1,6 +1,7 @@
-"""CLI command implementation for open."""
+"""CLI command implementation for open.
 
-"""Porringer CLI open command — the OS install-link handler entry point."""
+Porringer CLI open command — the OS install-link handler entry point.
+"""
 
 from typing import Annotated
 

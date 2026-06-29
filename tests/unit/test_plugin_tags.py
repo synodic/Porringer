@@ -1,6 +1,7 @@
-"""Helpers for test plugin tags."""
+"""Helpers for test plugin tags.
 
-"""Tests for runtime tag resolution and ordering."""
+Tests for runtime tag resolution and ordering.
+"""
 
 import re
 from pathlib import Path

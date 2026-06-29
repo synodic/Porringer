@@ -1,6 +1,6 @@
-"""Helpers for test minimal path."""
+"""Helpers for test minimal path.
 
-"""Integration tests that verify plugins tolerate minimal executable discovery.
+Integration tests that verify plugins tolerate minimal executable discovery.
 
 Every available plugin is inspected with restricted tool discovery
 where only the plugin's primary tool is discoverable.  This catches

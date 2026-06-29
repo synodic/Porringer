@@ -1,6 +1,6 @@
-"""Helpers for test example presence."""
+"""Helpers for test example presence.
 
-"""Presence test using the python-dev example manifest.
+Presence test using the python-dev example manifest.
 
 Verifies that pip packages declared in `examples/python-dev/porringer.json`
 which also appear in `pyproject.toml` dependency groups are detected as

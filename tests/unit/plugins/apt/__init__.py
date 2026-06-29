@@ -1,3 +1,4 @@
-"""Public package exports for the unit.plugins.apt module."""
+"""Public package exports for the unit.plugins.apt module.
 
-"""Unit tests for the apt plugin."""
+Unit tests for the apt plugin.
+"""

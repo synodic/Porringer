@@ -1,6 +1,7 @@
-"""Helpers for test sync inspection."""
+"""Helpers for test sync inspection.
 
-"""Tests for structured sync inspection reports."""
+Tests for structured sync inspection reports.
+"""
 
 import json
 from pathlib import Path

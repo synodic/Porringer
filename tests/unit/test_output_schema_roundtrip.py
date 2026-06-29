@@ -12,6 +12,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from porringer.schema.inspection import (
     ActionInspection,
     ActionSnapshot,
@@ -46,12 +48,12 @@ _ACTION_INDEX = 7
 _MANIFEST_ACTIONS = 5
 
 
-def _roundtrip[T](model: T) -> T:
+def _roundtrip[T: BaseModel](model: T) -> T:
     """Serialize to JSON dict and back through model_validate."""
-    raw = model.model_dump(mode='json')  # type: ignore[attr-defined]
+    raw = model.model_dump(mode='json')
     # Verify the dump is JSON-encodable (no non-serializable objects).
     json.dumps(raw)
-    return type(model).model_validate(raw)  # type: ignore[attr-defined]
+    return model.model_validate(raw)
 
 
 class TestResultEnvelopeRoundTrip:

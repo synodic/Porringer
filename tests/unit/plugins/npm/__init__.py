@@ -1,3 +1,4 @@
-"""Public package exports for the unit.plugins.npm module."""
+"""Public package exports for the unit.plugins.npm module.
 
-"""Unit tests for the npm plugin."""
+Unit tests for the npm plugin.
+"""

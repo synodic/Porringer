@@ -1,3 +1,4 @@
-"""Public package exports for the integration module."""
+"""Public package exports for the integration module.
 
-"""Integration tests package for Porringer."""
+Integration tests package for Porringer.
+"""

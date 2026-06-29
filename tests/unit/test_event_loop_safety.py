@@ -1,6 +1,6 @@
-"""Helpers for test event loop safety."""
+"""Helpers for test event loop safety.
 
-"""Tests proving sync execution is event-loop safe.
+Tests proving sync execution is event-loop safe.
 
 These tests verify that sync.run can run on a pre-existing event
 loop (e.g. qasync) without nesting asyncio.run() or blocking the loop.

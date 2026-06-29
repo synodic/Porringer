@@ -28,21 +28,16 @@ homepage = "https://github.com/synodic/porringer"
 repository = "https://github.com/synodic/porringer"
 
 [dependency-groups]
-lint = [
-    "ruff>=0.15.20",
-    "pyrefly>=1.1.1",
-]
+lint = ["ruff>=0.15.20", "pyrefly>=1.1.1"]
 test = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "pytest-subprocess>=1.6.0",
-    "dirty-equals>=0.11",
-    "hypothesis>=6.155.7",
-    "pytest-socket>=0.8.0",
+  "pytest>=9.1.1",
+  "pytest-asyncio>=1.4.0",
+  "pytest-subprocess>=1.6.0",
+  "dirty-equals>=0.11",
+  "hypothesis>=6.155.7",
+  "pytest-socket>=0.8.0",
 ]
-docs = [
-    "zensical>=0.0.46",
-]
+docs = ["zensical>=0.0.46"]
 
 [project.entry-points."porringer.environment"]
 pip = "porringer.plugin.pip.plugin:PIPEnvironment"
@@ -85,7 +80,6 @@ line-length = 120
 preview = true
 
 [tool.ruff.lint]
-ignore = ["D206", "D300", "E111", "E114", "E117", "ASYNC109", "ASYNC240"]
 select = [
   "D",     # pydocstyle
   "F",     # Pyflakes

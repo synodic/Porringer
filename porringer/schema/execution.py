@@ -1,6 +1,7 @@
-"""Data models and schemas for execution."""
+"""Data models and schemas for execution.
 
-"""Execution schemas."""
+Execution schemas.
+"""
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -360,7 +361,7 @@ class BatchSetupResults:
 
     @property
     def success(self) -> bool:
-        """Returns True if all manifests were processed successfully."""
+        """True when all manifests were processed successfully."""
         if self.failed_paths:
             return False
         return all(all(r.success for r in m.results) for m in self.manifest_results)

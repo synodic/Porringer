@@ -1,6 +1,6 @@
-"""Core helpers and types for manifest."""
+"""Core helpers and types for manifest.
 
-"""Protocol for plugins that contribute manifest source files.
+Protocol for plugins that contribute manifest source files.
 
 Plugins that host porringer configuration inside their own ecosystem
 files (e.g. ``pyproject.toml``, ``package.json``)

@@ -1,6 +1,7 @@
-"""Helpers for test manifest inspect."""
+"""Helpers for test manifest inspect.
 
-"""Test state-aware inspection and LATEST/EXACT sync strategies."""
+Test state-aware inspection and LATEST/EXACT sync strategies.
+"""
 
 import json
 import tempfile

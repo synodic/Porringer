@@ -1,6 +1,7 @@
-"""Data models and schemas for project."""
+"""Data models and schemas for project.
 
-"""Project and cached-directory inspection schemas."""
+Project and cached-directory inspection schemas.
+"""
 
 from enum import StrEnum
 from pathlib import Path

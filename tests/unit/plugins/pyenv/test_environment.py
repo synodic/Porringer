@@ -1,6 +1,7 @@
-"""Helpers for test environment."""
+"""Helpers for test environment.
 
-"""Unit tests for the PyenvEnvironment plugin."""
+Unit tests for the PyenvEnvironment plugin.
+"""
 
 from pathlib import Path
 from unittest.mock import patch

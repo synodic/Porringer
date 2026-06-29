@@ -1,6 +1,6 @@
-"""Helpers for test concurrency and client."""
+"""Helpers for test concurrency and client.
 
-"""Tests for concurrency limiting, shared aiohttp.ClientSession, and console check command.
+Tests for concurrency limiting, shared aiohttp.ClientSession, and console check command.
 
 Validates:
 1. ``max_concurrency`` field on ``SetupParameters``

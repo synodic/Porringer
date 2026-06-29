@@ -1,6 +1,7 @@
-"""CLI command implementation for package."""
+"""CLI command implementation for package.
 
-"""Porringer CLI package command module for managed-package operations."""
+Porringer CLI package command module for managed-package operations.
+"""
 
 import asyncio
 from pathlib import Path
@@ -48,7 +49,7 @@ def package_list(
     try:
         packages = asyncio.run(PackageCommands.list(plugin_name, resolved_path))
     except PluginError as e:
-        configuration.output.error(str(e.error))
+        configuration.output.error(e.error)
         raise typer.Exit(code=1) from None
 
     if not packages:

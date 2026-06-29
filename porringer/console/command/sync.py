@@ -1,6 +1,6 @@
-"""CLI command implementation for sync."""
+"""CLI command implementation for sync.
 
-"""Shared manifest execution helpers for Porringer CLI commands.
+Shared manifest execution helpers for Porringer CLI commands.
 
 The user-facing entry point is ``porringer install``; this module keeps the
 progress tracking, observable execution, and result rendering helpers it

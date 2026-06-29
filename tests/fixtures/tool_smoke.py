@@ -16,7 +16,7 @@ async def assert_native_dry_run_accepted(
     *,
     verb: PackageVerb = 'install',
     runtime_context: RuntimeContext | None = None,
-    timeout: float = 60.0,
+    timeout_seconds: float = 60.0,
 ) -> None:
     """Assert the real tool accepts the plugin's argv in native dry-run mode.
 
@@ -37,7 +37,7 @@ async def assert_native_dry_run_accepted(
         package: The package reference to rehearse.
         verb: Which operation to rehearse (``install`` or ``upgrade``).
         runtime_context: Resolved runtime paths for the operation.
-        timeout: Seconds to allow the rehearsal command to run.
+        timeout_seconds: Seconds to allow the rehearsal command to run.
     """
     flags = list(plugin.dry_run_flags(verb))
     if not flags:
@@ -46,5 +46,5 @@ async def assert_native_dry_run_accepted(
         argv = plugin.upgrade_command(package, runtime_context=runtime_context)
     else:
         argv = plugin.install_command(package, runtime_context=runtime_context)
-    result = await run_command([*argv, *flags], timeout=timeout)
+    result = await run_command([*argv, *flags], timeout=timeout_seconds)
     assert result.returncode == 0, f'{verb} dry-run rejected by {plugin.tool_name()!r}: {result.stderr}'

@@ -1,6 +1,7 @@
-"""Helpers for update detection helpers."""
+"""Helpers for update detection helpers.
 
-"""Shared factories for update-detection tests."""
+Shared factories for update-detection tests.
+"""
 
 from unittest.mock import AsyncMock, MagicMock
 

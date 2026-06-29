@@ -1,6 +1,6 @@
-"""Helpers for test runtime context seeding."""
+"""Helpers for test runtime context seeding.
 
-"""Tests for runtime-context seeding in ExecutionState.
+Tests for runtime-context seeding in ExecutionState.
 
 Verifies that ``execute_single()`` and ``ExecutionState`` correctly
 inherit a pre-resolved ``RuntimeContext`` from ``DiscoveredPlugins``

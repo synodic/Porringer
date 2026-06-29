@@ -1,6 +1,7 @@
-"""Helpers for test target resolution."""
+"""Helpers for test target resolution.
 
-"""Tests for install target resolution helpers."""
+Tests for install target resolution helpers.
+"""
 
 from pathlib import Path
 

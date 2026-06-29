@@ -1,6 +1,6 @@
-"""Helpers for api."""
+"""Helpers for api.
 
-"""Session-scoped API and configuration fixtures.
+Session-scoped API and configuration fixtures.
 
 Provides a single ``API`` instance (``session_api``) backed by a
 session-scoped temporary directory tree.  Tests that only *read*

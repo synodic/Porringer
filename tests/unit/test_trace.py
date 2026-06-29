@@ -1,6 +1,7 @@
-"""Helpers for test trace."""
+"""Helpers for test trace.
 
-"""Tests for opt-in command trace artifacts."""
+Tests for opt-in command trace artifacts.
+"""
 
 import json
 import sys

@@ -1,6 +1,6 @@
-"""Helpers for test update detection resolution."""
+"""Helpers for test update detection resolution.
 
-"""Tests for the update-detection resolution primitives.
+Tests for the update-detection resolution primitives.
 
 Covers ``is_package_installed`` 3-tuple return and ``check_for_newer_version``.
 """

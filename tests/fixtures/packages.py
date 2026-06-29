@@ -1,6 +1,6 @@
-"""Helpers for packages."""
+"""Helpers for packages.
 
-"""Session-scoped cached package list and plugin discovery for the ``mock_packages`` marker.
+Session-scoped cached package list and plugin discovery for the ``mock_packages`` marker.
 
 Queries installed packages via ``importlib.metadata`` **once** at session
 start and pre-discovers all plugins once.  Tests decorated with

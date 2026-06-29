@@ -1,6 +1,6 @@
-"""Helpers for test backend resolver."""
+"""Helpers for test backend resolver.
 
-"""Tests for BackendResolver — plugin resolution without default_priority.
+Tests for BackendResolver — plugin resolution without default_priority.
 
 The resolver selects a plugin per (PluginKind, ecosystem) pair using:
 1. Explicit user preferences (ecosystem → plugin name).

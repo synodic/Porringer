@@ -1,6 +1,7 @@
-"""Helpers for test plugin runtime."""
+"""Helpers for test plugin runtime.
 
-"""Tests for plugin runtime resolution, listing, and availability gating."""
+Tests for plugin runtime resolution, listing, and availability gating.
+"""
 
 from pathlib import Path
 from typing import override

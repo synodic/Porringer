@@ -1,6 +1,7 @@
-"""CLI command implementation for project."""
+"""CLI command implementation for project.
 
-"""Project and cached-directory inspection commands."""
+Project and cached-directory inspection commands.
+"""
 
 import asyncio
 from pathlib import Path
@@ -61,7 +62,7 @@ class ProjectCommands:
         plugins: DiscoveredPlugins | None = None,
     ) -> ProjectInspection:
         """Inspect one project directory or manifest path."""
-        directory_path = Path(path).resolve()
+        directory_path = await asyncio.to_thread(Path(path).resolve)
         exists = await asyncio.to_thread(directory_path.exists)
         has_manifest = await asyncio.to_thread(self._sync.has_manifest, directory_path) if exists else False
         validation = DirectoryValidationResult(

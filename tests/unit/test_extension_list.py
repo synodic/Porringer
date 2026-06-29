@@ -1,6 +1,7 @@
-"""Helpers for test extension list."""
+"""Helpers for test extension list.
 
-"""Tests for extension listing (kinds filter) and manifest action-field parsing."""
+Tests for extension listing (kinds filter) and manifest action-field parsing.
+"""
 
 import json
 from pathlib import Path

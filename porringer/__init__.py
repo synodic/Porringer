@@ -1,6 +1,6 @@
-"""Public package exports."""
+"""Public package exports.
 
-"""Public package entry points for Porringer.
+Public package entry points for Porringer.
 
 This package exposes the public API, backend helpers, CLI commands, and
 supporting utilities that applications use when integrating with Porringer.

@@ -1,6 +1,7 @@
-"""Core helpers and types for environment."""
+"""Core helpers and types for environment.
 
-"""Plugin utilities for package environments."""
+Plugin utilities for package environments.
+"""
 
 import contextlib
 import logging
@@ -203,7 +204,7 @@ class Environment(ToolBasedPlugin):
 
     # --- Optional plugin hooks --------------------------------------------
 
-    def dry_run_flags(self, verb: PackageVerb) -> Sequence[str]:  # noqa: PLR6301
+    def dry_run_flags(self, verb: PackageVerb) -> Sequence[str]:
         """Return extra CLI flags that turn *verb* into a no-op rehearsal.
 
         Override on plugins whose underlying tool supports a native
@@ -219,10 +220,10 @@ class Environment(ToolBasedPlugin):
             A sequence of extra arguments to append to the command,
             or an empty sequence to indicate this hook does not apply.
         """
-        del verb
+        del self, verb
         return ()
 
-    async def post_action(  # noqa: PLR6301
+    async def post_action(
         self,
         verb: PackageVerb,
         params: PackageParameters,
@@ -235,9 +236,9 @@ class Environment(ToolBasedPlugin):
         operation.  Always called once when the subprocess exits, even
         on failure (``success`` reflects the exit status).
         """
-        del verb, params, success
+        del self, verb, params, success
 
-    def parse_progress_line(  # noqa: PLR6301
+    def parse_progress_line(
         self,
         line: str,
         channel: Literal['stdout', 'stderr'],
@@ -250,7 +251,7 @@ class Environment(ToolBasedPlugin):
         percentages, install phases, etc.) and produce richer
         ``ActionProgress`` events alongside the raw output channel.
         """
-        del line, channel, action
+        del self, line, channel, action
         return None
 
     async def install(self, params: PackageParameters) -> Package | None:
@@ -349,7 +350,7 @@ class Environment(ToolBasedPlugin):
         args: list[str],
         params: PackageParameters,
         phase: str,
-        verb: str,
+        verb: PackageVerb,
     ) -> Package | None:
         """Run *args* as an async subprocess with line-by-line progress.
 
@@ -372,9 +373,8 @@ class Environment(ToolBasedPlugin):
             package=params.package,
         )
         # Apply native dry-run flags when the plugin advertises them.
-        verb_literal: PackageVerb = verb  # type: ignore[assignment]
         if params.dry:
-            extra = list(self.dry_run_flags(verb_literal))
+            extra = list(self.dry_run_flags(verb))
             if extra:
                 args = [*args, *extra]
         # Wrap the user callback so each output line can also be
@@ -408,7 +408,7 @@ class Environment(ToolBasedPlugin):
             logger.error(f'Failed to {verb} {params.package.name}: {e}')
         finally:
             with contextlib.suppress(Exception):
-                await self.post_action(verb_literal, params, success)
+                await self.post_action(verb, params, success)
         if not success:
             return None
         return Package(name=params.package.name, version=None)

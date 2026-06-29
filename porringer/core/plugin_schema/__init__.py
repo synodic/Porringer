@@ -1,6 +1,6 @@
-"""Public package exports for the core.plugin_schema module."""
+"""Public package exports for the core.plugin_schema module.
 
-"""Plugin schema package for Porringer.
+Plugin schema package for Porringer.
 
 This package contains the schema definitions and base classes for plugins,
 including environment plugins and their parameters.

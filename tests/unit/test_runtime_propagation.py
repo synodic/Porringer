@@ -1,6 +1,7 @@
-"""Helpers for test runtime propagation."""
+"""Helpers for test runtime propagation.
 
-"""Tests for runtime propagation across phase transitions and venv scoping."""
+Tests for runtime propagation across phase transitions and venv scoping.
+"""
 
 import asyncio
 import inspect

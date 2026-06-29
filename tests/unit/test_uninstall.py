@@ -1,6 +1,6 @@
-"""Helpers for test uninstall."""
+"""Helpers for test uninstall.
 
-"""Tests for the package uninstall feature.
+Tests for the package uninstall feature.
 
 Covers:
 - resolve_uninstall_operation (presence → UNINSTALL or SKIP/NOT_INSTALLED)

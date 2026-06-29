@@ -1,6 +1,7 @@
-"""Helpers for test plugin manager."""
+"""Helpers for test plugin manager.
 
-"""Tests for the PluginManager protocol and native plugin management routing."""
+Tests for the PluginManager protocol and native plugin management routing.
+"""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch

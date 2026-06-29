@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Plugin implementation for Yarn (Berry v4+) project environment."""
+Plugin implementation for Yarn (Berry v4+) project environment.
+"""
 
 from typing import override
 

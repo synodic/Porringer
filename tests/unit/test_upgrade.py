@@ -1,6 +1,6 @@
-"""Helpers for test upgrade."""
+"""Helpers for test upgrade.
 
-"""Tests for the imperative package upgrade feature (PackageCommands.upgrade).
+Tests for the imperative package upgrade feature (PackageCommands.upgrade).
 
 Covers:
 - execute_package with SyncStrategy.LATEST (upgrade vs install routing)

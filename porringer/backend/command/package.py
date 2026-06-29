@@ -1,6 +1,6 @@
-"""CLI command implementation for package."""
+"""CLI command implementation for package.
 
-"""The package command module.
+The package command module.
 
 Imperative package operations — listing, installing, upgrading,
 uninstalling, and checking for updates on packages managed by

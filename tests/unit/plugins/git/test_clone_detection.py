@@ -1,6 +1,7 @@
-"""Helpers for test clone detection."""
+"""Helpers for test clone detection.
 
-"""Unit tests for Git SCM clone detection and URL comparison."""
+Unit tests for Git SCM clone detection and URL comparison.
+"""
 
 from pathlib import Path
 from unittest.mock import AsyncMock, patch

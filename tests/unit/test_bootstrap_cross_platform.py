@@ -1,6 +1,6 @@
-"""Helpers for test bootstrap cross platform."""
+"""Helpers for test bootstrap cross platform.
 
-"""Cross-platform tests for the python-bootstrap example manifest.
+Cross-platform tests for the python-bootstrap example manifest.
 
 Validates that deferred resolution works correctly when platform-
 specific plugins are unavailable:

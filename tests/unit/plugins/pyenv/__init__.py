@@ -1,3 +1,4 @@
-"""Public package exports for the unit.plugins.pyenv module."""
+"""Public package exports for the unit.plugins.pyenv module.
 
-"""Tests for the pyenv plugin."""
+Tests for the pyenv plugin.
+"""

@@ -1,6 +1,7 @@
-"""Console and CLI support for entry."""
+"""Console and CLI support for entry.
 
-"""Typer CLI Application."""
+Typer CLI Application.
+"""
 
 import logging
 from importlib.metadata import version

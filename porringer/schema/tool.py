@@ -1,6 +1,7 @@
-"""Data models and schemas for tool."""
+"""Data models and schemas for tool.
 
-"""Managed tool/package operation schemas."""
+Managed tool/package operation schemas.
+"""
 
 from pydantic import Field
 

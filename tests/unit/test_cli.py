@@ -1,6 +1,7 @@
-"""Helpers for test cli."""
+"""Helpers for test cli.
 
-"""Test the click cli."""
+Test the click cli.
+"""
 
 import json
 import logging

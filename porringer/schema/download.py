@@ -1,6 +1,7 @@
-"""Data models and schemas for download."""
+"""Data models and schemas for download.
 
-"""Download schemas."""
+Download schemas.
+"""
 
 from collections.abc import Callable
 from dataclasses import dataclass

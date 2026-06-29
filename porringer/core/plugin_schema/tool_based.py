@@ -1,6 +1,6 @@
-"""Core helpers and types for tool based."""
+"""Core helpers and types for tool based.
 
-"""Shared base for plugins backed by a command-line tool.
+Shared base for plugins backed by a command-line tool.
 
 Provides the ``tool_name()`` / ``is_available()`` / ``tool_version()``
 triple so that ``Environment``, ``ProjectEnvironment``, and
@@ -177,7 +177,7 @@ class ToolBasedPlugin(Plugin):
     async def _run_raw(
         args: list[str],
         *,
-        timeout: float,
+        timeout_seconds: float,
         logger: logging.Logger,
         cwd: Path | None = None,
         error_label: str | None = None,
@@ -192,7 +192,7 @@ class ToolBasedPlugin(Plugin):
 
         Args:
             args: Command and arguments.
-            timeout: Subprocess timeout in seconds.
+            timeout_seconds: Subprocess timeout in seconds.
             logger: Logger for failure diagnostics.
             cwd: Working directory for the subprocess.
             error_label: Label used in the failure message (defaults to
@@ -203,7 +203,7 @@ class ToolBasedPlugin(Plugin):
             could not be executed.
         """
         try:
-            return await run_command(args, cwd=cwd, timeout=timeout)
+            return await run_command(args, cwd=cwd, timeout=timeout_seconds)
         except FileNotFoundError:
             logger.warning('%s not found on PATH', args[0])
         except (OSError, TimeoutError) as e:
@@ -237,7 +237,7 @@ class ToolBasedPlugin(Plugin):
             JSON.
         """
         logger = logging.getLogger(f'porringer.{type(self).tool_name()}.json_command')
-        result = await self._run_raw(args, timeout=30, logger=logger)
+        result = await self._run_raw(args, timeout_seconds=30, logger=logger)
         if result is None:
             return None
         if result.returncode != 0:
@@ -272,7 +272,7 @@ class ToolBasedPlugin(Plugin):
             The stdout string, or ``None`` on failure.
         """
         logger = logging.getLogger(f'porringer.{type(self).tool_name()}.text_command')
-        result = await self._run_raw(args, timeout=30, logger=logger)
+        result = await self._run_raw(args, timeout_seconds=30, logger=logger)
         if result is None:
             return None
         if result.returncode != 0:
@@ -304,7 +304,7 @@ class ToolBasedPlugin(Plugin):
             ``True`` if the process exited cleanly, ``False`` otherwise.
         """
         logger = logging.getLogger(f'porringer.{type(self).tool_name()}.{label}')
-        result = await self._run_raw(args, timeout=300, cwd=cwd, logger=logger, error_label=label)
+        result = await self._run_raw(args, timeout_seconds=300, cwd=cwd, logger=logger, error_label=label)
         if result is None:
             return False
         logger.info(result.stdout)

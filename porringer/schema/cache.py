@@ -1,6 +1,7 @@
-"""Data models and schemas for cache."""
+"""Data models and schemas for cache.
 
-"""Directory cache schemas."""
+Directory cache schemas.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path

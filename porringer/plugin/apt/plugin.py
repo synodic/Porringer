@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Plugin implementation for APT (Advanced Package Tool) package manager."""
+Plugin implementation for APT (Advanced Package Tool) package manager.
+"""
 
 import logging
 import sys

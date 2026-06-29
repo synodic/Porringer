@@ -1,6 +1,6 @@
-"""Core helpers and types for python environment."""
+"""Core helpers and types for python environment.
 
-"""Intermediate base for Python-ecosystem environment plugins.
+Intermediate base for Python-ecosystem environment plugins.
 
 Plugins that install Python packages (pip, uv, pipx) share several
 boilerplate declarations:

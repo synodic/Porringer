@@ -1,6 +1,7 @@
-"""Helpers for test project directory."""
+"""Helpers for test project directory.
 
-"""Tests for project_directory and SkipReason functionality."""
+Tests for project_directory and SkipReason functionality.
+"""
 
 import json
 import tempfile
@@ -12,8 +13,8 @@ import pytest
 from packaging.version import Version
 
 from porringer.api import API
+from porringer.backend.command.core import execution
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from porringer.backend.command.core.execution import _execute_project_sync
 from porringer.core.plugin_schema.project_environment import ProjectCommandPlan
 from porringer.core.schema import Distribution, Ecosystem, PluginKind, PluginParameters
 from porringer.schema import (
@@ -128,7 +129,7 @@ class TestProjectDirectorySkip:
                 new_callable=AsyncMock,
                 return_value=CommandResult(returncode=0, stdout='', stderr=''),
             ) as mock_run:
-                result = await _execute_project_sync(
+                result = await execution._execute_project_sync(
                     action,
                     {'mock-project': plugin},
                     root,

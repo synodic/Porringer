@@ -236,13 +236,9 @@ async def main() -> None:
 
     await api.sync.run(SetupParameters(paths=project_path))
 
-    await api.sync.run(
-        SetupParameters(paths=manifest_path, project_directory=False)
-    )
+    await api.sync.run(SetupParameters(paths=manifest_path, project_directory=False))
 
-    await api.sync.run(
-        SetupParameters(paths=manifest_path, project_directory=project_path)
-    )
+    await api.sync.run(SetupParameters(paths=manifest_path, project_directory=project_path))
 
     def on_event(event):
         description = getattr(event, 'action', None) and event.action.description or 'manifest'

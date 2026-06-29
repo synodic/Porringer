@@ -1,6 +1,7 @@
-"""CLI command implementation for client."""
+"""CLI command implementation for client.
 
-"""Client-oriented aggregate commands."""
+Client-oriented aggregate commands.
+"""
 
 import asyncio
 

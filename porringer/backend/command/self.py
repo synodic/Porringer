@@ -1,6 +1,7 @@
-"""CLI command implementation for self."""
+"""CLI command implementation for self.
 
-"""Utilities for managing and checking the Porringer installation version."""
+Utilities for managing and checking the Porringer installation version.
+"""
 
 import contextlib
 import importlib.metadata

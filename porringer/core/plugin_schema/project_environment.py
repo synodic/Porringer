@@ -1,6 +1,6 @@
-"""Core helpers and types for project environment."""
+"""Core helpers and types for project environment.
 
-"""Plugin utilities for project-scoped environments.
+Plugin utilities for project-scoped environments.
 
 A `ProjectEnvironment` plugin wraps a project dependency manager
 (PDM, Poetry, uv) and delegates venv creation, dependency resolution,

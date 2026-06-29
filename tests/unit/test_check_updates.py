@@ -1,6 +1,6 @@
-"""Helpers for test check updates."""
+"""Helpers for test check updates.
 
-"""Tests for check_updates implementations across all environment plugins.
+Tests for check_updates implementations across all environment plugins.
 
 Validates that each plugin's ``check_updates`` method correctly queries
 its respective package registry and handles ``include_prereleases``,

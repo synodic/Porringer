@@ -1,6 +1,7 @@
-"""CLI command implementation for env."""
+"""CLI command implementation for env.
 
-"""Porringer CLI environment diagnostics."""
+Porringer CLI environment diagnostics.
+"""
 
 import asyncio
 import json

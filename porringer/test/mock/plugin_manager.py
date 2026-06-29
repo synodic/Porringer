@@ -1,6 +1,6 @@
-"""Tests covering the plugin manager behavior."""
+"""Tests covering the plugin manager behavior.
 
-"""Mock plugin manager for testing routing logic without real tool dependencies.
+Mock plugin manager for testing routing logic without real tool dependencies.
 
 Provides a ``MockPluginManager`` that records which operations were
 requested (install vs upgrade) so tests can assert on semantic intent

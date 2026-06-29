@@ -1,6 +1,6 @@
-"""Helpers for test frozen app detection."""
+"""Helpers for test frozen app detection.
 
-"""Tests for python_command() behaviour in frozen (PyInstaller) applications.
+Tests for python_command() behaviour in frozen (PyInstaller) applications.
 
 When ``sys.frozen`` is ``True``, ``sys.executable`` points to the
 packaged binary (e.g. ``synodic.exe``) rather than a Python

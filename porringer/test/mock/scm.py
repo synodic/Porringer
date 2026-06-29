@@ -1,6 +1,7 @@
-"""Tests covering the scm behavior."""
+"""Tests covering the scm behavior.
 
-"""Mock SCM environment data."""
+Mock SCM environment data.
+"""
 
 from pathlib import Path
 from typing import override

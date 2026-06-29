@@ -1,6 +1,6 @@
-"""Helpers for test update detection."""
+"""Helpers for test update detection.
 
-"""Tests for update detection during inspection.
+Tests for update detection during inspection.
 
 Covers ``SkipReason.UPDATE_AVAILABLE`` / ``ALREADY_INSTALLED`` paths,
 version fields on ``SetupActionResult``, and version propagation on

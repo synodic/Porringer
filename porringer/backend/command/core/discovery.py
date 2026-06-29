@@ -1,6 +1,6 @@
-"""CLI command implementation for discovery."""
+"""CLI command implementation for discovery.
 
-"""Plugin discovery helpers.
+Plugin discovery helpers.
 
 Provides `discover_plugins` which wraps entry-point discovery and
 instantiation into a single canonical-name-keyed dict.  Extracted from

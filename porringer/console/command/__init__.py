@@ -1,3 +1,4 @@
-"""Public package exports for the console.command module."""
+"""Public package exports for the console.command module.
 
-"""Commands for the Porringer console application."""
+Commands for the Porringer console application.
+"""

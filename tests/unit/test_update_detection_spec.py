@@ -1,6 +1,7 @@
-"""Helpers for test update detection spec."""
+"""Helpers for test update detection spec.
 
-"""Tests for manifest-level PluginSpec parsing and per-plugin prerelease opt-in."""
+Tests for manifest-level PluginSpec parsing and per-plugin prerelease opt-in.
+"""
 
 from porringer.backend.command.core.action_builder import build_actions
 from porringer.core.schema import Ecosystem

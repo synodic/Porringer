@@ -1,6 +1,7 @@
-"""Data models and schemas for plugin."""
+"""Data models and schemas for plugin.
 
-"""Plugin metadata schemas."""
+Plugin metadata schemas.
+"""
 
 from dataclasses import dataclass
 from enum import Enum, auto

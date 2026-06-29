@@ -1,6 +1,7 @@
-"""Helpers for test plugin manager upgrade."""
+"""Helpers for test plugin manager upgrade.
 
-"""Tests for plugin upgrade routing, operation resolution, and extras reinstall."""
+Tests for plugin upgrade routing, operation resolution, and extras reinstall.
+"""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -693,7 +694,7 @@ class TestExtrasReinstall:
     async def test_plugin_minimal_extras_satisfied_skips(self) -> None:
         """Plugin: MINIMAL + installed + extras + introspection satisfied -> SKIP."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
+        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
@@ -715,7 +716,7 @@ class TestExtrasReinstall:
     async def test_plugin_minimal_extras_not_satisfied_reinstalls(self) -> None:
         """Plugin: MINIMAL + installed + extras not satisfied -> ENSURE_EXTRAS."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
+        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
 
@@ -755,7 +756,7 @@ class TestExtrasReinstall:
     async def test_execute_minimal_extras_skips(self) -> None:
         """execute_package under MINIMAL with extras skips when satisfied."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')  # type: ignore[method-assign]
+        mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')
         action = self._make_action(plugin_target='mock-pm')
         proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=proj_envs)

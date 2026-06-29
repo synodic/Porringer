@@ -1,6 +1,7 @@
-"""CLI command implementation for check."""
+"""CLI command implementation for check.
 
-"""Porringer CLI check command module for checking package updates via plugins."""
+Porringer CLI check command module for checking package updates via plugins.
+"""
 
 import asyncio
 from typing import Annotated

@@ -1,6 +1,6 @@
-"""Public package exports for the schema module."""
+"""Public package exports for the schema module.
 
-"""Schema package for Porringer.
+Schema package for Porringer.
 
 All public types are re-exported here for flat access via
 ``from porringer.schema import X``.

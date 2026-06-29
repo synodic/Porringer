@@ -1,6 +1,7 @@
-"""Helpers for test cache."""
+"""Helpers for test cache.
 
-"""Test the directory cache functionality."""
+Test the directory cache functionality.
+"""
 
 import json
 from pathlib import Path

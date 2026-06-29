@@ -1,6 +1,7 @@
-"""Helpers for test check."""
+"""Helpers for test check.
 
-"""Test the check and download functionality."""
+Test the check and download functionality.
+"""
 
 import tempfile
 from pathlib import Path

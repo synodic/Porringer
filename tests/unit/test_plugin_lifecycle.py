@@ -1,6 +1,6 @@
-"""Helpers for test plugin lifecycle."""
+"""Helpers for test plugin lifecycle.
 
-"""Contract tests for the Plugin setup/teardown lifecycle.
+Contract tests for the Plugin setup/teardown lifecycle.
 
 Verifies the framework-enforced guarantees:
   G1 — setup() is called at most once per plugin per sync.
@@ -387,11 +387,11 @@ class TestDefaultNoOp:
     async def test_base_setup_is_noop() -> None:
         """Calling setup() on a plugin with no override is a silent no-op."""
         env = _FakeEnvironment.__new__(_FakeEnvironment)
-        await Plugin.setup(env)  # type: ignore[arg-type]
+        await Plugin.setup(env)
 
     @staticmethod
     async def test_base_teardown_is_noop() -> None:
         """Calling teardown() on a plugin with no override is a silent no-op."""
         env = _FakeEnvironment.__new__(_FakeEnvironment)
 
-        await Plugin.teardown(env)  # type: ignore[arg-type]
+        await Plugin.teardown(env)

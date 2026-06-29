@@ -1,6 +1,7 @@
-"""Data models and schemas for profile."""
+"""Data models and schemas for profile.
 
-"""Setup profile schemas."""
+Setup profile schemas.
+"""
 
 from typing import Any
 
@@ -38,7 +39,7 @@ class SetupProfile(PorringerModel):
 
     @property
     def manifest_urls(self) -> list[str]:
-        """Return manifest URLs as plain strings."""
+        """Manifest URLs as plain strings."""
         return [manifest.url for manifest in self.manifests]
 
 

@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Plugin implementation for UV project environment."""
+Plugin implementation for UV project environment.
+"""
 
 from typing import override
 

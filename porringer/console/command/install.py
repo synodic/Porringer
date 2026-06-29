@@ -1,6 +1,7 @@
-"""CLI command implementation for install."""
+"""CLI command implementation for install.
 
-"""Porringer CLI install command."""
+Porringer CLI install command.
+"""
 
 import asyncio
 from dataclasses import dataclass

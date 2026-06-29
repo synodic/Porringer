@@ -1,6 +1,6 @@
-"""Core helpers and types for plugin manager."""
+"""Core helpers and types for plugin manager.
 
-"""Protocol for tools that manage their own plugins natively.
+Protocol for tools that manage their own plugins natively.
 
 Tools like PDM and Poetry support native plugin management via their
 own CLI commands (``pdm self add``, ``poetry self add``).  Plugins

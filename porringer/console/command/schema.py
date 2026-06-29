@@ -1,6 +1,6 @@
-"""CLI command implementation for schema."""
+"""CLI command implementation for schema.
 
-"""Porringer CLI schema command module.
+Porringer CLI schema command module.
 
 Exports the JSON Schema for porringer manifest files.
 """

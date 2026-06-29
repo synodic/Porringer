@@ -1,6 +1,6 @@
-"""Helpers for test package ref invariants."""
+"""Helpers for test package ref invariants.
 
-"""Property-based invariants for :class:`~porringer.core.schema.PackageRef`.
+Property-based invariants for :class:`~porringer.core.schema.PackageRef`.
 
 These tests assert *relationships that hold for all inputs* rather than
 checking captured example values.  Each property is its own oracle, so

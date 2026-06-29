@@ -1,6 +1,7 @@
-"""Helpers for test install cli."""
+"""Helpers for test install cli.
 
-"""CLI tests for the install and open commands."""
+CLI tests for the install and open commands.
+"""
 
 import json
 from pathlib import Path

@@ -1,6 +1,6 @@
-"""Helpers for test presence detection."""
+"""Helpers for test presence detection.
 
-"""Tests for presence detection edge cases.
+Tests for presence detection edge cases.
 
 Covers the behaviour of ``is_package_installed()`` and
 ``PIPEnvironment.packages()`` when the underlying subprocess calls

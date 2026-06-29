@@ -1,6 +1,7 @@
-"""CLI command implementation for cache."""
+"""CLI command implementation for cache.
 
-"""Porringer CLI cache command module for managing manifest directories."""
+Porringer CLI cache command module for managing manifest directories.
+"""
 
 import asyncio
 from pathlib import Path

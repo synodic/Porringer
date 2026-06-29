@@ -1,6 +1,6 @@
-"""Helpers for test project root."""
+"""Helpers for test project root.
 
-"""Tests for per-ecosystem project root auto-discovery.
+Tests for per-ecosystem project root auto-discovery.
 
 The `ProjectEnvironment.resolve_project_root()` method walks ancestor
 directories from a starting point looking for an ecosystem-specific

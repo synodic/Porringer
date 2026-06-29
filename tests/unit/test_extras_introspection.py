@@ -1,6 +1,6 @@
-"""Helpers for test extras introspection."""
+"""Helpers for test extras introspection.
 
-"""Tests for extras introspection utilities in resolution.py.
+Tests for extras introspection utilities in resolution.py.
 
 Verifies that ``extras_satisfied()`` correctly evaluates PEP 508
 conditional dependencies, that ``check_extras_installed()``

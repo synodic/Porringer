@@ -1,6 +1,7 @@
-"""Helpers for api."""
+"""Helpers for api.
 
-"""Public API surface for Porringer."""
+Public API surface for Porringer.
+"""
 
 import asyncio
 import logging

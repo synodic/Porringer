@@ -1,3 +1,4 @@
-"""Public package exports for the unit.plugins.uv module."""
+"""Public package exports for the unit.plugins.uv module.
 
-"""Unit tests for the uv plugin."""
+Unit tests for the uv plugin.
+"""

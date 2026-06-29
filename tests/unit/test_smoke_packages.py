@@ -1,6 +1,7 @@
-"""Helpers for test smoke packages."""
+"""Helpers for test smoke packages.
 
-"""Tests for local smoke package artifacts."""
+Tests for local smoke package artifacts.
+"""
 
 import subprocess
 

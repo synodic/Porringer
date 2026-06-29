@@ -1,6 +1,6 @@
-"""CLI command implementation for phase."""
+"""CLI command implementation for phase.
 
-"""Generalized phase abstraction for the execution pipeline.
+Generalized phase abstraction for the execution pipeline.
 
 Each phase in the setup flow (runtime → packages → tools → project-sync →
 SCM) is represented by a :class:`Phase` instance that

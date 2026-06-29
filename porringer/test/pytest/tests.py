@@ -1,6 +1,7 @@
-"""Tests covering the tests behavior."""
+"""Tests covering the tests behavior.
 
-"""Implementation of tests that should be overridden in plugins."""
+Implementation of tests that should be overridden in plugins.
+"""
 
 import shutil
 from abc import ABCMeta, abstractmethod

@@ -1,6 +1,7 @@
-"""CLI command implementation for inspection."""
+"""CLI command implementation for inspection.
 
-"""Build structured inspection reports for manifest previews."""
+Build structured inspection reports for manifest previews.
+"""
 
 import asyncio
 from pathlib import Path

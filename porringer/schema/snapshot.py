@@ -1,6 +1,7 @@
-"""Data models and schemas for snapshot."""
+"""Data models and schemas for snapshot.
 
-"""Client snapshot schemas for long-lived downstream applications."""
+Client snapshot schemas for long-lived downstream applications.
+"""
 
 from pydantic import Field
 

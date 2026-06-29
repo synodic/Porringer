@@ -1,6 +1,7 @@
-"""Tests covering the plugin behavior."""
+"""Tests covering the plugin behavior.
 
-"""Plugin."""
+Plugin.
+"""
 
 from typing import cast
 

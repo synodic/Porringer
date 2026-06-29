@@ -1,6 +1,7 @@
-"""Console and CLI support for common."""
+"""Console and CLI support for common.
 
-"""Shared helpers and constants for Porringer CLI commands."""
+Shared helpers and constants for Porringer CLI commands.
+"""
 
 import typer
 

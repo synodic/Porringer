@@ -1,6 +1,7 @@
-"""Helpers for test manifest validation."""
+"""Helpers for test manifest validation.
 
-"""Test the validate_manifest() API surface."""
+Test the validate_manifest() API surface.
+"""
 
 import json
 import tempfile

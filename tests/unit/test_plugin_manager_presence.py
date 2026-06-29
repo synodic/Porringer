@@ -1,6 +1,7 @@
-"""Helpers for test plugin manager presence."""
+"""Helpers for test plugin manager presence.
 
-"""Tests for plugin listing, parsing, and inspection-time presence checks."""
+Tests for plugin listing, parsing, and inspection-time presence checks.
+"""
 
 import asyncio
 from unittest.mock import AsyncMock, patch

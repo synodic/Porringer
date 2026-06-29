@@ -1,3 +1,4 @@
-"""Public package exports for the plugin.yarn_project module."""
+"""Public package exports for the plugin.yarn_project module.
 
-"""Yarn project plugin package for Porringer."""
+Yarn project plugin package for Porringer.
+"""

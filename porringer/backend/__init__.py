@@ -1,6 +1,6 @@
-"""Public package exports for the backend module."""
+"""Public package exports for the backend module.
 
-"""Backend package for Porringer.
+Backend package for Porringer.
 
 This package contains modules and utilities for backend processing,
 including configuration resolution, plugin management, and command execution.

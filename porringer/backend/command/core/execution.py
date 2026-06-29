@@ -1,6 +1,6 @@
-"""CLI command implementation for execution."""
+"""CLI command implementation for execution.
 
-"""Phased execution engine.
+Phased execution engine.
 
 Orchestrates the multi-phase setup flow: runtime → packages → tools →
 project-sync → SCM.  Each phase ensures its prerequisites are met before
@@ -1717,38 +1717,56 @@ async def _execute_project_sync(
                 )
 
     try:
-        # Always observe output: build the CLI steps from the plugin and
-        # run them via run_command for line-by-line progress.
-        plan = type(proj_env).command_plan(effective_dir, runtime_context=runtime_context)
-        effective_dir = plan.directory
-        steps = plan.steps or ([plan.argv] if plan.argv else [])
-
-        progress = CommandProgress(
-            action=action,
-            callback=_make_progress_callback(action, event_queue),
-            phase='sync',
-        )
-
-        success = True
-        for args in steps:
-            cmd_result = await run_command(args, progress=progress, cwd=effective_dir, timeout=300.0)
-            success = cmd_result.returncode == 0
-            if not success:
-                break
-
-        if success:
-            return SetupActionResult(
-                action=action,
-                success=True,
-                message=f'Synced project via {action.installer}',
-            )
-        return SetupActionResult(
-            action=action,
-            success=False,
-            message=f'Project sync failed via {action.installer}',
+        return await _run_project_sync_steps(
+            action,
+            proj_env,
+            effective_dir,
+            event_queue,
+            runtime_context=runtime_context,
         )
     except Exception as e:
         return SetupActionResult(action=action, success=False, message=str(e))
+
+
+async def _run_project_sync_steps(
+    action: SetupAction,
+    proj_env: ProjectEnvironment,
+    effective_dir: Path,
+    event_queue: asyncio.Queue[ProgressEvent | None],
+    *,
+    runtime_context: RuntimeContext | None = None,
+) -> SetupActionResult:
+    """Run the resolved project-sync steps and return their outcome."""
+    # Always observe output: build the CLI steps from the plugin and
+    # run them via run_command for line-by-line progress.
+    plan = type(proj_env).command_plan(effective_dir, runtime_context=runtime_context)
+    effective_dir = plan.directory
+    steps = plan.steps or ([plan.argv] if plan.argv else [])
+
+    progress = CommandProgress(
+        action=action,
+        callback=_make_progress_callback(action, event_queue),
+        phase='sync',
+    )
+
+    success = True
+    for args in steps:
+        cmd_result = await run_command(args, progress=progress, cwd=effective_dir, timeout=300.0)
+        success = cmd_result.returncode == 0
+        if not success:
+            break
+
+    if success:
+        return SetupActionResult(
+            action=action,
+            success=True,
+            message=f'Synced project via {action.installer}',
+        )
+    return SetupActionResult(
+        action=action,
+        success=False,
+        message=f'Project sync failed via {action.installer}',
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-"""Helpers for test example bootstrap."""
+"""Helpers for test example bootstrap.
 
-"""Bootstrap example tests.
+Bootstrap example tests.
 
 Validates that the `examples/python-bootstrap/porringer.json` manifest
 produces the correct phased action plan, including deferred tool/runtime

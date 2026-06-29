@@ -1,6 +1,7 @@
-"""Utility helpers for utility."""
+"""Utility helpers for utility.
 
-"""Utility definitions."""
+Utility definitions.
+"""
 
 import asyncio
 import contextlib
@@ -8,7 +9,7 @@ import os
 import sys
 from collections import deque
 from collections.abc import Callable, Sequence
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, cast
 
 from porringer.schema import ActionProgress, SetupAction
 from porringer.utility.trace import CommandTrace
@@ -78,10 +79,11 @@ async def run_command(
     args: Sequence[str],
     *,
     cwd: str | os.PathLike[str] | None = None,
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
     cancellation_check: asyncio.Event | None = None,
     progress: CommandProgress | None = None,
     output_tail_lines: int | None = DEFAULT_COMMAND_OUTPUT_TAIL_LINES,
+    **kwargs: object,
 ) -> CommandResult:
     """Run a command asynchronously using asyncio subprocess.
 
@@ -93,12 +95,13 @@ async def run_command(
     Args:
         args: Command and arguments to run.
         cwd: Optional working directory for the subprocess.
-        timeout: Optional timeout in seconds.
+        timeout_seconds: Optional timeout in seconds.
         cancellation_check: Optional Event that, when set, triggers cancellation.
         progress: Optional progress sink for line-by-line subprocess output.
         output_tail_lines: Number of trailing lines retained in the returned
             ``CommandResult`` per channel when ``progress`` is provided.
             ``None`` preserves full output.
+        **kwargs: Backward-compatible support for legacy ``timeout=`` calls.
 
     Returns:
         CommandResult with returncode, stdout, and stderr.
@@ -108,6 +111,13 @@ async def run_command(
         asyncio.CancelledError: If cancelled via cancellation_check.
         FileNotFoundError: If the command is not found.
     """
+    timeout = kwargs.pop('timeout', None)
+    if timeout_seconds is None and timeout is not None:
+        timeout_seconds = float(cast(float | int | str, timeout))
+    if kwargs:
+        unexpected = ', '.join(sorted(kwargs))
+        raise TypeError(f'Unexpected keyword arguments: {unexpected}')
+
     trace = CommandTrace.start(args, cwd=cwd)
     try:
         process = await asyncio.create_subprocess_exec(
@@ -124,14 +134,14 @@ async def run_command(
         return await _run_buffered_command(
             process,
             trace,
-            timeout=timeout,
+            timeout_seconds=timeout_seconds,
             cancellation_check=cancellation_check,
         )
 
     return await _run_observed_command(
         process,
         trace,
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
         cancellation_check=cancellation_check,
         progress=progress,
         output_tail_lines=output_tail_lines,
@@ -142,7 +152,7 @@ async def _run_buffered_command(
     process: asyncio.subprocess.Process,
     trace: CommandTrace,
     *,
-    timeout: float | None,
+    timeout_seconds: float | None,
     cancellation_check: asyncio.Event | None,
 ) -> CommandResult:
     """Run a subprocess to completion and capture full output."""
@@ -177,7 +187,7 @@ async def _run_buffered_command(
         return communicate_task.result()
 
     try:
-        async with asyncio.timeout(timeout):
+        async with asyncio.timeout(timeout_seconds):
             stdout_bytes, stderr_bytes = await communicate_or_cancel()
     except (Exception, asyncio.CancelledError) as exc:
         if isinstance(exc, TimeoutError):
@@ -204,7 +214,7 @@ async def _run_observed_command(
     process: asyncio.subprocess.Process,
     trace: CommandTrace,
     *,
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
     cancellation_check: asyncio.Event | None = None,
     progress: CommandProgress,
     output_tail_lines: int | None = DEFAULT_COMMAND_OUTPUT_TAIL_LINES,
@@ -262,7 +272,7 @@ async def _run_observed_command(
             raise asyncio.CancelledError('Operation cancelled')
 
     try:
-        async with asyncio.timeout(timeout):
+        async with asyncio.timeout(timeout_seconds):
             await run_with_progress()
     except (Exception, asyncio.CancelledError) as exc:
         if isinstance(exc, TimeoutError):

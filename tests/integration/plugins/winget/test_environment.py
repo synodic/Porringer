@@ -1,6 +1,7 @@
-"""Helpers for test environment."""
+"""Helpers for test environment.
 
-"""Tests plugin schemas."""
+Tests plugin schemas.
+"""
 
 import shutil
 import sys

@@ -1,6 +1,6 @@
-"""Backend helpers for builder."""
+"""Backend helpers for builder.
 
-"""Helpers for discovering and constructing plugins from entry points.
+Helpers for discovering and constructing plugins from entry points.
 
 The builder offers reusable logic for scanning entry-point groups,
 instantiating plugins, and resolving runtime executables without duplicating

@@ -1,6 +1,6 @@
-"""CLI command implementation for presence."""
+"""CLI command implementation for presence.
 
-"""Presence detection and action inspection.
+Presence detection and action inspection.
 
 Checks whether packages are already installed so the sync engine can
 skip redundant operations.

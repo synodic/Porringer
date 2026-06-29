@@ -1,6 +1,6 @@
-"""Helpers for test frozen presence resolution."""
+"""Helpers for test frozen presence resolution.
 
-"""Tests for frozen-app presence detection, version probing, and resolution.
+Tests for frozen-app presence detection, version probing, and resolution.
 
 Covers:
 - ``probe_tool_version()`` subprocess parsing

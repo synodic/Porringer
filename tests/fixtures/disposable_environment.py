@@ -78,7 +78,7 @@ class DisposableToolEnvironment:
 
     @property
     def directories(self) -> tuple[Path, ...]:
-        """Return every directory created for this disposable environment."""
+        """Every directory created for this disposable environment."""
         return (
             self.home,
             self.appdata,
@@ -98,14 +98,14 @@ class DisposableToolEnvironment:
 
     @property
     def npm_bin_dir(self) -> Path:
-        """Return the npm global executable directory for this platform."""
+        """The npm global executable directory for this platform."""
         if os.name == 'nt':
             return self.npm_config_prefix
         return self.npm_config_prefix / 'bin'
 
     @property
     def tool_bin_dirs(self) -> tuple[Path, ...]:
-        """Return directories where tools are expected to expose executables."""
+        """Directories where tools are expected to expose executables."""
         return (
             self.bin_dir,
             self.pipx_bin_dir,

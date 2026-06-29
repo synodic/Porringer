@@ -23,17 +23,15 @@ from rich.theme import Theme
 
 # Named semantic styles shared by every CLI command. Keeping the colour
 # choices here means the whole CLI can be restyled in one place.
-PORRINGER_THEME = Theme(
-    {
-        'error': 'red',
-        'success': 'green',
-        'warning': 'yellow',
-        'info': 'cyan',
-        'muted': 'dim',
-        'detail': 'dim italic',
-        'heading': 'bold',
-    }
-)
+PORRINGER_THEME = Theme({
+    'error': 'red',
+    'success': 'green',
+    'warning': 'yellow',
+    'info': 'cyan',
+    'muted': 'dim',
+    'detail': 'dim italic',
+    'heading': 'bold',
+})
 
 
 def no_color_requested(explicit: bool = False) -> bool:

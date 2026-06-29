@@ -1,3 +1,4 @@
-"""Public package exports for the unit.plugins.pnpm module."""
+"""Public package exports for the unit.plugins.pnpm module.
 
-"""Tests for the pnpm plugin."""
+Tests for the pnpm plugin.
+"""

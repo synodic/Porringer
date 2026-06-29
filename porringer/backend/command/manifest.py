@@ -1,6 +1,6 @@
-"""CLI command implementation for manifest."""
+"""CLI command implementation for manifest.
 
-"""Manifest loading, parsing, and validation.
+Manifest loading, parsing, and validation.
 
 Handles finding, loading, and validating porringer manifests.
 Supports three modes:

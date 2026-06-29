@@ -1,6 +1,6 @@
-"""Helpers for mock plugins."""
+"""Helpers for mock plugins.
 
-"""Shared mock plugin classes for unit tests.
+Shared mock plugin classes for unit tests.
 
 These mock implementations of ``Environment``, ``RuntimeProvider``, and
 ``PythonEnvironment`` are used across multiple test modules.  Centralising

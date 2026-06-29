@@ -1,6 +1,7 @@
-"""CLI command implementation for preview."""
+"""CLI command implementation for preview.
 
-"""Porringer CLI preview command."""
+Porringer CLI preview command.
+"""
 
 import asyncio
 import json
@@ -24,7 +25,6 @@ class _PreviewOptions:
     """Bundled options for manifest preview."""
 
     all_cached: bool = False
-    fail_fast: bool = True
     strategy: SyncStrategy = SyncStrategy.MINIMAL
     inspection_mode: InspectionMode = InspectionMode.COMPLETE
     project_directory: Path | None = None
@@ -68,7 +68,7 @@ def _setup_parameters(
     return SetupParameters(
         paths=paths,
         project_directory=options.project_directory,
-        fail_fast=options.fail_fast,
+        fail_fast=False,
         strategy=options.strategy,
         inspection_mode=options.inspection_mode,
         plugins=options.plugins,
@@ -210,10 +210,6 @@ def preview_default(  # noqa: PLR0913
         bool,
         typer.Option('--all', '-a', help='Preview all cached directories'),
     ] = False,
-    fail_fast: Annotated[
-        bool,
-        typer.Option('--fail-fast/--no-fail-fast', help='Stop on first manifest load error'),
-    ] = True,
     strategy: Annotated[
         str,
         typer.Option('--strategy', '-s', help='Install strategy: minimal (default), latest, or exact'),
@@ -247,7 +243,6 @@ def preview_default(  # noqa: PLR0913
     configuration = context.ensure_object(ConsoleConfiguration)
     options = _PreviewOptions(
         all_cached=all_cached,
-        fail_fast=fail_fast,
         strategy=parse_strategy(configuration, strategy),
         inspection_mode=_parse_inspection_mode(configuration, mode),
         project_directory=project_dir.resolve() if project_dir else None,

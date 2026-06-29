@@ -1,6 +1,6 @@
-"""Helpers for factories."""
+"""Helpers for factories.
 
-"""Canonical factories for constructing test doubles and schema objects.
+Canonical factories for constructing test doubles and schema objects.
 
 These helpers centralise the boilerplate that was previously copy-pasted
 across the unit suite: ``MagicMock(spec=Environment)`` wiring, ``SetupAction``

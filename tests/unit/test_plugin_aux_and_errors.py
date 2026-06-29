@@ -18,8 +18,9 @@ Verifies two cross-plugin invariants without invoking any wrapped CLI:
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -51,14 +52,14 @@ _SUBPROC_ENV_IDS = [n for n, _ in _SUBPROC_ENV_PAIRS]
 
 
 @contextmanager
-def _hide_tools(tools: tuple[str, ...]) -> Iterator[None]:
+def _hide_tools(tools: tuple[str, ...]) -> Generator[None]:
     """Patch ``shutil.which`` so the listed tools appear absent."""
     original = shutil.which
 
-    def _restricted(name: str, *args: object, **kwargs: object) -> str | None:
+    def _restricted(name: str, mode: int = os.F_OK, path: str | None = None) -> str | None:
         if name in tools:
             return None
-        return original(name, *args, **kwargs)  # type: ignore[arg-type]
+        return original(name, mode, path)
 
     with patch('shutil.which', side_effect=_restricted):
         yield
@@ -78,8 +79,8 @@ class TestAuxiliaryToolAbsence:
         with _hide_tools(tuple(aux)):
             for verb in ('install', 'upgrade', 'uninstall'):
                 # Should not raise on success or failure paths.
-                await plugin.post_action(verb, params, success=True)  # type: ignore[arg-type]
-                await plugin.post_action(verb, params, success=False)  # type: ignore[arg-type]
+                await plugin.post_action(verb, params, success=True)
+                await plugin.post_action(verb, params, success=False)
 
 
 @pytest.mark.parametrize(('name', 'plugin'), _SUBPROC_ENV_PAIRS, ids=_SUBPROC_ENV_IDS)

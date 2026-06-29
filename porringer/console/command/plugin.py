@@ -1,6 +1,7 @@
-"""CLI command implementation for plugin."""
+"""CLI command implementation for plugin.
 
-"""Porringer CLI plugin command module."""
+Porringer CLI plugin command module.
+"""
 
 import asyncio
 from typing import Annotated
@@ -72,7 +73,7 @@ def plugin_install(
         try:
             result = asyncio.run(PluginCommands.install(plugin, dry_run=dry_run))
         except PluginError as e:
-            configuration.output.error(str(e.error))
+            configuration.output.error(e.error)
             raise typer.Exit(code=1) from None
 
         if result.success:

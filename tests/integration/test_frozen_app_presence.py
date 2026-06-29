@@ -1,6 +1,6 @@
-"""Helpers for test frozen app presence."""
+"""Helpers for test frozen app presence.
 
-"""Integration tests for frozen-app and pre-resolved runtime presence detection.
+Integration tests for frozen-app and pre-resolved runtime presence detection.
 
 Verifies that inspection correctly detects packages when:
 

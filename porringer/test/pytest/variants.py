@@ -1,6 +1,7 @@
-"""Tests covering the variants behavior."""
+"""Tests covering the variants behavior.
 
-"""Provides test data for plugin tests."""
+Provides test data for plugin tests.
+"""
 
 from collections.abc import Sequence
 

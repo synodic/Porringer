@@ -1,6 +1,6 @@
-"""CLI command implementation for action builder."""
+"""CLI command implementation for action builder.
 
-"""Action plan construction.
+Action plan construction.
 
 Builds the list of `SetupAction` objects from a parsed manifest and
 resolved plugins.  Also contains the preview/parse entry point that
@@ -388,6 +388,8 @@ def build_actions(
             ``dict[str, Environment]`` for backward compatibility
             with existing callers / tests.
         strategy: The sync strategy (used for description text).
+        search_from: The directory from which project-relevance discovery
+            should start.
 
     Returns:
         List of actions to perform.

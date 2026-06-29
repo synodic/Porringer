@@ -1,6 +1,7 @@
-"""Helpers for test run command progress."""
+"""Helpers for test run command progress.
 
-"""Tests for subprocess command progress output retention."""
+Tests for subprocess command progress output retention.
+"""
 
 from porringer.schema import ActionProgress, SetupAction
 from porringer.utility.utility import CommandProgress, run_command

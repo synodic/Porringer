@@ -1,6 +1,7 @@
-"""Helpers for test command plugin."""
+"""Helpers for test command plugin.
 
-"""Test the command 'plugin'."""
+Test the command 'plugin'.
+"""
 
 import os
 import sys

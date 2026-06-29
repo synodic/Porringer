@@ -1,6 +1,7 @@
-"""Plugin integration for plugin."""
+"""Plugin integration for plugin.
 
-"""Plugin implementation for Poetry project environment."""
+Plugin implementation for Poetry project environment.
+"""
 
 import re
 from typing import override

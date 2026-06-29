@@ -1,6 +1,7 @@
-"""Helpers for test downstream api."""
+"""Helpers for test downstream api.
 
-"""Tests for downstream-oriented API helpers."""
+Tests for downstream-oriented API helpers.
+"""
 
 import json
 from dataclasses import replace
