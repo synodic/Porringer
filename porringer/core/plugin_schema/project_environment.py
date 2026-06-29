@@ -1,3 +1,5 @@
+"""Core helpers and types for project environment."""
+
 """Plugin utilities for project-scoped environments.
 
 A `ProjectEnvironment` plugin wraps a project dependency manager
@@ -13,9 +15,13 @@ ecosystem's marker file (e.g. `package.json` for Node,
 `pyproject.toml` for Python).
 """
 
+import json
 import logging
+import tomllib
 from abc import abstractmethod
+from collections.abc import Sequence
 from pathlib import Path
+from typing import ClassVar, override
 
 from pydantic import Field
 
@@ -30,7 +36,6 @@ logger = logging.getLogger(__name__)
 ECOSYSTEM_MARKERS: dict[Ecosystem, str] = {
     Ecosystem('python'): 'pyproject.toml',
     Ecosystem('node'): 'package.json',
-    Ecosystem('deno'): 'deno.json',
 }
 
 # Default mapping from ecosystem name to the manifest contribution.
@@ -39,7 +44,6 @@ ECOSYSTEM_CONTRIBUTIONS: dict[Ecosystem, ManifestContribution] = {
         filename='pyproject.toml', config_path=('tool', 'porringer'), file_format='toml'
     ),
     Ecosystem('node'): ManifestContribution(filename='package.json', config_path=('porringer',), file_format='json'),
-    Ecosystem('deno'): ManifestContribution(filename='deno.json', config_path=('porringer',), file_format='json'),
 }
 
 
@@ -53,6 +57,14 @@ class ProjectSyncParameters(PorringerModel):
         exclude=True,
         description='Resolved runtime paths for this execution run.',
     )
+
+
+class ProjectCommandPlan(PorringerModel):
+    """A project-sync command plan produced by a project plugin."""
+
+    directory: Path = Field(description='Working directory for the sync command')
+    argv: list[str] = Field(default_factory=list, description='Primary command and arguments to execute')
+    steps: list[list[str]] = Field(default_factory=list, description='Ordered command steps to execute')
 
 
 class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
@@ -80,6 +92,24 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     Override to `"sync"` for tools like uv.
     """
 
+    _supports_dry_run: bool = True
+    """Whether the wrapped tool supports a native ``--dry-run`` flag.
+
+    When `True` (the default), `sync()` appends `--dry-run` for dry
+    runs.  Override to `False` for tools that lack it (e.g. pnpm,
+    Yarn Berry); dry runs then log the command without
+    executing it.
+    """
+
+    _project_evidence_files: ClassVar[tuple[str, ...]] = ()
+    """Files that indicate this specific project manager owns the project."""
+
+    _pyproject_tool_tables: ClassVar[tuple[tuple[str, ...], ...]] = ()
+    """TOML table paths in pyproject.toml that indicate project ownership."""
+
+    _package_manager_names: ClassVar[tuple[str, ...]] = ()
+    """package.json packageManager prefixes that indicate project ownership."""
+
     # ------------------------------------------------------------------
     # Subclass hooks
     # ------------------------------------------------------------------
@@ -103,7 +133,7 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     def ecosystem() -> Ecosystem:
         """Return the ecosystem this project environment belongs to.
 
-        Examples: `"python"`, `"node"`, `"deno"`.
+        Examples: `"python"`, `"node"`.
         """
         ...
 
@@ -117,7 +147,7 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     def consumed_runtime_kind(cls) -> str:
         """Return the kind of runtime this project environment consumes.
 
-        Examples: `"python"`, `"node"`, `"deno"`.
+        Examples: `"python"`, `"node"`.
         """
         ...
 
@@ -152,7 +182,6 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         ==========  ================
         `python`  `pyproject.toml`
         `node`    `package.json`
-        `deno`    `deno.json`
         ==========  ================
 
         Override this method when a plugin uses a non-standard marker
@@ -231,13 +260,74 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
                 cmd.extend(['--python', str(exe)])
         return cmd
 
+    @classmethod
+    def project_relevance(cls, search_from: Path) -> bool:
+        """Return whether this plugin should run for the given directory.
+
+        The default implementation looks for the plugin's marker file in
+        the current directory or an ancestor, mirroring the existing
+        project-root discovery behavior.
+        """
+        return cls.resolve_project_root(search_from) is not None
+
+    @classmethod
+    def project_evidence(cls, search_from: Path) -> bool:
+        """Return whether project files specifically identify this plugin.
+
+        Marker files such as ``pyproject.toml`` and ``package.json`` establish
+        project relevance for an ecosystem. Evidence is narrower: lock files,
+        tool-specific config tables, or package-manager declarations identify
+        which project manager should own sync for that project.
+        """
+        directory = cls.resolve_project_root(search_from)
+        if directory is None:
+            return False
+
+        if any((directory / filename).exists() for filename in cls._project_evidence_files):
+            return True
+
+        pyproject = directory / 'pyproject.toml'
+        if cls._pyproject_tool_tables and pyproject.exists():
+            try:
+                data = tomllib.loads(pyproject.read_text(encoding='utf-8'))
+            except OSError, tomllib.TOMLDecodeError:
+                data = {}
+            if any(_has_nested_key(data, table_path) for table_path in cls._pyproject_tool_tables):
+                return True
+
+        package_json = directory / 'package.json'
+        if cls._package_manager_names and package_json.exists():
+            try:
+                data = json.loads(package_json.read_text(encoding='utf-8'))
+            except OSError, json.JSONDecodeError:
+                data = {}
+            package_manager = data.get('packageManager') if isinstance(data, dict) else None
+            if isinstance(package_manager, str) and package_manager.startswith(cls._package_manager_names):
+                return True
+
+        return False
+
+    @classmethod
+    def command_plan(cls, search_from: Path, *, runtime_context: RuntimeContext | None = None) -> ProjectCommandPlan:
+        """Build a sync command plan for the provided directory."""
+        directory = cls.resolve_project_root(search_from) or search_from
+        cmd = [cls.tool_name(), cls._sync_verb]
+        if runtime_context is not None:
+            exe = runtime_context.get(cls.consumed_runtime_kind())
+            if exe is not None:
+                cmd.extend(['--python', str(exe)])
+        return ProjectCommandPlan(directory=directory, argv=cmd, steps=[cmd])
+
     async def sync(self, params: ProjectSyncParameters) -> bool:
         """Run the tool's native sync/install in *params.directory*.
 
         The default implementation builds the command from
         `sync_command()` (which already includes `--python` when a
         runtime override is active) and appends `--dry-run` for dry
-        runs.
+        runs when the tool supports it (`_supports_dry_run`).
+
+        When the tool lacks a native `--dry-run` (`_supports_dry_run`
+        is `False`), dry runs log the command without executing it.
 
         Override this method when the tool requires a different CLI shape
         (e.g. Poetry needs `poetry env use` before `poetry install`).
@@ -250,6 +340,9 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         """
         args = list(self.sync_command(runtime_context=params.runtime_context))
         if params.dry:
+            if not self._supports_dry_run:
+                logger.info('Dry run: %s', ' '.join(args))
+                return True
             args.append('--dry-run')
         return await self._run_sync(args, params.directory)
 
@@ -271,3 +364,34 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
             `True` if the process exited cleanly.
         """
         return await self._run_bool_command(args, cwd=directory, label='sync')
+
+
+class NodeProjectEnvironment(ProjectEnvironment):
+    """Base for Node-ecosystem project environments (npm, pnpm, yarn).
+
+    Centralises the `node` ecosystem and consumed-runtime kind so that
+    each concrete plugin only declares its `tool_name()` and any CLI
+    deviations (e.g. ``_supports_dry_run``).
+    """
+
+    @staticmethod
+    @override
+    def ecosystem() -> Ecosystem:
+        """Node project environments belong to the `node` ecosystem."""
+        return Ecosystem('node')
+
+    @classmethod
+    @override
+    def consumed_runtime_kind(cls) -> str:
+        """Node project environments consume a Node runtime."""
+        return 'node'
+
+
+def _has_nested_key(data: object, path: Sequence[str]) -> bool:
+    """Return whether *data* contains the nested mapping path."""
+    current = data
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return False
+        current = current[key]
+    return True

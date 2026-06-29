@@ -1,3 +1,5 @@
+"""Data models and schemas for download."""
+
 """Download schemas."""
 
 from collections.abc import Callable
@@ -5,17 +7,19 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from porringer.core.schema import PorringerModel
 
 
 class HashAlgorithm(Enum):
-    """Supported hash algorithms for verification"""
+    """Supported hash algorithms for verification."""
 
     SHA256 = 'sha256'
     SHA512 = 'sha512'
 
 
-class DownloadParameters(BaseModel):
+class DownloadParameters(PorringerModel):
     """Parameters for downloading files."""
 
     url: str = Field(description='URL to download')

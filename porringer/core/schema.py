@@ -1,9 +1,11 @@
-"""Schema for Porringer"""
+"""Core helpers and types for schema."""
+
+"""Schema for Porringer."""
 
 import re
 import sys
 from enum import Enum
-from typing import Any, NewType, Protocol, Self
+from typing import Any, Literal, NewType, Protocol
 
 __all__ = [
     'Distribution',
@@ -24,8 +26,6 @@ __all__ = [
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator
-
-from porringer.core.transport import LocalTransport, Transport
 
 Ecosystem = NewType('Ecosystem', str)
 """Semantic alias for ecosystem identifiers (e.g. `"python"`, `"node"`).
@@ -65,7 +65,7 @@ _PEP440_CONSTRAINT_START = re.compile(r'[><=!~]')
 
 
 class PorringerModel(BaseModel):
-    """The base model to use for all Porringer models"""
+    """The base model to use for all Porringer models."""
 
     model_config = {'populate_by_name': False, 'arbitrary_types_allowed': True, 'extra': 'forbid'}
 
@@ -212,6 +212,34 @@ class PackageRef(PorringerModel):
             return f'{self.name}{extras_str}{self.constraint}'
         return f'{self.name}{extras_str}'
 
+    def specifier_for(self, style: Literal['pep440', 'at', 'equals']) -> str:
+        """Render this package reference using a tool-specific separator.
+
+        Plugins should prefer this helper over hand-rolling the ``name@version``
+        / ``name==version`` / ``name=version`` join in their command-builders.
+
+        Args:
+            style: The separator style to use:
+
+                * ``'pep440'`` — attach the constraint verbatim
+                  (e.g. ``ruff>=0.8.0``).  This matches :attr:`specifier`.
+                * ``'at'`` — npm-family separator (``name@constraint``).
+                * ``'equals'`` — apt-family separator (``name=constraint``).
+
+        Returns:
+            A bare name when no constraint is present, otherwise the
+            ``name<sep>constraint`` form.
+        """
+        if not self.constraint:
+            return self.name
+        if style == 'pep440':
+            return f'{self.name}{self.constraint}'
+        if style == 'at':
+            return f'{self.name}@{self.constraint}'
+        if style == 'equals':
+            return f'{self.name}={self.constraint}'
+        raise ValueError(f'Unknown specifier style: {style!r}')
+
     def __str__(self) -> str:
         """Return the full specifier string."""
         return self.specifier
@@ -241,7 +269,7 @@ class ManifestContribution(PorringerModel):
 
 
 class PluginDependency(PlatformScoped):
-    """Defines a dependency on another plugin"""
+    """Defines a dependency on another plugin."""
 
     plugin: str = Field(description='The name of the required plugin')
     required: bool = Field(default=True, description='Whether this dependency is required (True) or optional (False)')
@@ -292,32 +320,25 @@ class Package(PorringerModel):
 
 
 class Distribution(PorringerModel):
-    """Data that describes the distribution of the plugin"""
+    """Data that describes the distribution of the plugin."""
 
     version: Version
 
 
 class PluginParameters(PorringerModel):
-    """Generic plugin parameters that will be used to construct a Plugin instance"""
+    """Generic plugin parameters that will be used to construct a Plugin instance."""
 
     distribution: Distribution
-    transport: Transport = Field(default_factory=LocalTransport)
 
 
 class Plugin(Protocol):
-    """Porringer plugin"""
+    """Porringer plugin."""
 
     _distribution: Distribution
-    _transport: Transport
 
     def __init__(self, parameters: PluginParameters) -> None:
-        """Initializes the plugin"""
+        """Initializes the plugin."""
         self._distribution = parameters.distribution
-        self._transport = parameters.transport
-
-    def with_transport(self, transport: Transport) -> Self:
-        """Create a new instance of this plugin using a different transport."""
-        ...
 
     @staticmethod
     def ecosystem() -> Ecosystem | None:
@@ -404,9 +425,54 @@ class Plugin(Protocol):
         """
         return []
 
+    async def setup(self) -> None:
+        """Plugin-level one-time native registration.
+
+        Called by the framework **before** this plugin's first
+        package-phase action in a sync.  Use this for operations that
+        the framework cannot infer from the plugin's commands — for
+        example, running ``py install --configure --yes`` to create
+        PIM's global shortcuts directory and register it on the user
+        PATH, or ``pipx ensurepath`` to add the pipx venvs bin
+        directory.
+
+        **Contract (enforced by the framework, not plugin code):**
+
+        * **Idempotency** — called at most once per plugin per sync,
+          but the implementation must also tolerate being called on a
+          machine that was already set up by a previous sync.
+        * **Soft-fail isolation** — a failure aborts this plugin's
+          remaining actions in this sync but does not raise; the
+          framework logs at WARNING.
+                * **Inspection** — read-only inspection paths do not call
+                    setup.
+
+        The default implementation is a no-op.
+        """
+
+    async def teardown(self) -> None:
+        """Plugin-level cleanup that reverses what :meth:`setup` created.
+
+        Called by the framework **after** this plugin's last
+        ``uninstall()`` action when ``packages()`` returns empty.
+        Use this for removing directories, PATH entries, shell-init
+        lines, or other global state that :meth:`setup` created.
+
+        **Contract (enforced by the framework, not plugin code):**
+
+        * **Idempotency** — called at most once per plugin per sync,
+          but the implementation must also tolerate being called on a
+          machine where the plugin was never set up.
+        * **Soft-fail isolation** — same as :meth:`setup`.
+                * **Inspection** — read-only inspection paths do not call
+                    teardown.
+
+        The default implementation is a no-op.
+        """
+
     @property
     def distribution(self) -> Distribution:
-        """Retrieves plugin information that complements the packaged project metadata
+        """Retrieves plugin information that complements the packaged project metadata.
 
         Returns:
             The plugin's information

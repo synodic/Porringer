@@ -1,3 +1,5 @@
+"""Helpers for test backend resolver."""
+
 """Tests for BackendResolver — plugin resolution without default_priority.
 
 The resolver selects a plugin per (PluginKind, ecosystem) pair using:
@@ -6,7 +8,6 @@ The resolver selects a plugin per (PluginKind, ecosystem) pair using:
 """
 
 from pathlib import Path
-from typing import Self
 
 from packaging.version import Version
 
@@ -14,7 +15,6 @@ from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Distribution, Ecosystem, PluginKind, PluginParameters
-from porringer.core.transport import LocalTransport, Transport
 
 # ---------------------------------------------------------------------------
 # Helpers — lightweight stub plugins
@@ -28,15 +28,9 @@ class _StubPlugin:
     """Minimal plugin stub honouring the Plugin protocol."""
 
     _distribution: Distribution
-    _transport: Transport
 
     def __init__(self, parameters: PluginParameters) -> None:
         self._distribution = parameters.distribution
-        self._transport = LocalTransport()
-
-    def with_transport(self, transport: Transport) -> Self:
-        parameters = PluginParameters(distribution=self._distribution, transport=transport)
-        return type(self)(parameters)
 
     @staticmethod
     def ecosystem() -> Ecosystem | None:
@@ -61,6 +55,12 @@ class _StubPlugin:
     @staticmethod
     def dependencies() -> list:
         return []
+
+    async def setup(self) -> None:
+        """No-op plugin setup; satisfies the Plugin protocol."""
+
+    async def teardown(self) -> None:
+        """No-op plugin teardown; satisfies the Plugin protocol."""
 
     @property
     def distribution(self) -> Distribution:
@@ -370,7 +370,7 @@ def _make_consumer(
 
 
 class TestResolverRuntimeContext:
-    """When ``runtime_context`` is supplied, RuntimeConsumer plugins are probed
+    """When ``runtime_context`` is supplied, RuntimeConsumer plugins are probed.
 
     via ``is_available_for()`` instead of ``is_available()``.
     """

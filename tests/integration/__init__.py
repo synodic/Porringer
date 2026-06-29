@@ -1,5 +1,3 @@
-"""Integration tests package for Porringer.
+"""Public package exports for the integration module."""
 
-This package contains integration tests for the Porringer application,
-including tests for plugins, environments, and core functionalities.
-"""
+"""Integration tests package for Porringer."""

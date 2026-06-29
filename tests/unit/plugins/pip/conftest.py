@@ -1,3 +1,5 @@
+"""Helpers for conftest."""
+
 """Shared fixtures for pip plugin tests."""
 
 from packaging.version import Version

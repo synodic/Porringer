@@ -1,3 +1,5 @@
+"""Tests covering the subprocess behavior."""
+
 """Mock subprocess helpers for tests.
 
 Provides ``fake_proc`` — a factory for mock ``asyncio.subprocess.Process``

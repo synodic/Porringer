@@ -1,4 +1,6 @@
-"""Test the check and download functionality"""
+"""Helpers for test check."""
+
+"""Test the check and download functionality."""
 
 import tempfile
 from pathlib import Path
@@ -48,11 +50,11 @@ class TestCheckUpdatesParametersRuntimeContext:
 
 
 class TestCheckResult:
-    """Tests for CheckResult dataclass"""
+    """Tests for CheckResult dataclass."""
 
     @staticmethod
     def test_check_result_success() -> None:
-        """Test CheckResult with successful check"""
+        """Test CheckResult with successful check."""
         result = CheckResult(
             plugin='pip',
             packages=[
@@ -70,25 +72,25 @@ class TestCheckResult:
 
     @staticmethod
     def test_check_result_no_updates() -> None:
-        """Test CheckResult with no updates"""
+        """Test CheckResult with no updates."""
         result = CheckResult(plugin='pip', packages=[])
         assert result.success is True
         assert result.updates_available == 0
 
     @staticmethod
     def test_check_result_error() -> None:
-        """Test CheckResult with error"""
+        """Test CheckResult with error."""
         result = CheckResult(plugin='pip', error='Connection failed')
         assert result.success is False
         assert result.updates_available == 0
 
 
 class TestDownloadParameters:
-    """Tests for download parameters"""
+    """Tests for download parameters."""
 
     @staticmethod
     def test_download_parameters_validation() -> None:
-        """Test that DownloadParameters validates correctly"""
+        """Test that DownloadParameters validates correctly."""
         params = DownloadParameters(
             url='https://example.com/file.zip',
             destination=Path('/tmp/file.zip'),
@@ -101,31 +103,31 @@ class TestDownloadParameters:
 
 
 class TestDownloadUtility:
-    """Tests for download utility functions"""
+    """Tests for download utility functions."""
 
     @staticmethod
     def test_parse_hash_string() -> None:
-        """Test parsing hash strings"""
+        """Test parsing hash strings."""
         algo, digest = parse_hash_string('sha256:abc123def456')
         assert algo == HashAlgorithm.SHA256
         assert digest == 'abc123def456'
 
     @staticmethod
     def test_parse_hash_string_sha512() -> None:
-        """Test parsing SHA512 hash strings"""
+        """Test parsing SHA512 hash strings."""
         algo, digest = parse_hash_string('sha512:abc123def456')
         assert algo == HashAlgorithm.SHA512
         assert digest == 'abc123def456'
 
     @staticmethod
     def test_parse_hash_string_invalid() -> None:
-        """Test that invalid hash format raises error"""
+        """Test that invalid hash format raises error."""
         with pytest.raises(ValueError, match='Invalid hash format'):
             parse_hash_string('invalid-hash-string')
 
     @staticmethod
     def test_compute_file_hash() -> None:
-        """Test computing file hash"""
+        """Test computing file hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / 'test.txt'
             test_file.write_bytes(b'test content')

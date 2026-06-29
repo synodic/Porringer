@@ -1,3 +1,5 @@
+"""Plugin integration for plugin."""
+
 """Plugin implementation for Poetry project environment."""
 
 import re
@@ -5,6 +7,7 @@ from typing import override
 
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import (
+    ProjectCommandPlan,
     ProjectEnvironment,
     ProjectSyncParameters,
 )
@@ -26,6 +29,9 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
     installed via ``poetry self add``.
     """
 
+    _project_evidence_files = ('poetry.lock',)
+    _pyproject_tool_tables = (('tool', 'poetry'),)
+
     @staticmethod
     @override
     def ecosystem() -> Ecosystem:
@@ -45,7 +51,7 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
         return 'poetry'
 
     @override
-    def plugin_add_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def plugin_install_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return ``poetry self add <plugin>``.
 
         When *include_prereleases* is ``True``, appends
@@ -58,16 +64,16 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
         return cmd
 
     @override
-    def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def plugin_upgrade_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return ``poetry self add <plugin>``.
 
         Poetry's ``self add`` handles both initial install and
-        upgrade, so this delegates to ``plugin_add_command``.
+        upgrade, so this delegates to ``plugin_install_command``.
         """
-        return self.plugin_add_command(plugin, include_prereleases=include_prereleases)
+        return self.plugin_install_command(plugin, include_prereleases=include_prereleases)
 
     @override
-    def plugin_remove_command(self, plugin: PackageRef) -> list[str]:
+    def plugin_uninstall_command(self, plugin: PackageRef) -> list[str]:
         """Return ``poetry self remove <plugin>``."""
         return ['poetry', 'self', 'remove', plugin.name]
 
@@ -99,6 +105,19 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
         is handled by a separate `poetry env use` step in `sync()`.
         """
         return [self.tool_name(), self._sync_verb]
+
+    @classmethod
+    @override
+    def command_plan(cls, search_from, *, runtime_context: RuntimeContext | None = None) -> ProjectCommandPlan:
+        """Build Poetry's sync plan, including runtime selection when needed."""
+        directory = cls.resolve_project_root(search_from) or search_from
+        steps: list[list[str]] = []
+        if runtime_context is not None:
+            exe = runtime_context.get(cls.consumed_runtime_kind())
+            if exe is not None:
+                steps.append(['poetry', 'env', 'use', str(exe)])
+        steps.append(['poetry', cls._sync_verb])
+        return ProjectCommandPlan(directory=directory, argv=steps[-1], steps=steps)
 
     @override
     async def sync(self, params: ProjectSyncParameters) -> bool:

@@ -1,4 +1,6 @@
-"""Test the directory cache functionality"""
+"""Helpers for test cache."""
+
+"""Test the directory cache functionality."""
 
 import json
 from pathlib import Path
@@ -12,11 +14,11 @@ TWO_DIRECTORIES = 2
 
 
 class TestDirectoryCacheManager:
-    """Tests for DirectoryCacheManager"""
+    """Tests for DirectoryCacheManager."""
 
     @staticmethod
     def test_add_directory(cache_manager, temp_cache_dir) -> None:
-        """Test adding a directory to the cache"""
+        """Test adding a directory to the cache."""
         tmp_path, _ = temp_cache_dir
         target_dir = tmp_path / 'project'
         target_dir.mkdir()
@@ -34,7 +36,7 @@ class TestDirectoryCacheManager:
 
     @staticmethod
     def test_add_duplicate_directory_fails(cache_manager, temp_cache_dir) -> None:
-        """Test that adding duplicate directory raises error"""
+        """Test that adding duplicate directory raises error."""
         tmp_path, _ = temp_cache_dir
         target_dir = tmp_path / 'project'
         target_dir.mkdir()
@@ -46,7 +48,7 @@ class TestDirectoryCacheManager:
 
     @staticmethod
     def test_add_nonexistent_directory_fails(cache_manager, temp_cache_dir) -> None:
-        """Test that adding nonexistent path raises error when validating"""
+        """Test that adding nonexistent path raises error when validating."""
         tmp_path, _ = temp_cache_dir
         nonexistent = tmp_path / 'does_not_exist'
 
@@ -55,7 +57,7 @@ class TestDirectoryCacheManager:
 
     @staticmethod
     def test_remove_directory(cache_manager, temp_cache_dir) -> None:
-        """Test removing a directory from the cache"""
+        """Test removing a directory from the cache."""
         tmp_path, _ = temp_cache_dir
         target_dir = tmp_path / 'project'
         target_dir.mkdir()
@@ -70,19 +72,19 @@ class TestDirectoryCacheManager:
 
     @staticmethod
     def test_remove_nonexistent_directory(cache_manager) -> None:
-        """Test removing a directory that's not in cache"""
+        """Test removing a directory that's not in cache."""
         result = cache_manager.remove_directory(Path('/nonexistent'))
         assert result is False
 
     @staticmethod
     def test_list_directories_empty(cache_manager) -> None:
-        """Test listing when cache is empty"""
+        """Test listing when cache is empty."""
         directories = cache_manager.list_directories()
         assert directories == []
 
     @staticmethod
     def test_get_paths(cache_manager, temp_cache_dir) -> None:
-        """Test getting just paths from directories"""
+        """Test getting just paths from directories."""
         tmp_path, _ = temp_cache_dir
         dir1 = tmp_path / 'project1'
         dir2 = tmp_path / 'project2'
@@ -100,11 +102,11 @@ class TestDirectoryCacheManager:
 
 
 class TestDirectoryCachePersistence:
-    """Tests for cache persistence"""
+    """Tests for cache persistence."""
 
     @staticmethod
     def test_cache_persists_across_instances(temp_cache_dir) -> None:
-        """Test that cache data persists when creating new manager instance"""
+        """Test that cache data persists when creating new manager instance."""
         tmp_path, data_dir = temp_cache_dir
         target_dir = tmp_path / 'project'
         target_dir.mkdir()
@@ -122,7 +124,7 @@ class TestDirectoryCachePersistence:
 
     @staticmethod
     def test_clear_removes_all_data(cache_manager, temp_cache_dir) -> None:
-        """Test that clear removes all directories"""
+        """Test that clear removes all directories."""
         tmp_path, _ = temp_cache_dir
         target_dir = tmp_path / 'project'
         target_dir.mkdir()
@@ -135,11 +137,11 @@ class TestDirectoryCachePersistence:
 
 
 class TestDirectoryCacheValidation:
-    """Tests for directory validation"""
+    """Tests for directory validation."""
 
     @staticmethod
     def test_list_directories_validate(cache_manager, temp_cache_dir) -> None:
-        """Test validation returns all directories with correct status"""
+        """Test validation returns all directories with correct status."""
         tmp_path, _ = temp_cache_dir
         existing_dir = tmp_path / 'existing'
         existing_dir.mkdir()
@@ -168,7 +170,7 @@ class TestDirectoryCacheValidation:
 
     @staticmethod
     def test_update_directory(cache_manager, temp_cache_dir) -> None:
-        """Test updating directory metadata"""
+        """Test updating directory metadata."""
         tmp_path, _ = temp_cache_dir
         target_dir = tmp_path / 'project'
         target_dir.mkdir()
@@ -182,11 +184,11 @@ class TestDirectoryCacheValidation:
 
 
 class TestDirectoryCacheCorruption:
-    """Tests for corrupt cache recovery"""
+    """Tests for corrupt cache recovery."""
 
     @staticmethod
     def test_corrupt_cache_gives_empty_cache(temp_cache_dir) -> None:
-        """Test that a corrupt primary yields an empty cache that is persisted"""
+        """Test that a corrupt primary yields an empty cache that is persisted."""
         _, data_dir = temp_cache_dir
 
         primary = data_dir / DirectoryCacheManager.CACHE_FILENAME
@@ -204,11 +206,11 @@ class TestDirectoryCacheCorruption:
 
 
 class TestDirectoryCacheFirstRun:
-    """Tests for first-run behaviour (no files on disk)"""
+    """Tests for first-run behaviour (no files on disk)."""
 
     @staticmethod
     def test_first_run_creates_cache_file(tmp_path) -> None:
-        """Test that the very first load persists an empty cache to disk"""
+        """Test that the very first load persists an empty cache to disk."""
         data_dir = tmp_path / 'fresh_data'
         # data_dir does not exist yet
         manager = DirectoryCacheManager(data_dir)
@@ -223,7 +225,7 @@ class TestDirectoryCacheFirstRun:
 
     @staticmethod
     def test_first_run_no_error_on_subsequent_load(tmp_path) -> None:
-        """Test that after first-run persistence, a new manager loads cleanly"""
+        """Test that after first-run persistence, a new manager loads cleanly."""
         data_dir = tmp_path / 'fresh_data'
         manager1 = DirectoryCacheManager(data_dir)
         manager1.list_directories()  # triggers first-run _save

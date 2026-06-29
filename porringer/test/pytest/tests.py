@@ -1,4 +1,6 @@
-"""Implementation of tests that should be overridden in plugins"""
+"""Tests covering the tests behavior."""
+
+"""Implementation of tests that should be overridden in plugins."""
 
 import shutil
 from abc import ABCMeta, abstractmethod
@@ -24,13 +26,54 @@ from porringer.test.pytest.shared import (
     ScmEnvironmentTests,
 )
 
+# Package names that probe argv-injection and token-splitting bugs.  A
+# correct ``list``-based command builder confines each to exactly one
+# argv token, so neither the token count nor the structure may change
+# with the name's content.
+_ADVERSARIAL_PACKAGE_NAMES = (
+    'pkg; rm -rf /',
+    'pkg && evil',
+    'pkg $(whoami)',
+    '--config=evil',
+    'a b c',
+    'pkg\nrm',
+)
+
+_BENIGN_PACKAGE_NAME = 'benignpackage'
+
+
+def _environment_instance[T: Environment](plugin_type: type[T]) -> T:
+    """Construct a plugin instance with placeholder distribution metadata."""
+    return plugin_type(PluginParameters(distribution=Distribution(version=Version('0.0.0'))))
+
+
+def _command_for_verb(
+    instance: Environment,
+    verb: str,
+    package: PackageRef,
+    *,
+    include_prereleases: bool = False,
+) -> list[str]:
+    """Dispatch to the install / upgrade / uninstall builder for *verb*."""
+    if verb == 'install':
+        return instance.install_command(package, include_prereleases=include_prereleases)
+    if verb == 'upgrade':
+        return instance.upgrade_command(package, include_prereleases=include_prereleases)
+    return instance.uninstall_command(package)
+
+
+def _is_subsequence(small: list[str], large: list[str]) -> bool:
+    """Return whether *small* occurs in *large* in order (gaps allowed)."""
+    iterator = iter(large)
+    return all(token in iterator for token in small)
+
 
 class EnvironmentIntegrationTests[T: Environment](PluginIntegrationTests[T], EnvironmentTests[T], metaclass=ABCMeta):
-    """Base class for all environment integration tests that test plugin agnostic behavior"""
+    """Base class for all environment integration tests that test plugin agnostic behavior."""
 
 
 class EnvironmentUnitTests[T: Environment](PluginUnitTests[T], EnvironmentTests[T], metaclass=ABCMeta):
-    """Base class for all environment unit tests that test plugin agnostic behavior
+    """Base class for all environment unit tests that test plugin agnostic behavior.
 
     Custom implementations of the environment class should inherit from this class for its tests.
     """
@@ -58,15 +101,49 @@ class EnvironmentUnitTests[T: Environment](PluginUnitTests[T], EnvironmentTests[
         assert plugin_type.is_available() is False
 
     @staticmethod
-    def test_uninstall_command_returns_list(plugin_type: type[T]) -> None:
-        """uninstall_command() should return a non-empty list of strings."""
-        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-        instance = plugin_type(params)
-        ref = PackageRef.model_validate('some-package')
-        cmd = instance.uninstall_command(ref)
-        assert isinstance(cmd, list)
-        assert len(cmd) > 0
-        assert all(isinstance(part, str) for part in cmd)
+    @pytest.mark.parametrize('verb', ['install', 'upgrade', 'uninstall'])
+    def test_command_confines_package_to_single_token(plugin_type: type[T], verb: str) -> None:
+        """Each builder keeps the package within exactly one argv token.
+
+        Builders construct ``list`` argv, so a hostile package name must
+        never split across tokens nor change the argv structure.  The
+        name stays contained in a single token (a plugin may legitimately
+        decorate it, e.g. ``npm:name`` or ``name@latest``), and the
+        token count is invariant to the name's content.
+        """
+        instance = _environment_instance(plugin_type)
+        baseline = _command_for_verb(instance, verb, PackageRef(name=_BENIGN_PACKAGE_NAME))
+        assert isinstance(baseline, list)
+        assert baseline
+        assert all(isinstance(part, str) for part in baseline)
+        for name in _ADVERSARIAL_PACKAGE_NAMES:
+            cmd = _command_for_verb(instance, verb, PackageRef(name=name))
+            containing = [token for token in cmd if name in token]
+            assert len(containing) == 1
+            assert len(cmd) == len(baseline)
+
+    @staticmethod
+    @pytest.mark.parametrize('verb', ['install', 'upgrade'])
+    def test_prerelease_flag_is_additive(plugin_type: type[T], verb: str) -> None:
+        """Enabling prereleases only *adds* argv tokens, never removes them.
+
+        The command without prereleases must remain an ordered
+        subsequence of the command with them, so the option can only
+        extend — never rewrite — the base invocation.
+        """
+        instance = _environment_instance(plugin_type)
+        ref = PackageRef(name=_BENIGN_PACKAGE_NAME)
+        without = _command_for_verb(instance, verb, ref, include_prereleases=False)
+        with_pre = _command_for_verb(instance, verb, ref, include_prereleases=True)
+        assert _is_subsequence(without, with_pre)
+
+    @staticmethod
+    @pytest.mark.parametrize('verb', ['install', 'upgrade', 'uninstall'])
+    def test_command_is_deterministic(plugin_type: type[T], verb: str) -> None:
+        """Building the same command twice yields identical argv."""
+        instance = _environment_instance(plugin_type)
+        ref = PackageRef(name=_BENIGN_PACKAGE_NAME, constraint='>=1.0')
+        assert _command_for_verb(instance, verb, ref) == _command_for_verb(instance, verb, ref)
 
 
 class ProjectEnvironmentUnitTests[T: ProjectEnvironment](

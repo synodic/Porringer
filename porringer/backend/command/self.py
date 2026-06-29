@@ -1,3 +1,5 @@
+"""CLI command implementation for self."""
+
 """Utilities for managing and checking the Porringer installation version."""
 
 import contextlib

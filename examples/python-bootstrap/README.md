@@ -1,73 +1,51 @@
 # Python Bootstrap Example
 
-This example demonstrates using Porringer to bootstrap a complete Python
-development environment from scratch — the same chain a developer would
-follow manually.
+This example bootstraps a Python development toolchain from an almost empty environment. It demonstrates runtime installation, deferred tool resolution, native tool plugins, and project sync in one manifest.
 
 ## Bootstrap Chain
 
-The manifest executes in **phased order**:
+The manifest runs in ordered phases:
 
-1. **`runtimes.python`** → installs Python 3.14 via `pim` (Windows) or
-   `pyenv` (macOS / Linux).  The resolved interpreter path is propagated
-   to all downstream phases.
-2. **`packages.python`** → installs `pipx` into the current Python
-   environment via `pip` or `uv`.
-3. **`tools.python`** → installs `pdm` as an isolated CLI tool via
-   `pipx`.  The pipx backend is **deferred** at preview time — it becomes
-   available only after Phase 2 installs it.  The `plugins` list then
-   runs `pdm self add cppython` to add the cppython plugin natively.
-4. **`post_sync`** → runs `pdm install` in the manifest directory,
-   creating the project virtualenv and installing all dependencies from
-   `pyproject.toml`.
+1. `runtimes.python` installs Python 3.14 through `pim` on Windows or `pyenv` on macOS and Linux. The resolved interpreter path is passed to runtime-aware package and tool operations.
+2. `packages.python` installs `pipx` into the current Python environment through `pip` or `uv`.
+3. `tools.python` installs `pdm` as an isolated CLI tool through `pipx`. This backend may be deferred during preview because `pipx` is installed earlier in the same run.
+4. The `plugins` list runs `pdm self add cppython` through PDM's native plugin management.
+5. Project sync runs `pdm install` from the discovered project root.
 
 ## Manifest Overview
 
 ```text
-runtimes.python  ─►  pim / pyenv   ─►  Python 3.14
-packages.python  ─►  pip / uv      ─►  pipx
-tools.python     ─►  pipx          ─►  pdm          (deferred resolution)
-                 ─►  pdm self add  ─►  cppython     (native plugin management)
-post_sync        ─►  pdm install                    (project sync)
+runtimes.python  ->  pim / pyenv   ->  Python 3.14
+packages.python  ->  pip / uv      ->  pipx
+tools.python     ->  pipx          ->  pdm          (deferred resolution)
+                 ->  pdm self add  ->  cppython     (native plugin management)
+project sync     ->  pdm install                   (plugin-owned project sync)
 ```
 
 ## Usage
 
-### Preview what will happen
+Preview the plan without changing the environment:
 
 ```shell
-porringer sync --path examples/python-bootstrap --dry-run
+porringer preview examples/python-bootstrap
 ```
 
-### Execute with confirmation
+Run the setup with confirmation:
 
 ```shell
-porringer sync --path examples/python-bootstrap
+porringer install examples/python-bootstrap
 ```
 
-### Execute without confirmation (non-interactive)
+Skip confirmation in a scripted flow:
 
 ```shell
-porringer sync --path examples/python-bootstrap --yes
+porringer install examples/python-bootstrap --yes
 ```
 
-## How It Works
+## How Deferred Resolution Works
 
-Porringer's execution engine splits `PACKAGE`-type actions into sub-phases:
+Porringer installs runtimes before package and tool actions. It forwards the resolved interpreter to `RuntimeConsumer` plugins so later `pip` or `uv` commands target the intended Python.
 
-- **Phase 1 (Runtime):** Runtime providers (pim / pyenv) run first.  The
-  resolved interpreter is forwarded to all `RuntimeConsumer` plugins so
-  that subsequent pip / uv commands target the correct Python.
-- **Phase 2a (Package):** Regular package installs (pip / uv).  This is
-  where pipx gets installed.
-- **Phase 2b (Tool):** After Phase 2a the engine **re-discovers**
-  available plugins.  Pipx is now on PATH, so the `tools.python` section
-  resolves to the pipx backend and pdm is installed.
-- **Phase 3 (Project Sync):** Project-environment plugins (pdm, uv,
-  poetry) run their native sync / install command.
-- **Phase 4 (Post-sync):** Arbitrary shell commands execute in the
-  manifest directory.
+After package installation, Porringer discovers plugins again. If `pipx` was just installed, `tools.python` can resolve to the `pipx` backend and install `pdm`. Project sync runs after the toolchain is available and is owned by the selected project plugin.
 
-If a tool backend is not available at preview time (e.g. pipx is not yet
-installed), the action is created with a *deferred* installer.  Resolution
-happens just before Phase 2b, after packages have been installed.
+If a tool backend is unavailable at preview time, the action is created with a deferred installer. Resolution happens later in the run, after earlier package actions have completed.

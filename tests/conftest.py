@@ -6,34 +6,31 @@ import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from rich.console import Console
 
 from porringer.api import API
+from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core import discovery as _discovery
 from porringer.backend.command.core.discovery import invalidate_plugin_cache
 from porringer.backend.schema import GlobalConfiguration
 from porringer.console.schema import ConsoleConfiguration
+from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package
 from porringer.schema import (
-    ActionCompletedEvent,
-    BatchSetupResults,
     LocalConfiguration,
-    ManifestFailedEvent,
-    ManifestLoadedEvent,
-    SetupActionResult,
-    SetupParameters,
-    SetupResults,
 )
 
 # Register shared fixture modules so all tests can use them without imports.
 pytest_plugins = [
-    'tests.fixtures.manifests',
     'tests.fixtures.api',
     'tests.fixtures.packages',
+    'tests.fixtures.command_process',
+    'tests.fixtures.disposable_environment',
+    'tests.fixtures.smoke_packages',
 ]
 
 # Extend the plugin-scan cache TTL so that it never expires mid-suite.
@@ -44,22 +41,14 @@ _discovery.CACHE_TTL = 600.0
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
-    config.addinivalue_line(
-        'markers',
+    markers = [
         'fresh_plugins: invalidate the plugin discovery cache before this test',
-    )
-    config.addinivalue_line(
-        'markers',
         'mock_packages: use a cached package list instead of real subprocess calls',
-    )
-    config.addinivalue_line(
-        'markers',
-        'frozen_app: simulate a frozen (PyInstaller) application environment',
-    )
-    config.addinivalue_line(
-        'markers',
-        'bare_environment: simulate a bare system with only the primary tool on PATH',
-    )
+    ]
+    registered = set(config.getini('markers'))
+    for marker in markers:
+        if marker not in registered:
+            config.addinivalue_line('markers', marker)
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -110,7 +99,7 @@ def frozen_context(*, which_result: str | None = None) -> Generator[None]:
 
 
 @contextmanager
-def bare_environment_context(*, allowed_tools: set[str] | None = None) -> Generator[None]:
+def minimal_path_context(*, allowed_tools: set[str] | None = None) -> Generator[None]:
     """Context manager that hides all CLI tools except *allowed_tools*.
 
     Patches ``shutil.which`` globally so that any tool not in
@@ -166,50 +155,33 @@ def _apply_mock_packages(
 
     with (
         patch('porringer.plugin.pip.plugin.PIPEnvironment.packages', _fast_packages),
-        patch('porringer.plugin.pip.plugin.PIPEnvironment.check_updates', _noop_check_updates),
+        patch(
+            'porringer.plugin.pip.plugin.PIPEnvironment.check_updates',
+            _noop_check_updates,
+        ),
         patch('porringer.plugin.uv.plugin.UvEnvironment.packages', _fast_packages),
-        patch('porringer.plugin.uv.plugin.UvEnvironment.check_updates', _noop_check_updates),
+        patch(
+            'porringer.plugin.uv.plugin.UvEnvironment.check_updates',
+            _noop_check_updates,
+        ),
         # Patch discover_all_plugins at every import site
-        patch('porringer.backend.command.core.discovery.discover_all_plugins', _fast_discover),
-        patch('porringer.backend.command.core.action_builder.discover_all_plugins', _fast_discover),
-        patch('porringer.backend.command.core.execution.discover_all_plugins', _fast_discover),
+        patch(
+            'porringer.backend.command.core.discovery.discover_all_plugins',
+            _fast_discover,
+        ),
+        patch(
+            'porringer.backend.command.core.action_builder.discover_all_plugins',
+            _fast_discover,
+        ),
+        patch(
+            'porringer.backend.command.core.execution.discover_all_plugins',
+            _fast_discover,
+        ),
         patch('porringer.backend.command.sync.discover_all_plugins', _fast_discover),
         patch('porringer.backend.command.manifest.discover_all_plugins', _fast_discover),
         patch('porringer.api.discover_all_plugins', _fast_discover),
     ):
         yield
-
-
-async def execute_via_stream(api: API, params: SetupParameters) -> BatchSetupResults:
-    """Drain `execute_stream` and build `BatchSetupResults` from emitted events.
-
-    This is a test helper that calls `execute_stream` directly — no
-    separate preview step is needed.
-    """
-    manifests: list[SetupResults] = []
-    collected: list[SetupActionResult] = []
-    failed_paths: list[tuple[Path, str]] = []
-
-    async for event in api.sync.execute_stream(params):
-        if isinstance(event, ManifestLoadedEvent):
-            manifests.append(event.manifest)
-        elif isinstance(event, ManifestFailedEvent):
-            failed_paths.append(event.failed_path)
-        elif isinstance(event, ActionCompletedEvent):
-            collected.append(event.result)
-
-    # Partition collected results by manifest based on action identity
-    manifest_action_sets = [set(id(a) for a in m.actions) for m in manifests]
-    manifest_results: list[SetupResults] = []
-
-    for preview, action_ids in zip(manifests, manifest_action_sets, strict=False):
-        mr_results = [r for r in collected if id(r.action) in action_ids]
-        sr = SetupResults(actions=preview.actions, results=mr_results)
-        sr.manifest_path = preview.manifest_path
-        sr.metadata = preview.metadata
-        manifest_results.append(sr)
-
-    return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
 
 
 @pytest.fixture
@@ -221,6 +193,32 @@ def fresh_plugin_cache() -> None:
     tests mock plugin discovery and do not need this.
     """
     invalidate_plugin_cache()
+
+
+@pytest.fixture(params=[False, True], ids=['pip', 'pipx'])
+def installer_is_pipx(request: pytest.FixtureRequest) -> Generator[bool]:
+    """Parametrize a test across pip and pipx installation modes.
+
+    Patches ``is_pipx_installation`` in the plugin command module and yields
+    the active mode as a bool so the test can assert the mode-specific command.
+    """
+    with patch(
+        'porringer.backend.command.plugin.is_pipx_installation',
+        return_value=request.param,
+    ):
+        yield request.param
+
+
+@pytest.fixture
+def stub_runtime_context() -> Generator[RuntimeContext]:
+    """Patch ``Builder.resolve_runtime_context`` to return an empty context.
+
+    Yields the ``RuntimeContext`` used as the return value for tests that only
+    need runtime resolution stubbed out without a specific executable set.
+    """
+    ctx = RuntimeContext()
+    with patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx):
+        yield ctx
 
 
 @pytest.fixture

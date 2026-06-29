@@ -1,4 +1,6 @@
-"""Exception definitions"""
+"""Utility helpers for exception."""
+
+"""Exception definitions."""
 
 from enum import Enum
 
@@ -42,19 +44,19 @@ class PorringerError(Exception):
 
 
 class ProcessError(PorringerError):
-    """Raised when there is a configuration error"""
+    """Raised when there is a configuration error."""
 
 
 class PluginError(PorringerError):
-    """Raised when there is a plugin error"""
+    """Raised when there is a plugin error."""
 
 
 class NotSupportedError(PorringerError):
-    """Raised when something is not supported"""
+    """Raised when something is not supported."""
 
 
 class SetupError(PorringerError):
-    """Base class for setup-related errors"""
+    """Base class for setup-related errors."""
 
 
 class ManifestValidationCode(Enum):
@@ -113,10 +115,10 @@ class CommandTimeoutError(SetupError):
 
 
 class PluginDependencyError(PluginError):
-    """Raised when a required plugin dependency is not available"""
+    """Raised when a required plugin dependency is not available."""
 
     def __init__(self, plugin: str, dependency: str, error: str | None = None) -> None:
-        """Initializes the error
+        """Initializes the error.
 
         Args:
             plugin: The plugin that has the unmet dependency
@@ -134,7 +136,7 @@ class PluginDependencyError(PluginError):
 
     @property
     def plugin(self) -> str:
-        """Returns the plugin that has the unmet dependency
+        """Returns the plugin that has the unmet dependency.
 
         Returns:
             str -- The plugin name
@@ -143,7 +145,7 @@ class PluginDependencyError(PluginError):
 
     @property
     def dependency(self) -> str:
-        """Returns the missing dependency plugin name
+        """Returns the missing dependency plugin name.
 
         Returns:
             str -- The dependency plugin name
@@ -152,4 +154,4 @@ class PluginDependencyError(PluginError):
 
 
 class UpdateError(PorringerError):
-    """Raised when there is an error checking for or downloading updates"""
+    """Raised when there is an error checking for or downloading updates."""

@@ -1,3 +1,5 @@
+"""Helpers for test package ref."""
+
 """Tests for PackageRef model."""
 
 import pytest

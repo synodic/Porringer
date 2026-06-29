@@ -1,3 +1,5 @@
+"""Plugin integration for plugin."""
+
 """Plugin implementation for PDM project environment."""
 
 from typing import override
@@ -16,6 +18,9 @@ class PDMEnvironment(ProjectEnvironment, PluginManager):
     Implements ``PluginManager`` so that declared sub-plugins are
     installed via ``pdm self add``.
     """
+
+    _project_evidence_files = ('pdm.lock',)
+    _pyproject_tool_tables = (('tool', 'pdm'),)
 
     @staticmethod
     @override
@@ -36,7 +41,7 @@ class PDMEnvironment(ProjectEnvironment, PluginManager):
         return 'pdm'
 
     @override
-    def plugin_add_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def plugin_install_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return ``pdm self add <plugin>``.
 
         When *include_prereleases* is ``True``, appends
@@ -50,7 +55,7 @@ class PDMEnvironment(ProjectEnvironment, PluginManager):
         return cmd
 
     @override
-    def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def plugin_upgrade_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return ``pdm self add --pip-args="--upgrade [--pre]" <plugin>``.
 
         PDM's ``self update`` updates PDM itself and does not accept a
@@ -75,7 +80,7 @@ class PDMEnvironment(ProjectEnvironment, PluginManager):
         return cmd
 
     @override
-    def plugin_remove_command(self, plugin: PackageRef) -> list[str]:
+    def plugin_uninstall_command(self, plugin: PackageRef) -> list[str]:
         """Return ``pdm self remove <plugin>``."""
         return ['pdm', 'self', 'remove', plugin.name]
 

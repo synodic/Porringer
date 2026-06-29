@@ -1,4 +1,6 @@
-"""Plugin implementation"""
+"""Plugin integration for plugin."""
+
+"""Plugin implementation."""
 
 import asyncio
 import json
@@ -10,6 +12,10 @@ from porringer.core.plugin_schema.plugin_manager import find_tool_python
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind, PluginKind
+from porringer.utility.concurrency import gather_bounded
+
+# Bounded concurrency for per-venv metadata reads offloaded to threads.
+_PIPX_READ_CONCURRENCY = 16
 
 
 def _get_pipx_venvs_dir() -> Path:
@@ -177,8 +183,13 @@ class PIPXEnvironment(PythonEnvironment):
         if not venv_dirs:
             return []
 
-        # Fan out per-venv reads in parallel, each offloaded to a thread
-        results = await asyncio.gather(*[asyncio.to_thread(_read_venv_packages_sync, d) for d in venv_dirs])
+        # Fan out per-venv reads in parallel (each offloaded to a thread),
+        # bounded so machines with many venvs do not spawn an unbounded
+        # number of concurrent thread tasks.
+        results = await gather_bounded(
+            (lambda d=d: asyncio.to_thread(_read_venv_packages_sync, d) for d in venv_dirs),
+            limit=_PIPX_READ_CONCURRENCY,
+        )
 
         # Flatten the per-venv lists into a single list
         packages: list[Package] = []

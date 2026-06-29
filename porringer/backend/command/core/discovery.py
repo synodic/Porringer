@@ -1,3 +1,5 @@
+"""CLI command implementation for discovery."""
+
 """Plugin discovery helpers.
 
 Provides `discover_plugins` which wraps entry-point discovery and
@@ -56,6 +58,15 @@ class DiscoveredPlugins:
     _proj_infos: list[PluginInformation[ProjectEnvironment]] | None = field(default=None, repr=False)
     _scm_infos: list[PluginInformation[ScmEnvironment]] | None = field(default=None, repr=False)
 
+    load_errors: dict[str, str] = field(default_factory=dict, repr=False)
+    """Entry-point names that failed to load, mapped to their error message.
+
+    Populated by production discovery when a plugin import fails (e.g.
+    broken dependency, syntax error in plugin code).  Callers that need
+    to surface plugin failures to end-users should inspect this dict
+    instead of relying solely on log output.
+    """
+
     runtime_context: RuntimeContext | None = field(default=None, repr=False)
     """Resolved interpreter paths for RuntimeConsumer plugins.
 
@@ -106,11 +117,13 @@ class DiscoveredPlugins:
         if self._env_infos is not None and self._proj_infos is not None and self._scm_infos is not None:
             result = _build_from_infos(self._env_infos, self._proj_infos, self._scm_infos)
             result.runtime_context = self.runtime_context
+            result.load_errors = dict(self.load_errors)
             return result
         return DiscoveredPlugins(
             environments=dict(self.environments),
             project_environments=dict(self.project_environments),
             scm_environments=dict(self.scm_environments),
+            load_errors=dict(self.load_errors),
             runtime_context=self.runtime_context,
         )
 
@@ -253,7 +266,11 @@ def invalidate_plugin_cache() -> None:
         hook()
 
 
-def _scan_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> list[PluginInformation[T]]:
+def _scan_plugins[T: Plugin](
+    group: str,
+    base_class: type[T],
+    **kwargs: bool,
+) -> tuple[list[PluginInformation[T]], dict[str, str]]:
     """Scan entry points and return plugin metadata without instantiating.
 
     Does **not** call ``importlib.invalidate_caches()`` — that is the
@@ -270,7 +287,8 @@ def _scan_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) ->
             (e.g. ``check_dependencies=True``).
 
     Returns:
-        List of plugin information objects (class + distribution metadata).
+        Tuple of ``(infos, load_errors)`` — plugin information objects
+        and a dict of entry-point names that failed to load.
     """
     return Builder.find_plugins(group, base_class, **kwargs)
 
@@ -292,7 +310,7 @@ def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool)
     Returns:
         Dict mapping canonical plugin name to instantiated plugin.
     """
-    infos = _scan_plugins(group, base_class, **kwargs)
+    infos, _errors = _scan_plugins(group, base_class, **kwargs)
     result = _build_instances(infos)
     logger.debug('Discovered %d %s plugin(s): %s', len(result), group, sorted(result))
     return result
@@ -317,7 +335,7 @@ def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
     Args:
         use_cache: When ``True``, reuse cached scan results if they
             exist and are younger than :data:`CACHE_TTL` seconds.
-            Callers on the hot path (preview, dry-run) set this to
+            Callers on the hot path (preview, inspect) set this to
             ``True``.  Callers that need freshness after installing
             packages (execution phase transitions) leave it ``False``.
 
@@ -336,11 +354,14 @@ def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
             logger.debug('Plugin scan cache hit — building fresh instances')
             return _build_from_infos(_cache.env_infos, _cache.proj_infos, _cache.scm_infos)
 
-    env_infos = _scan_plugins('environment', Environment, check_dependencies=True)
-    proj_infos = _scan_plugins('project_environment', ProjectEnvironment)
-    scm_infos = _scan_plugins('scm', ScmEnvironment)
+    env_infos, env_errors = _scan_plugins('environment', Environment, check_dependencies=True)
+    proj_infos, proj_errors = _scan_plugins('project_environment', ProjectEnvironment)
+    scm_infos, scm_errors = _scan_plugins('scm', ScmEnvironment)
 
     result = _build_from_infos(env_infos, proj_infos, scm_infos)
+    result.load_errors = {**env_errors, **proj_errors, **scm_errors}
+    if result.load_errors:
+        logger.warning('Plugin load failures: %s', list(result.load_errors))
     logger.info(
         'Plugin discovery: %d environments, %d project, %d scm',
         len(result.environments),

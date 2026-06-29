@@ -1,3 +1,5 @@
+"""Helpers for test clone detection."""
+
 """Unit tests for Git SCM clone detection and URL comparison."""
 
 from pathlib import Path

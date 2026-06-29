@@ -1,8 +1,10 @@
-"""Builder — generic plugin discovery and construction.
+"""Backend helpers for builder."""
 
-Provides `Builder.find_plugins()` and `Builder.build_plugins()`
-for discovering and instantiating plugins from any entry-point group
-without per-kind boilerplate.
+"""Helpers for discovering and constructing plugins from entry points.
+
+The builder offers reusable logic for scanning entry-point groups,
+instantiating plugins, and resolving runtime executables without duplicating
+per-plugin-kind boilerplate.
 """
 
 import asyncio
@@ -16,7 +18,12 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.runtime import ResolvedRuntime, RuntimeContext, RuntimeProvider
+from porringer.core.plugin_schema.runtime import (
+    DefaultRuntimeExecutableProvider,
+    ResolvedRuntime,
+    RuntimeContext,
+    RuntimeProvider,
+)
 from porringer.core.schema import Distribution, Plugin, PluginDependency, PluginParameters
 
 logger = logging.getLogger(__name__)
@@ -36,12 +43,29 @@ async def _resolve_provider_executable(
     env: RuntimeProvider,
     kind: str,
 ) -> Path | None:
-    """Resolve a single executable from *env* trying default_tag then available_tags.
+    """Resolve a single executable from *env* by trying the fastest route first.
 
     Returns the resolved :class:`~pathlib.Path` or ``None`` when no
-    executable could be obtained.
+    executable can be obtained.
     """
-    # --- Fast path: provider-reported default --------------------------
+    # Use the provider's built-in default executable when it is available.
+    if isinstance(env, DefaultRuntimeExecutableProvider):
+        try:
+            executable = await env.default_executable()
+        except Exception:
+            logger.debug("default_executable() failed for '%s'", name, exc_info=True)
+            executable = None
+
+        if executable is not None:
+            logger.debug(
+                "Resolved runtime '%s' via provider '%s' default_executable: path=%s",
+                kind,
+                name,
+                executable,
+            )
+            return executable
+
+    # Try the provider's preferred default tag next.
     try:
         default = await env.default_tag()
     except Exception:
@@ -76,7 +100,7 @@ async def _resolve_provider_executable(
             name,
         )
 
-    # --- Fallback: enumerate all tags ----------------------------------
+    # Fall back to scanning every available tag.
     try:
         tags = await env.available_tags()
     except Exception:
@@ -122,7 +146,7 @@ async def _resolve_provider_executable(
 
 
 class Builder:
-    """Helper class for building Porringer projects"""
+    """Helper class for building Porringer projects."""
 
     # ------------------------------------------------------------------
     # Generic discovery & construction
@@ -134,7 +158,7 @@ class Builder:
         base_class: type[T],
         *,
         check_dependencies: bool = False,
-    ) -> list[PluginInformation[T]]:
+    ) -> tuple[list[PluginInformation[T]], dict[str, str]]:
         """Search for registered plugins in an entry-point group.
 
         Scans `porringer.<group>` for classes that are subclasses of
@@ -147,9 +171,12 @@ class Builder:
                 and filters out plugins with unmet required dependencies.
 
         Returns:
-            A list of discovered plugin information objects.
+            A tuple of ``(infos, load_errors)`` where *load_errors* maps
+            entry-point name to a human-readable error message for every
+            plugin that could not be loaded.
         """
         plugin_types: list[PluginInformation[T]] = []
+        load_errors: dict[str, str] = {}
 
         entry_points = list(metadata.entry_points(group=f'porringer.{group}'))
         logger.debug('Entry points for porringer.%s: %s', group, [ep.name for ep in entry_points])
@@ -159,12 +186,15 @@ class Builder:
                 loaded_type = entry_point.load()
             except Exception as e:
                 logger.warning("Plugin '%s' could not be loaded: %s. Skipping", entry_point.name, e)
+                load_errors[entry_point.name] = str(e)
                 continue
 
             plugin_name = str(canonicalize_name(entry_point.name))
 
             if entry_point.dist is None:
+                msg = 'plugin is not installed'
                 logger.warning("Plugin '%s' is not installed. Skipping", plugin_name)
+                load_errors[plugin_name] = msg
                 continue
 
             if not issubclass(loaded_type, base_class):
@@ -176,7 +206,7 @@ class Builder:
         if check_dependencies:
             plugin_types = Builder._resolve_dependencies(plugin_types)
 
-        return plugin_types
+        return plugin_types, load_errors
 
     @staticmethod
     def build_plugin[T: Plugin](info: PluginInformation[T]) -> T:

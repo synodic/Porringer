@@ -1,3 +1,5 @@
+"""Plugin integration for plugin."""
+
 """Plugin implementation for pyenv-managed Python runtimes."""
 
 import asyncio
@@ -142,20 +144,23 @@ class PyenvEnvironment(Environment, RuntimeProvider):
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode != 0:
-                stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ''
-                logger.debug('pyenv prefix %s failed: %s', tag, stderr)
-                return None
-            stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
-            prefix = Path(stdout)
-            executable = prefix / 'bin' / 'python'
-            if executable.exists():
-                return executable
-            logger.warning('pyenv prefix %s resolved to %s but bin/python missing', tag, prefix)
         except FileNotFoundError:
             logger.debug('pyenv not found on PATH')
+            return None
         except Exception as e:
             logger.debug('resolve_executable failed for tag %s: %s', tag, e)
+            return None
+
+        if proc.returncode != 0:
+            stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ''
+            logger.debug('pyenv prefix %s failed: %s', tag, stderr)
+            return None
+        stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ''
+        prefix = Path(stdout)
+        executable = prefix / 'bin' / 'python'
+        if executable.exists():
+            return executable
+        logger.warning('pyenv prefix %s resolved to %s but bin/python missing', tag, prefix)
         return None
 
     @override

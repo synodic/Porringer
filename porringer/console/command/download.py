@@ -1,3 +1,5 @@
+"""CLI command implementation for download."""
+
 """Porringer CLI download command module for downloading files."""
 
 import asyncio
@@ -7,7 +9,7 @@ from typing import Annotated
 import typer
 from rich.panel import Panel
 
-from porringer.api import API
+from porringer.console.common import create_api
 from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
     DownloadParameters,
@@ -15,18 +17,6 @@ from porringer.schema import (
 )
 
 app = typer.Typer()
-
-
-def _create_api(configuration: ConsoleConfiguration) -> API:
-    """Create and return API instance.
-
-    Args:
-        configuration: CLI configuration.
-
-    Returns:
-        Initialized API instance.
-    """
-    return API(configuration.local_configuration)
 
 
 def _create_progress_callback(configuration: ConsoleConfiguration) -> ProgressCallback | None:
@@ -42,10 +32,10 @@ def _create_progress_callback(configuration: ConsoleConfiguration) -> ProgressCa
     def progress_callback(downloaded: int, total: int | None) -> None:
         if total:
             percent = (downloaded / total) * 100
-            configuration.console.print(f'\r[dim]Downloading: {percent:.1f}%[/dim]', end='')
+            configuration.console.print(f'\r[muted]Downloading: {percent:.1f}%[/muted]', end='')
         else:
             mb = downloaded / (1024 * 1024)
-            configuration.console.print(f'\r[dim]Downloaded: {mb:.2f} MB[/dim]', end='')
+            configuration.console.print(f'\r[muted]Downloaded: {mb:.2f} MB[/muted]', end='')
 
     return progress_callback
 
@@ -73,7 +63,7 @@ def download_default(
     """
     configuration = context.ensure_object(ConsoleConfiguration)
 
-    api = _create_api(configuration)
+    api = create_api(configuration)
 
     params = DownloadParameters(
         url=url,
@@ -84,19 +74,19 @@ def download_default(
     )
 
     result = asyncio.run(api.download(params, _create_progress_callback(configuration)))
-    configuration.console.print()  # Newline after progress
+    configuration.output.blank()  # Newline after progress
 
     if result.success:
         verified_msg = ' (hash verified)' if result.verified else ''
         size_mb = result.size / (1024 * 1024)
-        configuration.console.print(
+        configuration.output.print(
             Panel(
-                f'[green]Download complete![/green]{verified_msg}\n\n'
-                f'[bold]File:[/bold] {result.path}\n'
-                f'[bold]Size:[/bold] {size_mb:.2f} MB',
+                f'[success]Download complete![/success]{verified_msg}\n\n'
+                f'[heading]File:[/heading] {result.path}\n'
+                f'[heading]Size:[/heading] {size_mb:.2f} MB',
                 border_style='green',
             )
         )
     else:
-        configuration.console.print(f'[red]Error:[/red] {result.message}')
+        configuration.output.error(result.message or 'Download failed')
         raise typer.Exit(1)

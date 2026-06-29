@@ -1,3 +1,5 @@
+"""Core helpers and types for tool based."""
+
 """Shared base for plugins backed by a command-line tool.
 
 Provides the ``tool_name()`` / ``is_available()`` / ``tool_version()``
@@ -8,12 +10,9 @@ the ``shutil.which`` logic.
 The three async helper instance methods — ``_run_json_command``,
 ``_run_text_command``, and ``_run_bool_command`` — use native
 ``asyncio.create_subprocess_exec`` so that plugin I/O never blocks
-the event loop.  Each method applies ``self._transport`` to
-transform command arguments and working directories before
-launching the subprocess.
+the event loop.
 """
 
-import asyncio
 import json
 import logging
 import re
@@ -21,14 +20,23 @@ import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.path import ensure_system_path
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
-from porringer.core.schema import Plugin, PluginParameters
-from porringer.core.transport import LocalTransport, Transport
+from porringer.core.schema import Plugin
+from porringer.utility.trace import CommandTrace
+from porringer.utility.utility import CommandResult, run_command
+
+
+def _log_nonzero_exit(logger: logging.Logger, program: str, result: CommandResult, *, check: bool) -> None:
+    """Log a non-zero subprocess exit at error or warning level."""
+    if check:
+        logger.error('%s exited with code %d: %s', program, result.returncode, result.stderr)
+    else:
+        logger.warning('%s exited with code %d', program, result.returncode)
 
 
 class ToolBasedPlugin(Plugin):
@@ -52,11 +60,6 @@ class ToolBasedPlugin(Plugin):
             Tool names (empty by default).
         """
         return ()
-
-    def with_transport(self, transport: Transport) -> Self:
-        """Create a new instance of this plugin using a different transport."""
-        parameters = PluginParameters(distribution=self._distribution, transport=transport)
-        return type(self)(parameters)
 
     @classmethod
     def tool_name(cls) -> str | None:
@@ -91,20 +94,18 @@ class ToolBasedPlugin(Plugin):
         return shutil.which(name) is not None
 
     def query_availability(self, runtime_context: RuntimeContext | None = None) -> bool:
-        """Unified availability check respecting platform, PATH, runtime context, and transport.
+        """Unified availability check respecting platform, PATH, and runtime context.
 
         Encapsulates the full decision tree so that every call-site
         (``list_packages``, ``build_plugin_info``, ``BackendResolver``,
         ``_plugins_discovered_event``) shares one implementation:
 
         1. ``is_supported()`` — reject unsupported platforms immediately.
-        2. When a non-local transport is active, delegate to
-           ``self._transport.check_tool()``.
-        3. When *runtime_context* is provided **and** the plugin is a
+        2. When *runtime_context* is provided **and** the plugin is a
            ``RuntimeConsumer``, delegate to
            ``is_available_for(runtime_context)`` which can probe the
            *target* interpreter (e.g. ``python -m pip`` via pim).
-        4. Otherwise fall back to the PATH-based ``is_available()``.
+        3. Otherwise fall back to the PATH-based ``is_available()``.
 
         Args:
             runtime_context: Resolved runtime paths for this execution
@@ -116,9 +117,6 @@ class ToolBasedPlugin(Plugin):
         try:
             if not type(self).is_supported():
                 return False
-            if not isinstance(self._transport, LocalTransport):
-                name = type(self).tool_name()
-                return name is None or self._transport.check_tool(name)
             if runtime_context is not None and isinstance(self, RuntimeConsumer):
                 return self.is_available_for(runtime_context)
             return self.is_available()
@@ -137,9 +135,6 @@ class ToolBasedPlugin(Plugin):
         first version-like pattern from the combined stdout/stderr output, and
         parses it as a `Version`.
 
-        The command arguments are transformed by ``self._transport`` so
-        that version checks work through WSL, Docker, or other transports.
-
         Returns `None` when `tool_name()` is `None`, the subprocess
         fails, or the output cannot be parsed as a valid PEP 440 version.
 
@@ -153,8 +148,9 @@ class ToolBasedPlugin(Plugin):
         if name is None:
             return None
 
+        args = [name, '--version']
+        trace = CommandTrace.start(args)
         try:
-            args = self._transport.transform_args([name, '--version'])
             result = subprocess.run(
                 args,
                 capture_output=True,
@@ -162,8 +158,10 @@ class ToolBasedPlugin(Plugin):
                 timeout=10,
                 check=False,
             )
+            trace.finish(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
             output = result.stdout + result.stderr
-        except OSError, subprocess.SubprocessError:
+        except (OSError, subprocess.SubprocessError) as exc:
+            trace.finish(returncode=None, error=f'{type(exc).__name__}: {exc}')
             return None
 
         match = re.search(r'v?\d+\.\d+(?:\.\d+)*', output)
@@ -175,12 +173,48 @@ class ToolBasedPlugin(Plugin):
         except InvalidVersion:
             return None
 
+    @staticmethod
+    async def _run_raw(
+        args: list[str],
+        *,
+        timeout: float,
+        logger: logging.Logger,
+        cwd: Path | None = None,
+        error_label: str | None = None,
+    ) -> CommandResult | None:
+        """Run *args* as a subprocess, returning the result or ``None`` on failure.
+
+        Centralises the launch-failure handling shared by every plugin
+        subprocess helper:
+
+        * ``FileNotFoundError`` — the tool is not on PATH.
+        * ``OSError`` / ``TimeoutError`` — the tool failed or timed out.
+
+        Args:
+            args: Command and arguments.
+            timeout: Subprocess timeout in seconds.
+            logger: Logger for failure diagnostics.
+            cwd: Working directory for the subprocess.
+            error_label: Label used in the failure message (defaults to
+                the executable name, ``args[0]``).
+
+        Returns:
+            The :class:`CommandResult`, or ``None`` when the command
+            could not be executed.
+        """
+        try:
+            return await run_command(args, cwd=cwd, timeout=timeout)
+        except FileNotFoundError:
+            logger.warning('%s not found on PATH', args[0])
+        except (OSError, TimeoutError) as e:
+            logger.error('Failed to run %s: %s', error_label or args[0], e)
+        return None
+
     async def _run_json_command(self, args: list[str], *, check: bool = False) -> Any | None:
         """Run a CLI command and parse its stdout as JSON.
 
         Uses ``asyncio.create_subprocess_exec`` so the event loop is
-        never blocked by subprocess I/O.  Command arguments are
-        transformed by ``self._transport`` before launching.
+        never blocked by subprocess I/O.
 
         Centralises the common pattern of running a subprocess, reading
         its standard output, and parsing it as JSON while handling the
@@ -203,37 +237,23 @@ class ToolBasedPlugin(Plugin):
             JSON.
         """
         logger = logging.getLogger(f'porringer.{type(self).tool_name()}.json_command')
-        transformed = self._transport.transform_args(args)
+        result = await self._run_raw(args, timeout=30, logger=logger)
+        if result is None:
+            return None
+        if result.returncode != 0:
+            _log_nonzero_exit(logger, args[0], result, check=check)
+            return None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *transformed,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
-            if proc.returncode != 0:
-                if check:
-                    stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
-                    logger.error('%s exited with code %d: %s', args[0], proc.returncode, stderr)
-                else:
-                    logger.warning('%s exited with code %d', args[0], proc.returncode)
-                return None
-            return json.loads(stdout) if stdout.strip() else None
-        except FileNotFoundError:
-            logger.warning('%s not found on PATH', args[0])
-        except (OSError, TimeoutError) as e:
-            logger.error('Failed to run %s: %s', args[0], e)
+            return json.loads(result.stdout) if result.stdout.strip() else None
         except json.JSONDecodeError as e:
             logger.warning('Could not parse JSON output from %s: %s', args[0], e)
-        return None
+            return None
 
     async def _run_text_command(self, args: list[str], *, check: bool = False) -> str | None:
         """Run a CLI command and return its stdout as text.
 
         Uses ``asyncio.create_subprocess_exec`` so the event loop is
-        never blocked by subprocess I/O.  Command arguments are
-        transformed by ``self._transport`` before launching.
+        never blocked by subprocess I/O.
 
         Centralises the common pattern of running a subprocess and
         returning its standard output while handling failure modes:
@@ -252,27 +272,13 @@ class ToolBasedPlugin(Plugin):
             The stdout string, or ``None`` on failure.
         """
         logger = logging.getLogger(f'porringer.{type(self).tool_name()}.text_command')
-        transformed = self._transport.transform_args(args)
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *transformed,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout_bytes, _stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
-            if proc.returncode != 0:
-                if check:
-                    logger.error('%s exited with code %d', args[0], proc.returncode)
-                else:
-                    logger.warning('%s exited with code %d', args[0], proc.returncode)
-                return None
-            return stdout
-        except FileNotFoundError:
-            logger.warning('%s not found on PATH', args[0])
-        except (OSError, TimeoutError) as e:
-            logger.error('Failed to run %s: %s', args[0], e)
-        return None
+        result = await self._run_raw(args, timeout=30, logger=logger)
+        if result is None:
+            return None
+        if result.returncode != 0:
+            _log_nonzero_exit(logger, args[0], result, check=check)
+            return None
+        return result.stdout
 
     async def _run_bool_command(
         self,
@@ -284,9 +290,7 @@ class ToolBasedPlugin(Plugin):
         """Run a CLI command and return whether it succeeded.
 
         Uses ``asyncio.create_subprocess_exec`` so the event loop is
-        never blocked by subprocess I/O.  Command arguments and the
-        working directory are transformed by ``self._transport``
-        before launching.
+        never blocked by subprocess I/O.
 
         Logs stdout at info level and stderr at error level on failure.
         Returns ``True`` when the process exits with code 0.
@@ -300,26 +304,11 @@ class ToolBasedPlugin(Plugin):
             ``True`` if the process exited cleanly, ``False`` otherwise.
         """
         logger = logging.getLogger(f'porringer.{type(self).tool_name()}.{label}')
-        transformed = self._transport.transform_args(args)
-        transformed_cwd = self._transport.transform_cwd(cwd)
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *transformed,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=transformed_cwd,
-            )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300)
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
-            logger.info(stdout)
-            if proc.returncode != 0:
-                stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
-                logger.error(stderr)
-                return False
-        except FileNotFoundError:
-            logger.warning('%s not found on PATH', args[0])
+        result = await self._run_raw(args, timeout=300, cwd=cwd, logger=logger, error_label=label)
+        if result is None:
             return False
-        except (OSError, TimeoutError) as e:
-            logger.error('Failed to run %s: %s', label, e)
+        logger.info(result.stdout)
+        if result.returncode != 0:
+            logger.error(result.stderr)
             return False
         return True

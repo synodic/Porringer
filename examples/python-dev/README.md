@@ -1,67 +1,58 @@
 # Python Development Environment Example
 
-This example demonstrates using Porringer to set up a Python development environment with common linting, formatting, and testing tools.
+This example shows a small Python development environment managed by Porringer. It installs common linting, formatting, type-checking, testing, and project-management tools.
 
-## Manifest Overview
+## What the Manifest Declares
 
-The `porringer.json` manifest declares the desired environment using kind sections (`packages`, `tools`, `projects`, `runtimes`), each keyed by ecosystem. Porringer resolves each ecosystem to the best available installer at runtime.
+The `porringer.json` manifest groups entries by kind and ecosystem. Porringer resolves each ecosystem to an available installer at runtime, then detects project sync from repository files when a project plugin has ownership evidence.
 
-- **`packages.python`** (resolved to `uv` or `pip`): Development tools installed in the current environment
-  - `ruff` - Fast Python linter and formatter
-  - `pyrefly` - Python type checker
-  - `pytest` - Testing framework
-  - `pytest-cov` - Coverage plugin for pytest
-  - `pytest-mock` - Mock object library for pytest
-  - `pytest-asyncio` - Async test support for pytest
-- **`tools.python`** (resolved to `pipx`): CLI tools installed in isolated environments
-  - `pdm` - Python project manager
+| Manifest section | Resolves to | Installs |
+| --- | --- | --- |
+| `packages.python` | `uv` or `pip` | `ruff`, `pyrefly`, `pytest`, `pytest-asyncio` |
+| `tools.python` | `pipx` | `pdm` |
 
-These packages mirror the project's own `lint` and `test` dependency groups in
-`pyproject.toml`, so running `--dry-run` inside the dev environment shows every
-package as already satisfied.
+These packages mirror the repository's own `lint` and `test` dependency groups in `pyproject.toml`. If you run preview from a matching development environment, the package actions should report as satisfied.
 
 ## Usage
 
-### Preview what will happen
+Preview the plan without changing the environment:
 
 ```shell
-porringer sync --path examples/python-dev --dry-run
+porringer preview examples/python-dev
 ```
 
-### Execute with confirmation
+Run the setup with confirmation:
 
 ```shell
-porringer sync --path examples/python-dev
+porringer install examples/python-dev
 ```
 
-### Execute without confirmation (non-interactive)
+Skip confirmation in a scripted flow:
 
 ```shell
-porringer sync --path examples/python-dev --yes
+porringer install examples/python-dev --yes
 ```
 
-### Upgrade all packages to latest
+Upgrade every package to the latest allowed version:
 
 ```shell
-porringer sync --path examples/python-dev --strategy latest
+porringer install examples/python-dev --strategy latest
 ```
 
-## Alternative: pyproject.toml
+## Embedded pyproject Manifest
 
-You can also embed this manifest in a `pyproject.toml` file:
+The same manifest can live in `pyproject.toml`:
 
 ```toml
 [tool.porringer]
 version = "1"
 
 [tool.porringer.packages]
-python = ["ruff", "pyrefly", "pytest", "pytest-cov", "pytest-mock", "pytest-asyncio"]
+python = ["ruff", "pyrefly", "pytest", "pytest-asyncio"]
 
 [tool.porringer.tools]
 python = ["pdm"]
 
 [tool.porringer.preferences]
-python = "uv"  # optional: prefer uv over pip
-```
-
+python = "uv"
 ```

@@ -1,4 +1,6 @@
-"""Tests for progress event stream and sub-action progress."""
+"""Helpers for test sub action progress."""
+
+"""Tests for progress events and action progress."""
 
 import json
 import tempfile
@@ -6,26 +8,33 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from porringer.backend.command.sync import SyncCommands
 from porringer.core.plugin_schema.environment import PackageParameters
 from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.plugin.pip.plugin import PIPEnvironment
 from porringer.schema import (
+    SCHEMA_VERSION,
     ActionCompletedEvent,
+    ActionProgress,
+    ActionProgressEvent,
+    ActionRef,
     ActionStartedEvent,
+    ManifestFailedEvent,
     ManifestLoadedEvent,
     ProgressEvent,
     SetupAction,
     SetupActionResult,
     SetupParameters,
-    SubActionProgress,
-    SubActionProgressEvent,
+    SetupResults,
+    progress_event_snapshot,
 )
 
 HALF_PROGRESS = 0.5
+FAILED_MANIFEST_INDEX = 3
 MIN_DOWNLOAD_UPDATES = 2
-MIN_STREAM_EVENTS = 2
+MIN_EVENT_COUNT = 2
 
 
 def _make_action(package: str = 'requests') -> SetupAction:
@@ -39,14 +48,14 @@ def _make_action(package: str = 'requests') -> SetupAction:
     )
 
 
-class TestSubActionProgress:
-    """Tests for SubActionProgress dataclass."""
+class TestActionProgress:
+    """Tests for ActionProgress dataclass."""
 
     @staticmethod
     def test_basic_construction() -> None:
-        """SubActionProgress stores provided fields."""
+        """ActionProgress stores provided fields."""
         action = _make_action()
-        progress = SubActionProgress(
+        progress = ActionProgress(
             action=action,
             phase='downloading',
             progress=HALF_PROGRESS,
@@ -62,28 +71,99 @@ class TestProgressEvent:
     """Tests for ProgressEvent dataclass."""
 
     @staticmethod
+    def test_action_ref_rejects_mismatched_id() -> None:
+        """ActionRef enforces consistency between structured and compact identity."""
+        with pytest.raises(ValidationError):
+            ActionRef(manifest_index=2, action_index=4, action_id='wrong')
+
+    @staticmethod
     def test_action_started() -> None:
         """ActionStartedEvent populates expected fields."""
         action = _make_action()
-        event = ActionStartedEvent(action=action, action_index=0)
+        ref = ActionRef.from_indices(1, 0)
+        event = ActionStartedEvent(action=action, action_ref=ref)
         assert event.action is action
         assert event.action_index == 0
+        assert event.action_ref is ref
 
     @staticmethod
     def test_action_completed() -> None:
         """ActionCompletedEvent includes result."""
         action = _make_action()
         result = SetupActionResult(action=action, success=True, message='ok')
-        event = ActionCompletedEvent(action=action, result=result, action_index=0)
+        ref = ActionRef.from_indices(1, 0)
+        event = ActionCompletedEvent(action=action, result=result, action_ref=ref)
         assert event.result is result
+        assert event.action_index == 0
 
     @staticmethod
-    def test_sub_action_progress() -> None:
-        """SubActionProgressEvent includes sub-action."""
+    def test_action_progress() -> None:
+        """ActionProgressEvent includes progress detail."""
         action = _make_action()
-        sub = SubActionProgress(action=action, phase='downloading', progress=HALF_PROGRESS, message='pkg')
-        event = SubActionProgressEvent(action=action, sub_action=sub)
-        assert event.sub_action is sub
+        progress = ActionProgress(action=action, phase='downloading', progress=HALF_PROGRESS, message='pkg')
+        ref = ActionRef.from_indices(1, 0)
+        event = ActionProgressEvent(action=action, progress=progress, action_ref=ref)
+        assert event.progress is progress
+        assert event.action_ref is ref
+
+    @staticmethod
+    def test_action_started_snapshot_json() -> None:
+        """Action lifecycle events serialize to stable JSON with action refs."""
+        action = _make_action()
+        ref = ActionRef.from_indices(2, 4)
+        event = ActionStartedEvent(action=action, action_ref=ref)
+
+        snapshot = progress_event_snapshot(event)
+        payload = json.loads(snapshot.model_dump_json())
+
+        assert payload['schema_version'] == SCHEMA_VERSION
+        assert payload['event_type'] == 'action_started'
+        assert payload['action_id'] == '2:4'
+        assert payload['action_ref'] == {'manifest_index': 2, 'action_index': 4, 'action_id': '2:4'}
+        assert payload['action']['package_name'] == 'requests'
+
+    @staticmethod
+    def test_action_completed_snapshot_json() -> None:
+        """Completed events include stable result data."""
+        action = _make_action()
+        ref = ActionRef.from_indices(2, 4)
+        result = SetupActionResult(action=action, success=True, message='ok')
+        event = ActionCompletedEvent(action=action, result=result, action_ref=ref)
+
+        snapshot = progress_event_snapshot(event)
+
+        assert snapshot.event_type == 'action_completed'
+        assert snapshot.action_id == '2:4'
+        assert snapshot.result is not None
+        assert snapshot.result.success is True
+        assert snapshot.result.message == 'ok'
+
+    @staticmethod
+    def test_failed_manifest_snapshot_json() -> None:
+        """Failed manifest snapshots include the resolved input path index."""
+        event = ManifestFailedEvent(failed_path=(Path('missing'), 'boom'), manifest_index=FAILED_MANIFEST_INDEX)
+
+        snapshot = progress_event_snapshot(event)
+
+        assert snapshot.event_type == 'manifest_failed'
+        assert snapshot.failed_path is not None
+        assert snapshot.failed_path.manifest_index == FAILED_MANIFEST_INDEX
+        assert snapshot.failed_path.error == 'boom'
+
+    @staticmethod
+    def test_action_progress_snapshot_json() -> None:
+        """Action progress snapshots keep parent action identity."""
+        action = _make_action()
+        ref = ActionRef.from_indices(2, 4)
+        progress = ActionProgress(action=action, phase='downloading', progress=HALF_PROGRESS, message='pkg')
+        event = ActionProgressEvent(action=action, progress=progress, action_ref=ref)
+
+        snapshot = progress_event_snapshot(event)
+
+        assert snapshot.event_type == 'action_progress'
+        assert snapshot.action_id == '2:4'
+        assert snapshot.action_progress is not None
+        assert snapshot.action_progress.progress == HALF_PROGRESS
 
 
 class TestPackageParametersProgressCallback:
@@ -112,7 +192,7 @@ class TestPipProgressLineParsing:
     def test_downloading_line() -> None:
         """Pip parser captures download start lines."""
         action = _make_action()
-        collected: list[SubActionProgress] = []
+        collected: list[ActionProgress] = []
 
         PIPEnvironment._parse_progress_line(
             'Downloading https://files.pythonhosted.org/ruff-0.8.0-py3-none-any.whl (2.1 MB)',
@@ -129,7 +209,7 @@ class TestPipProgressLineParsing:
     def test_progress_percentage_line() -> None:
         """Pip parser captures download percentages."""
         action = _make_action()
-        collected: list[SubActionProgress] = []
+        collected: list[ActionProgress] = []
 
         PIPEnvironment._parse_progress_line(
             '   1.5 MB 50%',
@@ -145,7 +225,7 @@ class TestPipProgressLineParsing:
     def test_installing_line() -> None:
         """Pip parser captures installing lines."""
         action = _make_action()
-        collected: list[SubActionProgress] = []
+        collected: list[ActionProgress] = []
 
         PIPEnvironment._parse_progress_line(
             'Installing collected packages: requests, urllib3',
@@ -161,7 +241,7 @@ class TestPipProgressLineParsing:
     def test_already_satisfied_line() -> None:
         """Pip parser captures already satisfied lines."""
         action = _make_action()
-        collected: list[SubActionProgress] = []
+        collected: list[ActionProgress] = []
 
         PIPEnvironment._parse_progress_line(
             'Requirement already satisfied: requests in /usr/lib/python3.12/site-packages',
@@ -177,7 +257,7 @@ class TestPipProgressLineParsing:
     def test_irrelevant_line_is_ignored() -> None:
         """Pip parser ignores unrelated lines."""
         action = _make_action()
-        collected: list[SubActionProgress] = []
+        collected: list[ActionProgress] = []
 
         PIPEnvironment._parse_progress_line(
             'Using cached requests-2.31.0.tar.gz',
@@ -191,7 +271,7 @@ class TestPipProgressLineParsing:
     def test_full_progress_sequence() -> None:
         """Simulate a realistic sequence of pip output lines."""
         action = _make_action('ruff')
-        collected: list[SubActionProgress] = []
+        collected: list[ActionProgress] = []
 
         lines = [
             'Collecting ruff',
@@ -219,23 +299,55 @@ class TestPipProgressLineParsing:
 
 
 @pytest.mark.mock_packages
-class TestExecuteStream:
-    """Tests for execute_stream async generator."""
+class TestExecutionEvents:
+    """Tests for evented sync execution."""
 
     @staticmethod
-    async def test_stream_yields_events() -> None:
-        """execute_stream yields ProgressEvent items via the queue-based bridge."""
+    async def test_run_partitions_results_by_action_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+        """run() groups completed results by stable refs, not result action object identity."""
+        commands = SyncCommands()
+        first_action = _make_action('first')
+        second_action = _make_action('second')
+        manifest_zero = SetupResults(actions=[first_action], manifest_path=Path('zero'))
+        manifest_one = SetupResults(actions=[second_action], manifest_path=Path('one'))
+        synthetic_result_action = _make_action('synthetic')
+
+        async def _fake_execution_events(_parameters: SetupParameters, *, plugins=None):
+            del plugins
+            yield ManifestLoadedEvent(manifest=manifest_zero, manifest_index=0)
+            yield ManifestLoadedEvent(manifest=manifest_one, manifest_index=1)
+            yield ActionCompletedEvent(
+                action=first_action,
+                result=SetupActionResult(action=synthetic_result_action, success=True, message='zero'),
+                action_ref=ActionRef.from_indices(0, 0),
+            )
+            yield ActionCompletedEvent(
+                action=second_action,
+                result=SetupActionResult(action=second_action, success=True, message='one'),
+                action_ref=ActionRef.from_indices(1, 0),
+            )
+
+        monkeypatch.setattr(commands, '_execution_events', _fake_execution_events)
+
+        report = await commands.run(SetupParameters())
+        results = report.results
+
+        assert [r.message for r in results.manifest_results[0].results] == ['zero']
+        assert [r.message for r in results.manifest_results[1].results] == ['one']
+
+    @staticmethod
+    async def test_run_emits_events() -> None:
+        """Run forwards ProgressEvent items through the event callback."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
+            manifest_data = {'version': '1'}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            params = SetupParameters(paths=Path(tmpdir))
             commands = SyncCommands()
 
             collected: list[ProgressEvent] = []
-            async for event in commands.execute_stream(params):
-                collected.append(event)
+            await commands.run(params, on_event=collected.append)
 
             events = collected
 
@@ -248,21 +360,21 @@ class TestExecuteStream:
             assert len(started) == len(completed)
 
     @staticmethod
-    async def test_stream_cancellation() -> None:
-        """Breaking from the stream cancels the background task."""
+    async def test_event_generator_cancellation() -> None:
+        """Breaking from the private event generator cancels the background task."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
-            manifest_data = {'version': '1', 'packages': {'python': ['requests', 'flask', 'pytest', 'ruff', 'black']}}
+            manifest_data = {'version': '1'}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            params = SetupParameters(paths=Path(tmpdir), dry_run=True)
+            params = SetupParameters(paths=Path(tmpdir))
             commands = SyncCommands()
 
             collected: list[ProgressEvent] = []
-            async for event in commands.execute_stream(params):
+            async for event in commands._execution_events(params):
                 collected.append(event)
-                if len(collected) >= MIN_STREAM_EVENTS:
+                if len(collected) >= MIN_EVENT_COUNT:
                     break  # early exit
 
             events = collected
-            assert len(events) >= MIN_STREAM_EVENTS
+            assert len(events) >= MIN_EVENT_COUNT

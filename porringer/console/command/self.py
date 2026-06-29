@@ -1,3 +1,5 @@
+"""CLI command implementation for self."""
+
 """Porringer CLI self command module."""
 
 import asyncio
@@ -27,9 +29,9 @@ def self_check(context: typer.Context) -> None:
     latest = str(info.latest_version) if info.latest_version else 'unknown'
 
     if info.latest_version is None:
-        configuration.console.print(
+        configuration.output.print(
             Panel(
-                f'[yellow]Could not fetch latest version from PyPI[/yellow]\nCurrent version: [cyan]{current}[/cyan]',
+                f'[warning]Could not fetch latest version from PyPI[/warning]\nCurrent version: [info]{current}[/info]',
                 title='Version Check',
                 border_style='yellow',
             )
@@ -37,11 +39,11 @@ def self_check(context: typer.Context) -> None:
         raise typer.Exit(code=1)
 
     if info.update_available:
-        configuration.console.print(
+        configuration.output.print(
             Panel(
-                f'[green]Update available![/green]\n\n'
-                f'Current: [cyan]{current}[/cyan]\n'
-                f'Latest:  [green]{latest}[/green]\n\n',
+                f'[success]Update available![/success]\n\n'
+                f'Current: [info]{current}[/info]\n'
+                f'Latest:  [success]{latest}[/success]\n\n',
                 title='Porringer Update',
                 border_style='green',
             )

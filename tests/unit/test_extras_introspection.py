@@ -1,3 +1,5 @@
+"""Helpers for test extras introspection."""
+
 """Tests for extras introspection utilities in resolution.py.
 
 Verifies that ``extras_satisfied()`` correctly evaluates PEP 508
@@ -12,6 +14,7 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from packaging.markers import default_environment
 from packaging.utils import canonicalize_name
 
@@ -256,7 +259,7 @@ class TestFindToolPython:
     def test_shebang_without_exe_suffix_windows(tmp_path: Path) -> None:
         """Windows binary with shebang missing .exe suffix → appends it."""
         if sys.platform != 'win32':
-            return  # Windows-only test
+            pytest.skip('Windows-only test')
 
         python_path = tmp_path / 'Scripts' / 'python.exe'
         python_path.parent.mkdir(parents=True)

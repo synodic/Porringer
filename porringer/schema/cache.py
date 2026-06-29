@@ -1,12 +1,25 @@
+"""Data models and schemas for cache."""
+
 """Directory cache schemas."""
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from platformdirs import user_cache_dir
+from pydantic import Field
+
+from porringer.core.schema import PorringerModel
 
 
-class ManifestDirectory(BaseModel):
+class LocalConfiguration(PorringerModel):
+    """Configuration provided by the application running Porringer."""
+
+    cache_directory: Path = Field(
+        default=Path(user_cache_dir('porringer', 'synodic')), description='The application cache path '
+    )
+
+
+class ManifestDirectory(PorringerModel):
     """A directory or file path referencing a manifest.
 
     The path may point to a directory containing any recognised
@@ -20,7 +33,7 @@ class ManifestDirectory(BaseModel):
     name: str | None = Field(default=None, description='Optional display name/alias')
 
 
-class DirectoryCache(BaseModel):
+class DirectoryCache(PorringerModel):
     """Persisted cache of manifest directories."""
 
     version: str = Field(default='1', description='Cache schema version')

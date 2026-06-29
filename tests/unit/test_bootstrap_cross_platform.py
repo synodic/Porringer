@@ -1,3 +1,5 @@
+"""Helpers for test bootstrap cross platform."""
+
 """Cross-platform tests for the python-bootstrap example manifest.
 
 Validates that deferred resolution works correctly when platform-
@@ -22,8 +24,8 @@ from unittest.mock import patch
 
 import pytest
 
+from porringer.backend.command.core.action_builder import parse_manifest
 from porringer.backend.command.core.execution import inject_runtime_path
-from porringer.backend.command.sync import SyncCommands
 from porringer.core.schema import PluginKind
 from porringer.schema import SetupResults
 
@@ -45,7 +47,7 @@ class TestBootstrapDeferredRuntime:
             return original_which(cmd)
 
         with patch('shutil.which', side_effect=_which_no_runtime):
-            return SyncCommands.parse_manifest(_BOOTSTRAP_DIR)
+            return parse_manifest(_BOOTSTRAP_DIR)
 
     @staticmethod
     def test_runtime_action_deferred(preview_no_runtime: SetupResults) -> None:
@@ -84,7 +86,7 @@ class TestBootstrapDeferredPackage:
             return original_which(cmd)
 
         with patch('shutil.which', side_effect=_which_no_pip):
-            return SyncCommands.parse_manifest(_BOOTSTRAP_DIR)
+            return parse_manifest(_BOOTSTRAP_DIR)
 
     @staticmethod
     def test_package_actions_deferred(preview_no_pip: SetupResults) -> None:
@@ -121,7 +123,7 @@ class TestBootstrapFullyDeferred:
             return original_which(cmd)
 
         with patch('shutil.which', side_effect=_which_nothing):
-            return SyncCommands.parse_manifest(_BOOTSTRAP_DIR)
+            return parse_manifest(_BOOTSTRAP_DIR)
 
     @staticmethod
     def test_runtime_and_package_both_deferred(preview_nothing: SetupResults) -> None:

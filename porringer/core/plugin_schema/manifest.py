@@ -1,7 +1,9 @@
+"""Core helpers and types for manifest."""
+
 """Protocol for plugins that contribute manifest source files.
 
 Plugins that host porringer configuration inside their own ecosystem
-files (e.g. ``pyproject.toml``, ``package.json``, ``deno.json``)
+files (e.g. ``pyproject.toml``, ``package.json``)
 implement ``ManifestContributor`` so the manifest discovery engine
 can probe those files automatically.
 

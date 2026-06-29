@@ -1,3 +1,5 @@
+"""Helpers for test environment."""
+
 """Tests for the pnpm project environment plugin."""
 
 import pytest

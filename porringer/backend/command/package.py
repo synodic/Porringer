@@ -1,3 +1,5 @@
+"""CLI command implementation for package."""
+
 """The package command module.
 
 Imperative package operations — listing, installing, upgrading,
@@ -14,7 +16,7 @@ import builtins
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from packaging.utils import canonicalize_name
 from packaging.version import Version
@@ -30,9 +32,8 @@ from porringer.backend.command.core.resolution import (
     resolve_uninstall_operation,
     resolved_to_result,
 )
-from porringer.backend.command.core.wsl_overlay import overlay_wsl_plugin, wsl_transport_for
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
-from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
+from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.schema import Package, PackageRef
 from porringer.schema import (
     CheckParameters,
@@ -46,9 +47,14 @@ from porringer.schema import (
     SyncStrategy,
 )
 from porringer.schema.plugin import ScopedPackage
+from porringer.utility.concurrency import gather_bounded
 from porringer.utility.exception import PluginError, UpdateError
 
 logger = logging.getLogger(__name__)
+
+# Default bounded-concurrency limit for fan-out paths whose parameter
+# objects do not carry their own ``max_concurrency`` budget.
+_DEFAULT_FANOUT = 8
 
 # ---------------------------------------------------------------------------
 # Private helpers
@@ -75,7 +81,6 @@ async def _imperative_action(
     dry_run: bool,
     resolve_fn: _ResolveFn,
     execute_fn: _ExecuteFn,
-    distro: str | None = None,
 ) -> SetupActionResult:
     """Shared skeleton for imperative package operations.
 
@@ -116,18 +121,9 @@ async def _imperative_action(
         installer=plugin_name,
         package=package,
         runtime_tag=runtime_tag,
-        distro=distro,
     )
 
     ctx = ResolutionContext(runtime_context=runtime_context)
-
-    if distro is not None:
-        wsl_ctx = await _resolve_wsl_runtime_context(environments, distro)
-        if wsl_ctx is not None:
-            ctx = ResolutionContext(
-                runtime_context=runtime_context,
-                wsl_runtime_contexts={distro: wsl_ctx},
-            )
 
     if dry_run:
         resolved = await resolve_fn(action, environments, ctx)
@@ -158,42 +154,6 @@ async def _discover_with_runtime(runtime_context: RuntimeContext | None) -> Disc
 _discover_environments = discover_environments
 
 
-async def _resolve_wsl_runtime_context(
-    environments: dict[str, Environment],
-    distro: str,
-) -> RuntimeContext | None:
-    """Resolve the interpreter path inside a WSL distro.
-
-    Scans *environments* for :class:`RuntimeProvider` plugins, wraps
-    each with a :class:`WslTransport`, and attempts to resolve the
-    default executable inside the target distro.
-
-    Returns:
-        A :class:`RuntimeContext` mapping the provider's kind to the
-        resolved executable, or ``None`` when no provider succeeds.
-    """
-    transport = wsl_transport_for(distro)
-    if transport is None:
-        return None
-
-    for env in environments.values():
-        if not isinstance(env, RuntimeProvider):
-            continue
-        wsl_env = cast(RuntimeProvider, env.with_transport(transport))
-        kind = cast(type[RuntimeProvider], type(env)).provided_runtime_kind()
-        try:
-            tag = await wsl_env.default_tag()
-        except Exception:
-            continue
-        if tag is None:
-            continue
-        executable = await wsl_env.resolve_executable(tag)
-        if executable is not None:
-            return RuntimeContext(executables={kind: executable})
-
-    return None
-
-
 async def _build_update_infos(
     env: Any,
     check_params: CheckUpdatesParameters,
@@ -221,6 +181,48 @@ async def _build_update_infos(
     return infos
 
 
+async def _check_env_updates(
+    env: Environment,
+    name: str,
+    *,
+    include_prereleases: bool,
+    runtime_context: RuntimeContext,
+    log_context: str = '',
+) -> CheckResult:
+    """Run an update check for a single environment, returning a ``CheckResult``.
+
+    Builds :class:`CheckUpdatesParameters` for *env*, delegates to
+    :func:`_build_update_infos`, and normalises any failure into a
+    ``CheckResult`` carrying the error string.  Shared by
+    ``check_updates`` and ``check_updates_by_runtime``.
+
+    Args:
+        env: The environment plugin to query.
+        name: The plugin name (used in the result and log messages).
+        include_prereleases: Whether to include pre-release versions.
+        runtime_context: Resolved runtime paths for this check.
+        log_context: Optional suffix appended to log messages (e.g.
+            ``' on runtime 3.12'``) for extra diagnostic context.
+
+    Returns:
+        A ``CheckResult`` with either the discovered packages or an error.
+    """
+    try:
+        check_params = CheckUpdatesParameters(
+            packages=[],
+            include_prereleases=include_prereleases,
+            runtime_context=runtime_context,
+        )
+        package_infos = await _build_update_infos(env, check_params, runtime_context)
+        return CheckResult(plugin=name, packages=package_infos)
+    except (PluginError, UpdateError) as e:
+        logger.error('Plugin error checking updates for %s%s: %s', name, log_context, e)
+        return CheckResult(plugin=name, error=str(e))
+    except Exception as e:
+        logger.warning('Failed to check updates for %s%s: %s', name, log_context, e)
+        return CheckResult(plugin=name, error=str(e))
+
+
 # ---------------------------------------------------------------------------
 # Public namespace
 # ---------------------------------------------------------------------------
@@ -246,7 +248,6 @@ class PackageCommands:
         *,
         plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
-        distro: str | None = None,
     ) -> builtins.list[Package]:
         """List packages installed in a plugin's environment.
 
@@ -263,9 +264,6 @@ class PackageCommands:
                 queries the global / default environment.
             plugins: Pre-discovered plugins.
             runtime_context: Pre-resolved runtime context.
-            distro: Target WSL2 distribution name.  When set,
-                the plugin is wrapped with a :class:`WslTransport`
-                so that package queries execute inside the distro.
 
         Returns:
             The packages managed by the named plugin.
@@ -273,7 +271,7 @@ class PackageCommands:
         Raises:
             PluginError: If the plugin is not found.
         """
-        logger.debug('Listing packages for plugin: %s (distro=%s)', plugin_name, distro)
+        logger.debug('Listing packages for plugin: %s', plugin_name)
 
         if plugins is not None:
             environments = plugins.environments
@@ -289,14 +287,6 @@ class PackageCommands:
         if env is None:
             available = sorted(environments.keys())
             raise PluginError(f"Plugin '{plugin_name}' not found. Available: {', '.join(available)}")
-
-        if distro is not None:
-            environments = overlay_wsl_plugin(environments, key, distro)
-            env = environments[key]
-            if isinstance(env, RuntimeConsumer):
-                wsl_ctx = await _resolve_wsl_runtime_context(environments, distro)
-                if wsl_ctx is not None:
-                    runtime_context = wsl_ctx
 
         if not env.query_availability(runtime_context):
             logger.debug("Plugin '%s' is not available; returning empty package list", plugin_name)
@@ -370,7 +360,7 @@ class PackageCommands:
                 packages=pkgs,
             )
 
-        gathered = await asyncio.gather(*[_query(rt) for rt in matching])
+        gathered = await gather_bounded((lambda rt=rt: _query(rt) for rt in matching), limit=_DEFAULT_FANOUT)
         results = [r for r in gathered if r is not None]
 
         logger.debug(
@@ -388,7 +378,6 @@ class PackageCommands:
         skip_global: bool = False,
         plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
-        distro: str | None = None,
     ) -> builtins.list[ScopedPackage]:
         """List packages across multiple scopes (global + per-directory).
 
@@ -402,7 +391,6 @@ class PackageCommands:
             skip_global: When ``True``, skip the global (``project_path=None``) scope.
             plugins: Pre-discovered plugins.
             runtime_context: Pre-resolved runtime context.
-            distro: Target WSL2 distribution name.
 
         Returns:
             A flat list of scoped packages across all queried scopes.
@@ -413,6 +401,16 @@ class PackageCommands:
             len(directories),
             skip_global,
         )
+
+        # Resolve the runtime context once up front. Otherwise each fanned-out
+        # scope query would independently call ``Builder.resolve_runtime_context``
+        # (an expensive subprocess probe), turning one resolution into N+1.
+        if runtime_context is None:
+            if plugins is not None:
+                runtime_context = plugins.resolved_runtime(None)
+            if runtime_context is None:
+                environments = plugins.environments if plugins is not None else _discover_environments()
+                runtime_context = await Builder.resolve_runtime_context(environments)
 
         scoped: builtins.list[ScopedPackage] = []
 
@@ -425,7 +423,6 @@ class PackageCommands:
                 project_path=project_path,
                 plugins=plugins,
                 runtime_context=runtime_context,
-                distro=distro,
             )
             return [
                 ScopedPackage(
@@ -458,7 +455,6 @@ class PackageCommands:
         project_path: Path | None = None,
         plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
-        distro: str | None = None,
     ) -> tuple[builtins.list[Package], set[str]]:
         """List installed packages with manifest cross-referencing.
 
@@ -473,7 +469,6 @@ class PackageCommands:
             project_path: Path to the project directory.
             plugins: Pre-discovered plugins.
             runtime_context: Pre-resolved runtime context.
-            distro: Target WSL2 distribution name.
 
         Returns:
             A ``(packages, declared_names)`` tuple.  *declared_names*
@@ -482,7 +477,7 @@ class PackageCommands:
         """
         logger.debug('list_with_manifest: plugin=%s manifest=%s', plugin_name, manifest_path)
 
-        preview = load_manifest(manifest_path)
+        preview = await asyncio.to_thread(load_manifest, manifest_path)
         declared_names: set[str] = set()
         for action in preview.actions:
             if action.installer == plugin_name and action.package is not None:
@@ -493,7 +488,6 @@ class PackageCommands:
             project_path=project_path,
             plugins=plugins,
             runtime_context=runtime_context,
-            distro=distro,
         )
 
         return installed, declared_names
@@ -509,7 +503,6 @@ class PackageCommands:
         plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
         dry_run: bool = False,
-        distro: str | None = None,
     ) -> SetupActionResult:
         """Install a package if it is not already present.
 
@@ -523,8 +516,6 @@ class PackageCommands:
             plugins: Pre-discovered plugins.
             runtime_context: Optional resolved runtime paths.
             dry_run: When ``True``, resolve only.
-            distro: Target WSL2 distribution name.  When set,
-                the action executes inside the named distro.
 
         Returns:
             A ``SetupActionResult`` describing the outcome.
@@ -541,7 +532,6 @@ class PackageCommands:
             execute_fn=lambda action, envs, queue, ctx: execute_package(
                 action, envs, SyncStrategy.MINIMAL, queue, context=ctx
             ),
-            distro=distro,
         )
 
     @staticmethod
@@ -553,7 +543,6 @@ class PackageCommands:
         plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
         dry_run: bool = False,
-        distro: str | None = None,
     ) -> SetupActionResult:
         """Upgrade (or install) a single package to its latest version.
 
@@ -567,8 +556,6 @@ class PackageCommands:
             plugins: Pre-discovered plugins.
             runtime_context: Optional resolved runtime paths.
             dry_run: When ``True``, resolve only.
-            distro: Target WSL2 distribution name.  When set,
-                the action executes inside the named distro.
 
         Returns:
             A ``SetupActionResult`` describing the outcome.
@@ -585,7 +572,6 @@ class PackageCommands:
             execute_fn=lambda action, envs, queue, ctx: execute_package(
                 action, envs, SyncStrategy.LATEST, queue, context=ctx
             ),
-            distro=distro,
         )
 
     @staticmethod
@@ -597,7 +583,6 @@ class PackageCommands:
         plugins: DiscoveredPlugins | None = None,
         runtime_context: RuntimeContext | None = None,
         dry_run: bool = False,
-        distro: str | None = None,
     ) -> SetupActionResult:
         """Uninstall a managed package.
 
@@ -611,8 +596,6 @@ class PackageCommands:
             plugins: Pre-discovered plugins.
             runtime_context: Optional resolved runtime paths.
             dry_run: When ``True``, resolve only.
-            distro: Target WSL2 distribution name.  When set,
-                the action executes inside the named distro.
 
         Returns:
             A ``SetupActionResult`` describing the outcome.
@@ -627,7 +610,6 @@ class PackageCommands:
             dry_run=dry_run,
             resolve_fn=resolve_uninstall_operation,
             execute_fn=lambda action, envs, queue, ctx: execute_uninstall(action, envs, queue, context=ctx),
-            distro=distro,
         )
 
     # --- Update checking ---
@@ -637,7 +619,6 @@ class PackageCommands:
         params: CheckParameters | None = None,
         *,
         plugins: DiscoveredPlugins | None = None,
-        distro: str | None = None,
     ) -> builtins.list[CheckResult]:
         """Check for package updates across all (or selected) plugins.
 
@@ -645,9 +626,6 @@ class PackageCommands:
             params: Optional check parameters (plugin filter,
                 pre-release flag).
             plugins: Pre-discovered plugins.
-            distro: Target WSL2 distribution name.  When set,
-                each plugin is wrapped with a :class:`WslTransport`
-                so that update checks execute inside the distro.
 
         Returns:
             One :class:`CheckResult` per queried plugin.
@@ -664,40 +642,35 @@ class PackageCommands:
 
         environments: dict[str, Environment] = dict(plugins.environments)
 
-        transport = wsl_transport_for(distro) if distro is not None else None
-        if distro is not None:
-            wsl_ctx = await _resolve_wsl_runtime_context(environments, distro)
-            if wsl_ctx is not None:
-                runtime_context = wsl_ctx
-
-        results: builtins.list[CheckResult] = []
-
+        eligible: builtins.list[tuple[str, Environment]] = []
         for name, env in environments.items():
             if params.plugins and name not in params.plugins:
                 continue
 
-            target_env = env.with_transport(transport) if transport else env
-
-            plugin_type = type(target_env)
-            if not plugin_type.is_supported() or not target_env.query_availability(runtime_context):
+            plugin_type = type(env)
+            if not plugin_type.is_supported() or not env.query_availability(runtime_context):
                 logger.debug('Skipping unavailable plugin %s for update check', name)
                 continue
 
-            try:
-                check_params = CheckUpdatesParameters(
-                    packages=[],
-                    include_prereleases=params.include_prereleases,
-                    runtime_context=runtime_context,
-                )
-                package_infos = await _build_update_infos(target_env, check_params, runtime_context)
-                results.append(CheckResult(plugin=name, packages=package_infos))
+            eligible.append((name, env))
 
-            except (PluginError, UpdateError) as e:
-                logger.error('Plugin error checking updates for %s: %s', name, e)
-                results.append(CheckResult(plugin=name, error=str(e)))
-            except Exception as e:
-                logger.warning('Failed to check updates for %s: %s', name, e)
-                results.append(CheckResult(plugin=name, error=str(e)))
+        # ``_check_env_updates`` isolates per-plugin failures into ``CheckResult``,
+        # so these independent checks are safe to run concurrently. Bounded fan-out
+        # keeps wall-clock near the slowest single check instead of their sum.
+        resolved_context = runtime_context
+
+        def _make_check(name: str, target_env: Environment) -> Callable[[], Awaitable[CheckResult]]:
+            return lambda: _check_env_updates(
+                target_env,
+                name,
+                include_prereleases=params.include_prereleases,
+                runtime_context=resolved_context,
+            )
+
+        results = await gather_bounded(
+            (_make_check(name, target_env) for name, target_env in eligible),
+            limit=params.max_concurrency,
+        )
 
         return results
 
@@ -745,8 +718,8 @@ class PackageCommands:
 
         async def _check_runtime(rt) -> RuntimeCheckResult | None:
             ctx = RuntimeContext(executables={rt.kind: rt.executable})
-            check_results: builtins.list[CheckResult] = []
 
+            eligible: builtins.list[tuple[str, Any]] = []
             for name, env in consumers.items():
                 if env.consumed_runtime_kind() != rt.kind:
                     continue
@@ -758,23 +731,21 @@ class PackageCommands:
                         rt.tag,
                     )
                     continue
+                eligible.append((name, env))
 
-                try:
-                    check_params = CheckUpdatesParameters(
-                        packages=[],
-                        include_prereleases=params.include_prereleases,
-                        runtime_context=ctx,
-                    )
-                    package_infos = await _build_update_infos(env, check_params, ctx)
-                    check_results.append(CheckResult(plugin=name, packages=package_infos))
-                except Exception as e:
-                    logger.warning(
-                        'Failed to check updates for %s on runtime %s: %s',
-                        name,
-                        rt.tag,
-                        e,
-                    )
-                    check_results.append(CheckResult(plugin=name, error=str(e)))
+            def _make_check(name: str, env: Any) -> Callable[[], Awaitable[CheckResult]]:
+                return lambda: _check_env_updates(
+                    env,
+                    name,
+                    include_prereleases=params.include_prereleases,
+                    runtime_context=ctx,
+                    log_context=f' on runtime {rt.tag}',
+                )
+
+            check_results = await gather_bounded(
+                (_make_check(name, env) for name, env in eligible),
+                limit=params.max_concurrency,
+            )
 
             if not check_results:
                 return None
@@ -786,7 +757,10 @@ class PackageCommands:
                 results=check_results,
             )
 
-        gathered = await asyncio.gather(*[_check_runtime(rt) for rt in all_runtimes])
+        gathered = await gather_bounded(
+            (lambda rt=rt: _check_runtime(rt) for rt in all_runtimes),
+            limit=params.max_concurrency,
+        )
         for entry in gathered:
             if entry is not None:
                 results.append(entry)

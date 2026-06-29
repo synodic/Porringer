@@ -1,5 +1,8 @@
+"""CLI command implementation for cache."""
+
 """Porringer CLI cache command module for managing manifest directories."""
 
+import asyncio
 from pathlib import Path
 from typing import Annotated
 
@@ -43,11 +46,12 @@ def cache_add(
     api = API(configuration.local_configuration)
 
     try:
-        directory = api.cache.add_directory(path, name=name)
+        status = asyncio.run(api.project.add(path, name=name))
+        directory = status.directory
         display_name = directory.name or str(directory.path)
-        configuration.console.print(f'[green]Added:[/green] {display_name}')
+        configuration.output.success(display_name, prefix='Added')
     except ValueError as e:
-        configuration.console.print(f'[red]Error:[/red] {e}')
+        configuration.output.error(str(e))
         raise typer.Exit(1) from e
 
 
@@ -71,10 +75,10 @@ def cache_remove(
     configuration = context.ensure_object(ConsoleConfiguration)
     api = API(configuration.local_configuration)
 
-    if api.cache.remove_directory(path):
-        configuration.console.print(f'[green]Removed:[/green] {path}')
+    if asyncio.run(api.project.remove(path)):
+        configuration.output.success(str(path), prefix='Removed')
     else:
-        configuration.console.print(f'[yellow]Not found:[/yellow] {path}')
+        configuration.output.warning(str(path), prefix='Not found')
         raise typer.Exit(1)
 
 
@@ -95,10 +99,10 @@ def cache_list(
     configuration = context.ensure_object(ConsoleConfiguration)
     api = API(configuration.local_configuration)
 
-    directories = api.cache.list_directories(validate=validate, check_manifest=validate)
+    directories = asyncio.run(api.project.list(validate=validate, check_manifest=validate))
 
     if not directories:
-        configuration.console.print('[yellow]No cached directories[/yellow]')
+        configuration.output.warning('No cached directories')
         return
 
     table = Table(title='Cached Directories', show_header=True, header_style='bold magenta')
@@ -109,16 +113,16 @@ def cache_list(
         table.add_column('Manifest', style='white')
 
         for v in directories:
-            name = v.directory.name or ''
+            name = v.name or ''
             status = '[green]OK[/green]' if v.exists else '[red]Missing[/red]'
             manifest = '[green]Found[/green]' if v.has_manifest else '[red]Missing[/red]' if v.exists else '-'
-            table.add_row(str(v.directory.path), name, status, manifest)
+            table.add_row(str(v.path), name, status, manifest)
     else:
         for v in directories:
-            name = v.directory.name or ''
-            table.add_row(str(v.directory.path), name)
+            name = v.name or ''
+            table.add_row(str(v.path), name)
 
-    configuration.console.print(table)
+    configuration.output.print(table)
 
 
 @app.command('clear')
@@ -139,11 +143,11 @@ def cache_clear(
     api = API(configuration.local_configuration)
 
     if not yes and not typer.confirm('Clear all cached directories?', default=False):
-        configuration.console.print('[yellow]Aborted[/yellow]')
+        configuration.output.warning('Aborted')
         raise typer.Exit(0)
 
-    api.cache.clear()
-    configuration.console.print('[green]Cache cleared[/green]')
+    asyncio.run(api.project.clear())
+    configuration.output.success('Cache cleared')
 
 
 @app.callback(invoke_without_command=True, no_args_is_help=True)

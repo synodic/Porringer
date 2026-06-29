@@ -1,3 +1,5 @@
+"""CLI command implementation for check."""
+
 """Porringer CLI check command module for checking package updates via plugins."""
 
 import asyncio
@@ -27,20 +29,20 @@ def _display_results(configuration: ConsoleConfiguration, results: list[CheckRes
     total_updates = sum(r.updates_available for r in results if r.success)
 
     if total_updates == 0:
-        configuration.console.print(Panel('[dim]All packages are up to date.[/dim]', border_style='dim'))
+        configuration.output.print(Panel('[muted]All packages are up to date.[/muted]', border_style='dim'))
         return
 
-    configuration.console.print(f'\n[bold green]{total_updates} update(s) available[/bold green]\n')
+    configuration.output.print(f'\n[heading][success]{total_updates} update(s) available[/success][/heading]\n')
 
     for result in results:
         if not result.success:
-            configuration.console.print(f'[yellow]{result.plugin}:[/yellow] [red]Error: {result.error}[/red]')
+            configuration.output.print(f'[warning]{result.plugin}:[/warning] [error]Error: {result.error}[/error]')
             continue
 
         if not result.packages:
             continue
 
-        table = Table(title=f'[bold]{result.plugin}[/bold]', show_header=True)
+        table = Table(title=f'[heading]{result.plugin}[/heading]', show_header=True)
         table.add_column('Package', style='cyan')
         table.add_column('Current', style='dim')
         table.add_column('Latest', style='green')
@@ -52,8 +54,8 @@ def _display_results(configuration: ConsoleConfiguration, results: list[CheckRes
                 str(pkg.latest_version) if pkg.latest_version else 'N/A',
             )
 
-        configuration.console.print(table)
-        configuration.console.print()
+        configuration.output.print(table)
+        configuration.output.blank()
 
 
 @app.callback(invoke_without_command=True)

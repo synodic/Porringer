@@ -1,3 +1,5 @@
+"""Public package exports for the utility module."""
+
 """Utility package for Porringer.
 
 This package contains utility functions and classes used throughout the Porringer application,

@@ -1,7 +1,9 @@
+"""CLI command implementation for phase."""
+
 """Generalized phase abstraction for the execution pipeline.
 
 Each phase in the setup flow (runtime → packages → tools → project-sync →
-SCM → post-sync commands) is represented by a :class:`Phase` instance that
+SCM) is represented by a :class:`Phase` instance that
 encapsulates the *refresh → resolve-deferred → execute → post-hook* cycle.
 
 The :func:`run_phases` driver replaces the hand-coded per-phase blocks in
@@ -55,8 +57,8 @@ class Phase(Protocol):
     """
 
     @property
-    def kind(self) -> PluginKind | None:
-        """The ``PluginKind`` this phase processes (``None`` for post-sync commands)."""
+    def kind(self) -> PluginKind:
+        """The ``PluginKind`` this phase processes."""
         ...
 
     async def refresh(self, state: ExecutionState) -> None:
@@ -91,10 +93,10 @@ class Phase(Protocol):
 class _PhaseBase:
     """Shared helpers for concrete phase implementations."""
 
-    _kind: PluginKind | None
+    _kind: PluginKind
 
     @property
-    def kind(self) -> PluginKind | None:
+    def kind(self) -> PluginKind:
         return self._kind
 
     # Default no-ops — subclasses override as needed.
@@ -119,7 +121,6 @@ class RuntimePhase(_PhaseBase):
     async def post_execute(self, state: ExecutionState) -> None:
         """Propagate the resolved runtime and trigger a full plugin refresh."""
         await state.propagate_runtime()
-        await state._propagate_wsl_runtimes()
         await asyncio.to_thread(state.refresh_all_plugins)
 
 
@@ -186,19 +187,6 @@ class ScmPhase(_PhaseBase):
         return PhaseResult(results=results, should_continue=ok)
 
 
-class CommandPhase(_PhaseBase):
-    """Phase 5: run arbitrary post-sync shell commands."""
-
-    _kind = None
-
-    async def execute(self, state: ExecutionState) -> PhaseResult:
-        """Run post-sync shell commands."""
-        results = await state.run_command_actions(state.phases[self._kind])
-        failed = any(not r.success and not r.skipped for r in results)
-        ok = not (failed and state.parameters.fail_fast)
-        return PhaseResult(results=results, should_continue=ok)
-
-
 # ---------------------------------------------------------------------------
 # Canonical phase ordering
 # ---------------------------------------------------------------------------
@@ -209,7 +197,6 @@ PHASES: list[Phase] = [
     ToolPhase(),
     ProjectPhase(),
     ScmPhase(),
-    CommandPhase(),
 ]
 """The ordered list of phases that :func:`run_phases` iterates."""
 

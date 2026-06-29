@@ -1,3 +1,5 @@
+"""Plugin integration for plugin."""
+
 """Plugin implementation for pnpm environment."""
 
 from pathlib import Path
@@ -32,9 +34,7 @@ class PNPMEnvironment(Environment):
         self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
     ) -> list[str]:
         """Returns the CLI command to install a package via pnpm."""
-        if package.constraint:
-            return ['pnpm', 'add', '-g', f'{package.name}@{package.constraint}']
-        return ['pnpm', 'add', '-g', package.name]
+        return ['pnpm', 'add', '-g', package.specifier_for('at')]
 
     @override
     def upgrade_command(
@@ -42,7 +42,7 @@ class PNPMEnvironment(Environment):
     ) -> list[str]:
         """Returns the CLI command to upgrade a package via pnpm."""
         if package.constraint:
-            return ['pnpm', 'update', '-g', f'{package.name}@{package.constraint}']
+            return ['pnpm', 'update', '-g', package.specifier_for('at')]
         return ['pnpm', 'update', '-g', '--latest', package.name]
 
     @override
@@ -66,6 +66,7 @@ class PNPMEnvironment(Environment):
         return await self._check_npm_registry(
             params.packages,
             include_prereleases=params.include_prereleases,
+            max_concurrency=params.max_concurrency,
             http_client=params.http_client,
         )
 

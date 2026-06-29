@@ -1,3 +1,5 @@
+"""Helpers for http."""
+
 """Shared aiohttp mock helpers for tests that interact with HTTP APIs.
 
 Provides both a reusable helper function and a pytest fixture for

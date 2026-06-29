@@ -1,3 +1,5 @@
+"""Public package exports for the backend module."""
+
 """Backend package for Porringer.
 
 This package contains modules and utilities for backend processing,

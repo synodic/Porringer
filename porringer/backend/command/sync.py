@@ -1,3 +1,5 @@
+"""CLI command implementation for sync."""
+
 """The sync command module.
 
 Thin facade that wires together manifest loading, action building,
@@ -6,49 +8,58 @@ in the sibling modules:
 
 * `.manifest`       — loading and validating manifests
 * `.action_builder` — building the action plan from a manifest
-* `.presence`       — dry-run / presence detection
+* `.presence`       — inspection / presence detection
 * `.execution`      — phased async execution engine
 * `.discovery`      — plugin entry-point discovery
 """
 
 import asyncio
 import contextlib
+import inspect as inspectlib
 import logging
 import shutil
 import tempfile
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlparse
 
+import aiohttp
+
+from porringer.backend.builder import Builder
 from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core.discovery import DiscoveredPlugins
+from porringer.core.plugin_schema.runtime import RuntimeConsumer
+from porringer.core.schema import PluginKind
 from porringer.schema import (
     ActionCompletedEvent,
+    ActionRef,
     BatchSetupResults,
     DownloadParameters,
     DownloadResult,
+    FailedPathInspection,
+    InspectionMode,
     ManifestFailedEvent,
     ManifestLoadedEvent,
-    ManifestParsedEvent,
     ManifestValidationResult,
     ProgressEvent,
     SetupActionResult,
     SetupParameters,
     SetupResults,
-    SyncStrategy,
+    SyncInspectionReport,
+    SyncRunReport,
+    action_id_for,
 )
+from porringer.utility import HTTP_TIMEOUT
+from porringer.utility.concurrency import gather_bounded
 from porringer.utility.download import download_file
 from porringer.utility.exception import ManifestError
+from porringer.utility.observability import batch_diagnostics, batch_follow_up_actions, result_status
 
-from .core.action_builder import (
-    async_load_manifest,
-    async_parse_manifest,
-    load_manifest,
-    parse_manifest,
-)
+from .core.action_builder import load_manifest
 from .core.discovery import discover_all_plugins, invalidate_plugin_cache
 from .core.execution import _plugins_discovered_event, execute_single
+from .core.inspection import build_manifest_inspection, build_sync_inspection_report
 from .manifest import has_manifest as _has_manifest
 from .manifest import manifest_filenames as _manifest_filenames
 from .manifest import manifest_schema, validate_manifest
@@ -56,10 +67,36 @@ from .manifest import manifest_schema, validate_manifest
 logger = logging.getLogger(__name__)
 
 
+def _action_indices(preview: SetupResults) -> list[int]:
+    """Return source action indexes for a preview, initializing when absent."""
+    if len(preview.action_indices) != len(preview.actions):
+        preview.action_indices = list(range(len(preview.actions)))
+    return preview.action_indices
+
+
+def _inspection_needs_runtime(previews: Sequence[SetupResults], plugins: DiscoveredPlugins) -> bool:
+    """Return whether complete inspection needs a resolved runtime context."""
+    for preview in previews:
+        for action in preview.actions:
+            if action.kind is None or action.installer is None:
+                continue
+            plugin = None
+            match action.kind:
+                case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
+                    plugin = plugins.environments.get(action.installer)
+                case PluginKind.PROJECT:
+                    plugin = plugins.project_environments.get(action.installer)
+                case PluginKind.SCM:
+                    plugin = plugins.scm_environments.get(action.installer)
+            if isinstance(plugin, RuntimeConsumer):
+                return True
+    return False
+
+
 class SyncCommands:
     """Manifest-driven sync commands.
 
-    Handles manifest loading, validation, streaming execution, and
+    Handles manifest loading, validation, evented execution, and
     manifest schema export.  Update checking for managed packages
     has moved to :class:`~porringer.backend.command.package.PackageCommands`.
     """
@@ -121,77 +158,6 @@ class SyncCommands:
         """
         return _has_manifest(path)
 
-    @staticmethod
-    def parse_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
-        """Parse a manifest and build the action plan without executing.
-
-        Delegates to `action_builder.parse_manifest`.
-
-        .. note::
-            Prefer :meth:`async_parse_manifest` in async contexts.
-        """
-        return parse_manifest(path, strategy)
-
-    @staticmethod
-    def load_manifest(path: Path, strategy: SyncStrategy = SyncStrategy.MINIMAL) -> SetupResults:
-        """Load a manifest quickly using cached plugin discovery.
-
-        Delegates to `action_builder.load_manifest` — the fast path
-        for GUI preview.  Actions whose installer cannot be resolved
-        from cached plugins will have ``installer=None``.
-
-        .. note::
-            Prefer :meth:`async_load_manifest` in async contexts.
-        """
-        return load_manifest(path, strategy)
-
-    @staticmethod
-    async def async_parse_manifest(
-        path: Path,
-        strategy: SyncStrategy = SyncStrategy.MINIMAL,
-        *,
-        plugins: DiscoveredPlugins | None = None,
-    ) -> SetupResults:
-        """Parse a manifest asynchronously.
-
-        Offloads blocking I/O to a thread.  When *plugins* is
-        provided, plugin discovery is skipped — use this with a
-        pre-discovered ``DiscoveredPlugins`` to avoid redundant
-        entry-point scanning.
-
-        Args:
-            path: Path to manifest file or directory containing one.
-            strategy: The sync strategy.
-            plugins: Pre-discovered plugins.
-
-        Returns:
-            SetupResults containing the list of actions.
-        """
-        return await async_parse_manifest(path, strategy, plugins=plugins)
-
-    @staticmethod
-    async def async_load_manifest(
-        path: Path,
-        strategy: SyncStrategy = SyncStrategy.MINIMAL,
-        *,
-        plugins: DiscoveredPlugins | None = None,
-    ) -> SetupResults:
-        """Load a manifest asynchronously using cached plugin discovery.
-
-        This is the preferred entry-point for GUI / async callers.
-        Offloads blocking I/O to a thread and accepts pre-discovered
-        plugins to eliminate redundant discovery.
-
-        Args:
-            path: Path to manifest file or directory containing one.
-            strategy: The sync strategy.
-            plugins: Pre-discovered plugins.
-
-        Returns:
-            SetupResults containing the action plan.
-        """
-        return await async_load_manifest(path, strategy, plugins=plugins)
-
     # --- Path resolution ---
 
     @staticmethod
@@ -244,115 +210,219 @@ class SyncCommands:
     async def _download_urls(
         urls: list[str],
         tmp_dir: Path,
+        *,
+        max_concurrency: int = 8,
     ) -> list[Path]:
         """Download remote manifest URLs into *tmp_dir*.
 
-        Returns a list of local paths to the downloaded files.
+        Downloads run with bounded concurrency over a single shared
+        :class:`aiohttp.ClientSession` so connections are pooled and TLS
+        setup is not repeated per URL.
+
+        Returns a list of local paths to the downloaded files, ordered to
+        match *urls*.
         """
-        downloaded: list[Path] = []
-        for i, url in enumerate(urls):
-            dest = tmp_dir / f'manifest_{i}.json'
-            result: DownloadResult = await download_file(
-                DownloadParameters(url=url, destination=dest),
+        if not urls:
+            return []
+
+        dests = [tmp_dir / f'manifest_{i}.json' for i in range(len(urls))]
+
+        async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as session:
+
+            def _make_download(url: str, dest: Path) -> Callable[[], Awaitable[tuple[str, DownloadResult]]]:
+                async def _run() -> tuple[str, DownloadResult]:
+                    result = await download_file(
+                        DownloadParameters(url=url, destination=dest),
+                        http_client=session,
+                    )
+                    return url, result
+
+                return _run
+
+            results = await gather_bounded(
+                (_make_download(url, dest) for url, dest in zip(urls, dests, strict=True)),
+                limit=max_concurrency,
             )
+
+        for url, result in results:
             if not result.success:
                 raise ValueError(f'Failed to download manifest from {url}: {result.message}')
-            downloaded.append(dest)
-        return downloaded
+        return dests
 
     # --- Manifest loading ---
 
-    def _load_manifests(self, parameters: SetupParameters) -> tuple[list[SetupResults], list[tuple[Path, str]]]:
+    def _load_manifests(
+        self,
+        parameters: SetupParameters,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> tuple[list[SetupResults], list[tuple[int, Path, str]]]:
         """Load and filter manifests from the resolved paths.
 
-        Shared by `run()` and `execute_stream()` to avoid duplicating
+        Shared by inspection and execution to avoid duplicating
         the parse → filter → error-handling loop.
 
         Args:
             parameters: The setup parameters.
+            plugins: Optional pre-discovered plugin registry to reuse while
+                building manifests.
 
         Returns:
             A tuple of (loaded previews, failed paths).
         """
         paths, _urls = self._resolve_paths(parameters)
-        logger.info(f'Processing {len(paths)} path(s) (dry_run={parameters.dry_run})')
+        logger.info('Processing %d path(s)', len(paths))
 
         previews: list[SetupResults] = []
-        failed_paths: list[tuple[Path, str]] = []
+        failed_paths: list[tuple[int, Path, str]] = []
 
-        for path in paths:
+        for manifest_index, path in enumerate(paths):
             try:
-                preview = load_manifest(path, strategy=parameters.strategy)
+                preview = load_manifest(path, strategy=parameters.strategy, plugins=plugins)
             except ManifestError as e:
                 logger.warning(f'Failed to load manifest at {path}: {e.error}')
-                failed_paths.append((path, str(e.error)))
+                failed_paths.append((manifest_index, path, e.error))
                 if parameters.fail_fast:
                     break
                 continue
 
-            # Filter actions to only included plugins
-            if parameters.plugins:
-                preview.actions = [
-                    a for a in preview.actions if a.installer is None or a.installer in parameters.plugins
-                ]
-
-            # Filter actions to only included packages
-            if parameters.include_packages:
-                names = {n.lower() for n in parameters.include_packages}
-                preview.actions = [a for a in preview.actions if a.package is None or a.package.name.lower() in names]
-
-            # Apply caller-level prerelease overrides
-            if parameters.prerelease_packages:
-                overrides = {n.lower() for n in parameters.prerelease_packages}
-                preview.actions = [
-                    replace(a, include_prereleases=True)
-                    if a.package is not None and a.package.name.lower() in overrides
-                    else a
-                    for a in preview.actions
-                ]
+            preview.manifest_index = manifest_index
+            self._apply_action_filters(preview, parameters, manifest_index=manifest_index)
 
             previews.append(preview)
 
         return previews, failed_paths
 
-    # --- Streaming API ---
+    @staticmethod
+    def _apply_action_filters(preview: SetupResults, parameters: SetupParameters, *, manifest_index: int = 0) -> None:
+        """Apply caller-level action filters to a loaded manifest preview."""
+        indexed_actions = list(zip(_action_indices(preview), preview.actions, strict=True))
 
-    async def execute_stream(
+        # Filter actions to only included plugins.
+        if parameters.plugins:
+            indexed_actions = [
+                (index, action)
+                for index, action in indexed_actions
+                if action.installer is None or action.installer in parameters.plugins
+            ]
+
+        # Filter actions to only included packages.
+        if parameters.include_packages:
+            names = {name.lower() for name in parameters.include_packages}
+            indexed_actions = [
+                (index, action)
+                for index, action in indexed_actions
+                if action.package is None or action.package.name.lower() in names
+            ]
+
+        # Apply caller-level prerelease overrides.
+        if parameters.prerelease_packages:
+            overrides = {name.lower() for name in parameters.prerelease_packages}
+            indexed_actions = [
+                (index, replace(action, include_prereleases=True))
+                if action.package is not None and action.package.name.lower() in overrides
+                else (index, action)
+                for index, action in indexed_actions
+            ]
+
+        if parameters.action_ids:
+            indexed_actions = [
+                (index, action)
+                for index, action in indexed_actions
+                if action_id_for(manifest_index, index) in parameters.action_ids
+            ]
+
+        preview.action_indices = [index for index, _action in indexed_actions]
+        preview.actions = [action for _index, action in indexed_actions]
+
+    async def inspect(
+        self,
+        parameters: SetupParameters,
+        *,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> SyncInspectionReport:
+        """Inspect manifests without executing setup actions.
+
+        This is the structured preview/diagnostics path for frontends
+        and CLI JSON output.  It loads manifests, discovers plugins,
+        validates each manifest, resolves native commands, performs
+        presence/update checks, and returns a stable report.
+
+        Args:
+            parameters: Setup parameters controlling paths, strategy,
+                filters, prerelease overrides, and project-directory
+                behavior.
+            plugins: Pre-discovered plugins.  When provided, plugin
+                discovery is skipped and the supplied runtime context is
+                reused.
+
+        Returns:
+            A structured inspection report.
+        """
+        tmp_dir: Path | None = None
+        try:
+            local_paths, urls = self._resolve_paths(parameters)
+            effective_params = parameters
+            if urls:
+                tmp = tempfile.mkdtemp(prefix='porringer_')
+                tmp_dir = Path(tmp)
+                url_paths = await self._download_urls(urls, tmp_dir, max_concurrency=parameters.max_concurrency)
+                effective_params = parameters.model_copy(update={'paths': [*local_paths, *url_paths]})
+
+            shared_plugins = plugins
+            if shared_plugins is None:
+                shared_plugins = await asyncio.to_thread(discover_all_plugins, use_cache=True)
+
+            previews, failed = await asyncio.to_thread(self._load_manifests, effective_params, shared_plugins)
+            if (
+                effective_params.inspection_mode != InspectionMode.FAST
+                and shared_plugins.runtime_context is None
+                and _inspection_needs_runtime(previews, shared_plugins)
+            ):
+                shared_plugins.runtime_context = await Builder.resolve_runtime_context(shared_plugins.environments)
+
+            failed_paths = tuple(
+                FailedPathInspection(path=path, error=error, manifest_index=manifest_index)
+                for manifest_index, path, error in failed
+            )
+            manifests = []
+            for index, preview in enumerate(previews):
+                manifest_index = preview.manifest_index if preview.manifest_index is not None else index
+                diagnostics = ()
+                if preview.manifest_path is not None:
+                    validation = await asyncio.to_thread(validate_manifest, preview.manifest_path)
+                    diagnostics = tuple(validation.diagnostics)
+                manifests.append(
+                    await build_manifest_inspection(
+                        index=manifest_index,
+                        preview=preview,
+                        plugins=shared_plugins,
+                        parameters=effective_params,
+                        diagnostics=diagnostics,
+                    )
+                )
+
+            return build_sync_inspection_report(
+                manifests=tuple(manifests),
+                failed_paths=failed_paths,
+                plugins=shared_plugins,
+                inspection_mode=effective_params.inspection_mode,
+            )
+        finally:
+            if tmp_dir is not None:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    # --- Execution API ---
+
+    async def _execution_events(
         self,
         parameters: SetupParameters,
         *,
         plugins: DiscoveredPlugins | None = None,
     ) -> AsyncIterator[ProgressEvent]:
-        """Stream progress events while executing setup actions.
+        """Yield progress events while executing setup actions.
 
-        Resolves paths, parses manifests, and executes (or dry-runs) in a
-        single call.  Events are emitted in three stages:
-
-        1. ``MANIFEST_PARSED`` — emitted immediately after the manifest
-           JSON is loaded and actions are built.  GUI clients can use
-           this to populate cards before dry-run checks begin.
-        2. ``MANIFEST_LOADED`` — emitted after plugin discovery
-           completes and CLI commands are populated on each action.
-           This is the fully-resolved preview.
-        3. ``ACTION_STARTED`` / ``ACTION_COMPLETED`` /
-           ``SUB_ACTION_PROGRESS`` — per-action lifecycle events during
-           dry-run or real execution.
-
-        Yields `ProgressEvent` items as manifests are loaded, actions
-        start, complete, and report sub-action detail.  Cancellation is
-        handled via standard `task.cancel()` on the consuming task.
-
-        Args:
-            parameters: The setup parameters (paths, dry_run, strategy, etc.).
-            plugins: Pre-discovered plugins from
-                :meth:`API.discover_plugins`.  When provided, plugin
-                discovery is skipped and the ``PLUGINS_DISCOVERED``
-                event is **not** emitted (the caller already has the
-                availability map).
-
-        Yields:
-            ProgressEvent for each manifest load, action lifecycle transition,
-            and sub-action update.
+        Public callers should use :meth:`run` with ``on_event`` instead
+        of depending on the generator implementation directly.
         """
         queue: asyncio.Queue[ProgressEvent | None] = asyncio.Queue()
         tmp_dir: Path | None = None
@@ -369,26 +439,14 @@ class SyncCommands:
                 if urls:
                     tmp = tempfile.mkdtemp(prefix='porringer_')
                     tmp_dir = Path(tmp)
-                    url_paths = await self._download_urls(urls, tmp_dir)
+                    url_paths = await self._download_urls(urls, tmp_dir, max_concurrency=parameters.max_concurrency)
                     all_paths = local_paths + url_paths
                     effective_params = parameters.model_copy(update={'paths': all_paths})
 
-                previews, failed = await asyncio.to_thread(self._load_manifests, effective_params)
-
-                for path, error in failed:
-                    queue.put_nowait(ManifestFailedEvent(failed_path=(path, error)))
-
-                for preview in previews:
-                    # Stage 1: fast preview — cards can be shown immediately
-                    queue.put_nowait(ManifestParsedEvent(manifest=preview))
-
-                # Use pre-passed plugins when available; otherwise
-                # discover once for the entire batch.
                 shared_plugins = plugins
                 if shared_plugins is None:
-                    if not parameters.dry_run:
-                        invalidate_plugin_cache()
-                    shared_plugins = await asyncio.to_thread(discover_all_plugins, use_cache=parameters.dry_run)
+                    invalidate_plugin_cache()
+                    shared_plugins = await asyncio.to_thread(discover_all_plugins)
 
                     # Emit PLUGINS_DISCOVERED once for the batch — before
                     # any per-manifest work so the GUI gets the availability
@@ -396,14 +454,21 @@ class SyncCommands:
                     # pre-passed plugins (they already have the map).
                     queue.put_nowait(await asyncio.to_thread(_plugins_discovered_event, shared_plugins))
 
-                for preview in previews:
-                    # Stage 2 + 3: execute_single populates CLI commands,
-                    # emits MANIFEST_LOADED, then streams ACTION_* events.
+                previews, failed = await asyncio.to_thread(self._load_manifests, effective_params, shared_plugins)
+
+                for manifest_index, path, error in failed:
+                    queue.put_nowait(ManifestFailedEvent(failed_path=(path, error), manifest_index=manifest_index))
+
+                for index, preview in enumerate(previews):
+                    manifest_index = preview.manifest_index if preview.manifest_index is not None else index
+                    # execute_single populates CLI commands, emits
+                    # MANIFEST_LOADED, then reports ACTION_* events.
                     await execute_single(
                         preview,
                         parameters,
                         event_queue=queue,
                         plugins=shared_plugins,
+                        manifest_index=manifest_index,
                     )
             finally:
                 # Sentinel signals the generator to stop
@@ -416,10 +481,6 @@ class SyncCommands:
                 if event is None:
                     break
                 yield event
-            # Propagate any exception from _run() so callers see the
-            # real error instead of silently receiving an empty stream.
-            if task.done() and not task.cancelled():
-                task.result()
         except GeneratorExit:
             # Consumer closed the async generator (e.g. ``break`` or
             # ``aclose()``).  Cancel synchronously only — ``await``
@@ -436,42 +497,86 @@ class SyncCommands:
             if tmp_dir is not None:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    async def run(self, parameters: SetupParameters, *, plugins: DiscoveredPlugins | None = None) -> BatchSetupResults:
-        """Execute setup and return collected results.
+        # Propagate any exception from _run() so callers see the
+        # real error instead of silently receiving no events.
+        if task.done() and not task.cancelled():
+            task.result()
 
-        Drains :meth:`execute_stream` internally so that there is exactly
-        one execution path.  All ``ProgressEvent`` items are consumed
-        and partitioned into a ``BatchSetupResults``.
+    async def run(
+        self,
+        parameters: SetupParameters,
+        *,
+        plugins: DiscoveredPlugins | None = None,
+        on_event: Callable[[ProgressEvent], object] | None = None,
+    ) -> SyncRunReport:
+        """Execute setup, optionally observe events, and return a report.
+
+        This is the single public execution entry point.  All progress
+        events flow through ``on_event`` when provided, then the same
+        events are collected into ``BatchSetupResults``.
+
+        .. warning::
+            Execution mutates process-global ``PATH`` so that runtimes
+            installed mid-sync become discoverable.  Do **not** run two
+            syncs concurrently in the same process; their ``PATH``
+            changes are not isolated from one another.  Embedders that
+            need parallel syncs should use separate processes.
 
         Args:
-            parameters: The setup parameters (paths, dry_run, strategy, etc.).
-            plugins: Pre-discovered plugins (forwarded to
-                :meth:`execute_stream`).
+            parameters: The setup parameters (paths, strategy, filters, etc.).
+            plugins: Pre-discovered plugins from :meth:`API.discover_plugins`.
+            on_event: Optional callback invoked for every progress event
+                before collection. If it returns an awaitable, it is awaited.
 
         Returns:
-            BatchSetupResults from execution.
+            Structured sync run report with batch results, diagnostics, and follow-up actions.
         """
         manifests: list[SetupResults] = []
-        collected: list[SetupActionResult] = []
+        collected: list[tuple[ActionRef | None, SetupActionResult]] = []
         failed_paths: list[tuple[Path, str]] = []
 
-        async for event in self.execute_stream(parameters, plugins=plugins):
+        async for event in self._execution_events(parameters, plugins=plugins):
+            if on_event is not None:
+                maybe_awaitable = on_event(event)
+                if inspectlib.isawaitable(maybe_awaitable):
+                    await maybe_awaitable
             if isinstance(event, ManifestLoadedEvent):
                 manifests.append(event.manifest)
             elif isinstance(event, ManifestFailedEvent):
                 failed_paths.append(event.failed_path)
             elif isinstance(event, ActionCompletedEvent):
-                collected.append(event.result)
+                collected.append((event.action_ref, event.result))
 
-        # Partition collected results by manifest based on action identity
-        manifest_action_sets = [set(id(a) for a in m.actions) for m in manifests]
+        # Partition by stable action refs, keeping object-identity only as
+        # a compatibility fallback for legacy events without refs. Results are
+        # grouped in a single pass to avoid an O(manifests * results) scan.
+        indexed_previews = [
+            (preview, preview.manifest_index if preview.manifest_index is not None else index)
+            for index, preview in enumerate(manifests)
+        ]
+
+        # Map each action's identity to its owning manifest index, used only
+        # for legacy ref-less completion events.
+        action_to_manifest_index: dict[int, int] = {
+            id(action): manifest_index for preview, manifest_index in indexed_previews for action in preview.actions
+        }
+
+        results_by_manifest_index: dict[int, list[SetupActionResult]] = {}
+        for ref, result in collected:
+            target_index = ref.manifest_index if ref is not None else action_to_manifest_index.get(id(result.action))
+            if target_index is None:
+                continue
+            results_by_manifest_index.setdefault(target_index, []).append(result)
+
         manifest_results: list[SetupResults] = []
 
-        for preview, action_ids in zip(manifests, manifest_action_sets, strict=False):
-            mr_results = [r for r in collected if id(r.action) in action_ids]
+        for preview, manifest_index in indexed_previews:
+            mr_results = results_by_manifest_index.get(manifest_index, [])
             sr = SetupResults(
                 actions=preview.actions,
+                action_indices=preview.action_indices,
                 results=mr_results,
+                manifest_index=manifest_index,
                 manifest_path=preview.manifest_path,
                 root_directory=preview.root_directory,
                 metadata=preview.metadata,
@@ -479,4 +584,11 @@ class SyncCommands:
             )
             manifest_results.append(sr)
 
-        return BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
+        results = BatchSetupResults(manifest_results=manifest_results, failed_paths=failed_paths)
+        diagnostics = batch_diagnostics(results)
+        return SyncRunReport(
+            status=result_status(results.success, diagnostics),
+            results=results,
+            diagnostics=diagnostics,
+            follow_up_actions=batch_follow_up_actions(results),
+        )

@@ -10,5 +10,4 @@ jobs:
     uses: synodic/.github/.github/workflows/python-merge.yml@stable
     with:
       repository_url: https://upload.pypi.org/legacy/
-    secrets:
-      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+    secrets: inherit

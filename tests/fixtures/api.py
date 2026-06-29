@@ -1,10 +1,11 @@
+"""Helpers for api."""
+
 """Session-scoped API and configuration fixtures.
 
 Provides a single ``API`` instance (``session_api``) backed by a
 session-scoped temporary directory tree.  Tests that only *read*
-from the API (``parse_manifest``, ``sync.run`` dry-run,
-``plugin.list``) should use ``session_api`` instead of the
-function-scoped ``test_api``.
+from the API (``parse_manifest``, ``sync.inspect``, ``plugin.list``)
+should use ``session_api`` instead of the function-scoped ``test_api``.
 """
 
 from pathlib import Path
@@ -55,6 +56,6 @@ def session_api(
     """Shared read-only ``API`` instance for the full test session.
 
     Use this fixture in tests that do not mutate API state (e.g.
-    ``parse_manifest``, ``sync.run(dry_run=True)``, ``plugin.list``).
+    ``parse_manifest``, ``sync.inspect``, ``plugin.list``).
     """
     return API(session_local_configuration, global_configuration=session_global_configuration)

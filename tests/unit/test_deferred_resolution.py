@@ -1,3 +1,5 @@
+"""Helpers for test deferred resolution."""
+
 """Tests for deferred action resolution — fail-fast and escalated logging.
 
 Validates the distinction between *deferrable* actions (plugin registered

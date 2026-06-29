@@ -1,3 +1,5 @@
+"""Public package exports for the unit module."""
+
 """Unit tests package for Porringer.
 
 This package contains unit tests for the Porringer application,

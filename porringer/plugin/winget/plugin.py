@@ -1,4 +1,6 @@
-"""Plugin implementation"""
+"""Plugin integration for plugin."""
+
+"""Plugin implementation."""
 
 import logging
 import sys
@@ -179,9 +181,6 @@ class WingetEnvironment(Environment):
         Overrides the base to add `--accept-source-agreements` and
         other winget-specific flags.
         """
-        if params.progress_callback is None:
-            return await super().install(params)
-
         pkg = params.package
         args = [
             'winget',
@@ -212,9 +211,6 @@ class WingetEnvironment(Environment):
         Overrides the base to add `--accept-source-agreements` and
         other winget-specific flags.
         """
-        if params.progress_callback is None:
-            return await super().upgrade(params)
-
         pkg = params.package
         args = [
             'winget',

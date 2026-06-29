@@ -1,3 +1,5 @@
+"""Helpers for test frozen presence resolution."""
+
 """Tests for frozen-app presence detection, version probing, and resolution.
 
 Covers:

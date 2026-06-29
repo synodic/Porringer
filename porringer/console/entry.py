@@ -1,4 +1,6 @@
-"""Typer CLI Application"""
+"""Console and CLI support for entry."""
+
+"""Typer CLI Application."""
 
 import logging
 from importlib.metadata import version
@@ -10,11 +12,15 @@ from rich.console import Console
 from porringer.console.command.cache import app as cache_app
 from porringer.console.command.check import app as check_app
 from porringer.console.command.download import app as download_app
+from porringer.console.command.env import app as env_app
+from porringer.console.command.install import install_default
+from porringer.console.command.open import open_default
 from porringer.console.command.package import app as package_app
 from porringer.console.command.plugin import app as plugin_app
+from porringer.console.command.preview import preview_default
 from porringer.console.command.schema import app as schema_app
 from porringer.console.command.self import app as self_app
-from porringer.console.command.sync import app as sync_app
+from porringer.console.output import build_console, no_color_requested
 from porringer.console.schema import LOG_LEVELS, MAX_VERBOSITY_LEVEL, VERBOSITY_DEBUG_THRESHOLD, ConsoleConfiguration
 
 __version__ = version('porringer')
@@ -23,33 +29,36 @@ app = typer.Typer()
 app.add_typer(cache_app, name='cache')
 app.add_typer(check_app, name='check')
 app.add_typer(download_app, name='download')
+app.add_typer(env_app, name='env')
+app.command(name='install')(install_default)
+app.command(name='open')(open_default)
 app.add_typer(package_app, name='package')
+app.command(name='preview')(preview_default)
 app.add_typer(schema_app, name='schema')
-app.add_typer(sync_app, name='sync')
 app.add_typer(plugin_app, name='plugin')
 app.add_typer(self_app, name='self')
 
 
 class TyperHandler(logging.Handler):
-    """A logging handler that outputs to typer"""
+    """A logging handler that outputs to typer."""
 
     def __init__(self, console: Console) -> None:
-        """Initializes the handler"""
+        """Initializes the handler."""
         logging.Handler.__init__(self)
 
         self.console = console
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Emits the log record to typer"""
+        """Emits the log record to typer."""
         level = next(level for level in LOG_LEVELS if level.name == record.levelname)
         message = self.format(record)
         self.console.print(message, style=level.colour)
 
 
 def version_callback(value: bool) -> None:
-    """Callback for the version option"""
+    """Callback for the version option."""
     if value:
-        print(f'Porringer {__version__}')
+        typer.echo(f'Porringer {__version__}')
         raise typer.Exit()
 
 
@@ -58,6 +67,14 @@ def application(
     context: typer.Context,
     verbose: Annotated[int, typer.Option('--verbose', '-v', count=True, help='', min=0, max=MAX_VERBOSITY_LEVEL)] = 0,
     debug: Annotated[bool, typer.Option('--debug', help='')] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option('--quiet', '-q', help='Suppress informational output; only show warnings and errors'),
+    ] = False,
+    no_color: Annotated[
+        bool,
+        typer.Option('--no-color', help='Disable coloured output (also honoured via the NO_COLOR env var)'),
+    ] = False,
     version: Annotated[
         bool | None,
         typer.Option('--version', callback=version_callback, is_eager=True),
@@ -69,12 +86,20 @@ def application(
         context: The click context object
         verbose: The input verbosity level
         debug: The debug flag
+        quiet: Suppress informational output
+        no_color: Disable coloured output
         version: The version request
     """
     configuration = context.ensure_object(ConsoleConfiguration)
 
     configuration.debug = debug
     configuration.verbosity = verbose
+    configuration.quiet = quiet
+
+    # Rebuild consoles without colour when requested or when NO_COLOR is set.
+    if no_color_requested(no_color):
+        configuration.console = build_console(no_color=True)
+        configuration.error_console = build_console(no_color=True, stderr=True)
 
     logger = logging.getLogger('porringer')
 

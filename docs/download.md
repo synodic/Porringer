@@ -1,14 +1,18 @@
+---
+icon: lucide/download
+---
+
 # Download Command
 
-The download command downloads files with optional hash verification.
+Use `porringer download` to fetch a file and optionally verify its hash or size before treating it as usable.
 
-## Basic Download
+## Basic Usage
 
 ```shell
 porringer download https://example.com/file.zip ./file.zip
 ```
 
-## Hash Verification
+## Verification
 
 Verify the file hash after download:
 
@@ -21,8 +25,6 @@ Supported hash algorithms:
 - `sha256`
 - `sha512`
 
-## Size Verification
-
 Verify file size after download:
 
 ```shell
@@ -31,7 +33,7 @@ porringer download https://example.com/file.zip ./file.zip --size 1048576
 
 ## Timeout
 
-Set download timeout (default: 300 seconds):
+The default timeout is 300 seconds. Increase it for large files or slow networks:
 
 ```shell
 porringer download https://example.com/large-file.zip ./file.zip --timeout 600
@@ -41,10 +43,10 @@ porringer download https://example.com/large-file.zip ./file.zip --timeout 600
 
 ```python
 import asyncio
-from porringer.api import API
-from porringer.schema import LocalConfiguration, DownloadParameters
+from pathlib import Path
 
-api = API(LocalConfiguration())
+from porringer.api import API
+from porringer.schema import DownloadParameters
 
 params = DownloadParameters(
     url='https://example.com/file.zip',
@@ -52,13 +54,13 @@ params = DownloadParameters(
     expected_hash='sha256:abc123...',
 )
 
-result = asyncio.run(api.download(params))
+result = asyncio.run(API.download(params))
 print(f'Download success: {result.success}')
 ```
 
 ## Progress Callback
 
-For programmatic usage, you can provide a progress callback:
+Programmatic callers can provide a progress callback:
 
 ```python
 import asyncio
@@ -70,5 +72,5 @@ def progress(downloaded: int, total: int | None) -> None:
         print(f'Progress: {percent:.1f}%')
 
 
-result = asyncio.run(api.download(params, progress_callback=progress))
+result = asyncio.run(API.download(params, progress_callback=progress))
 ```

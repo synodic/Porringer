@@ -1,9 +1,10 @@
+"""Helpers for mock plugins."""
+
 """Shared mock plugin classes for unit tests.
 
-These mock implementations of ``Environment``, ``RuntimeProvider``,
-``PythonEnvironment``, ``ProjectEnvironment``, and ``RuntimeConsumer``
-are used across multiple test modules.  Centralising them avoids
-duplication and ensures consistent test behaviour.
+These mock implementations of ``Environment``, ``RuntimeProvider``, and
+``PythonEnvironment`` are used across multiple test modules.  Centralising
+them avoids duplication and ensures consistent test behaviour.
 """
 
 import os
@@ -15,9 +16,8 @@ from typing import override
 from packaging.version import Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
-from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
+from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
 
 MOCK_DIST = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
@@ -127,68 +127,4 @@ class MockPythonEnv(PythonEnvironment):
     async def packages(
         self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
     ) -> list[Package]:
-        return []
-
-
-class MockProjectEnv(ProjectEnvironment):
-    """A minimal RuntimeConsumer project environment."""
-
-    @staticmethod
-    @override
-    def ecosystem() -> Ecosystem:
-        return Ecosystem('python')
-
-    @classmethod
-    @override
-    def consumed_runtime_kind(cls) -> str:
-        return 'python'
-
-    @classmethod
-    @override
-    def tool_name(cls) -> str:
-        return 'mock-pdm'
-
-
-class MockNodeConsumer(Environment, RuntimeConsumer):
-    """An environment that consumes a Node runtime, not Python."""
-
-    @staticmethod
-    @override
-    def ecosystem() -> Ecosystem:
-        return Ecosystem('node')
-
-    @classmethod
-    def consumed_runtime_kind(cls) -> str:
-        """Identifier"""
-        return 'node'
-
-    @classmethod
-    @override
-    def tool_name(cls) -> str | None:
-        return None
-
-    @override
-    def install_command(
-        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
-    ) -> list[str]:
-        return []
-
-    @override
-    def uninstall_command(self, package: PackageRef, *, runtime_context: RuntimeContext | None = None) -> list[str]:
-        return []
-
-    @override
-    def upgrade_command(
-        self, package: PackageRef, *, include_prereleases: bool = False, runtime_context: RuntimeContext | None = None
-    ) -> list[str]:
-        return []
-
-    @override
-    async def packages(
-        self, *, project_path: Path | None = None, runtime_context: RuntimeContext | None = None
-    ) -> list[Package]:
-        return []
-
-    @override
-    async def check_updates(self, params: CheckUpdatesParameters) -> list[Package]:
         return []

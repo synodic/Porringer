@@ -2,7 +2,7 @@
     "$schema": "https://synodic.github.io/porringer/schema.json",
     "version": "1",
     "name": "Node.js Development Environment",
-    "description": "Common global tools and project setup for Node.js / Deno development",
+    "description": "Common global tools and project setup for Node.js development",
     "author": "Synodic Software",
     "url": "https://github.com/synodic/porringer",
     "packages": {
@@ -16,16 +16,6 @@
                 "description": "Fast linter and formatter for JS/TS"
             },
             "tsx"
-        ],
-        "deno": [
-            {
-                "name": "jsr:@std/cli",
-                "description": "Deno standard-library CLI helpers"
-            }
         ]
-    },
-    "projects": {
-        "node": [],
-        "deno": []
     }
 }

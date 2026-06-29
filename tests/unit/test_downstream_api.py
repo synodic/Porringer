@@ -1,0 +1,329 @@
+"""Helpers for test downstream api."""
+
+"""Tests for downstream-oriented API helpers."""
+
+import json
+from dataclasses import replace
+from pathlib import Path
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from porringer.api import API
+from porringer.backend.command.tool import ToolCommands
+from porringer.core.schema import PackageRef
+from porringer.schema import (
+    BatchSetupResults,
+    DownloadResult,
+    InspectionMode,
+    ProjectState,
+    SetupAction,
+    SetupActionResult,
+    SetupParameters,
+    SetupResults,
+    SyncRunReport,
+    SyncStrategy,
+)
+from porringer.utility.observability import batch_diagnostics, batch_follow_up_actions
+
+
+def _write_manifest(path: Path, data: dict) -> Path:
+    """Write a porringer manifest into *path*."""
+    manifest = path / 'porringer.json'
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+    return manifest
+
+
+@pytest.mark.mock_packages
+class TestDownstreamSync:
+    """Sync preview helpers."""
+
+    @staticmethod
+    async def test_inspect_uses_requested_fast_inspection(session_api: API, tmp_path: Path) -> None:
+        """sync.inspect supports fast inspection through SetupParameters."""
+        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
+
+        report = await session_api.sync.inspect(SetupParameters(paths=tmp_path, inspection_mode=InspectionMode.FAST))
+
+        assert report.inspection_mode == InspectionMode.FAST
+        assert report.summary.actions == 1
+
+    @staticmethod
+    async def test_action_id_selector_preserves_source_identity(session_api: API, tmp_path: Path) -> None:
+        """action_ids select original manifest positions without renumbering refs."""
+        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests', 'rich']}})
+
+        report = await session_api.sync.inspect(
+            SetupParameters(
+                paths=tmp_path,
+                inspection_mode=InspectionMode.FAST,
+                action_ids={'0:1'},
+            )
+        )
+
+        assert report.summary.actions == 1
+        assert report.manifests[0].actions[0].index == 0
+        assert report.manifests[0].actions[0].action_index == 1
+        assert report.manifests[0].actions[0].action_id == '0:1'
+        assert report.manifests[0].actions[0].action.package_name == 'rich'
+
+    @staticmethod
+    async def test_action_id_selector_preserves_input_manifest_index(session_api: API, tmp_path: Path) -> None:
+        """Failed earlier paths do not renumber later manifest action ids."""
+        missing = tmp_path / 'missing'
+        project = tmp_path / 'project'
+        project.mkdir()
+        _write_manifest(project, {'version': '1', 'packages': {'python': ['requests']}})
+
+        report = await session_api.sync.inspect(
+            SetupParameters(
+                paths=[missing, project],
+                fail_fast=False,
+                inspection_mode=InspectionMode.FAST,
+            )
+        )
+
+        assert report.summary.failed_paths == 1
+        assert report.manifests[0].index == 1
+        assert report.manifests[0].actions[0].action_id == '1:0'
+
+        selected = await session_api.sync.inspect(
+            SetupParameters(
+                paths=[missing, project],
+                fail_fast=False,
+                inspection_mode=InspectionMode.FAST,
+                action_ids={'1:0'},
+            )
+        )
+        renumbered = await session_api.sync.inspect(
+            SetupParameters(
+                paths=[missing, project],
+                fail_fast=False,
+                inspection_mode=InspectionMode.FAST,
+                action_ids={'0:0'},
+            )
+        )
+
+        assert selected.summary.actions == 1
+        assert selected.manifests[0].actions[0].action_id == '1:0'
+        assert renumbered.summary.actions == 0
+
+
+class TestObservableResults:
+    """Observable result helper behavior."""
+
+    @staticmethod
+    def test_batch_diagnostics_preserve_ref_for_unique_copied_action() -> None:
+        """Diagnostics recover refs when a result carries an equal copied action."""
+        action = SetupAction(
+            description='Install requests',
+            installer='pip',
+            package=PackageRef.model_validate('requests'),
+        )
+        result = SetupActionResult(action=replace(action), success=False, message='boom')
+        batch = BatchSetupResults(
+            manifest_results=[
+                SetupResults(
+                    actions=[action],
+                    action_indices=[2],
+                    results=[result],
+                    manifest_index=4,
+                )
+            ]
+        )
+
+        diagnostics = batch_diagnostics(batch)
+        follow_up_actions = batch_follow_up_actions(batch)
+
+        assert diagnostics[0].target is not None
+        assert diagnostics[0].target.action_id == '4:2'
+        assert follow_up_actions[0].action_id == '4:2'
+
+    @staticmethod
+    def test_batch_diagnostics_omits_ambiguous_copied_action_ref() -> None:
+        """Ambiguous copied actions are observable without assigning an unstable ref."""
+        action = SetupAction(
+            description='Install requests',
+            installer='pip',
+            package=PackageRef.model_validate('requests'),
+        )
+        result = SetupActionResult(action=replace(action), success=False, message='boom')
+        batch = BatchSetupResults(
+            manifest_results=[
+                SetupResults(
+                    actions=[action, replace(action)],
+                    action_indices=[0, 1],
+                    results=[result],
+                    manifest_index=2,
+                )
+            ]
+        )
+
+        diagnostics = batch_diagnostics(batch)
+
+        assert diagnostics[0].target is not None
+        assert diagnostics[0].target.action_id is None
+
+
+@pytest.mark.mock_packages
+class TestProjectInspectionAPI:
+    """Project inspection API tests."""
+
+    @staticmethod
+    async def test_inspect_returns_project_inspection(session_api: API, tmp_path: Path) -> None:
+        """project.inspect returns an inspect-derived project report."""
+        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
+
+        inspection = await session_api.project.inspect(tmp_path)
+
+        assert inspection.state == ProjectState.INSPECTED
+        assert inspection.summary.actions == 1
+        assert inspection.manifest is not None
+        assert inspection.manifest.actions[0].action_id == '0:0'
+
+    @staticmethod
+    async def test_inspect_cached_uses_cached_directories(test_api: API, tmp_path: Path) -> None:
+        """project.inspect_cached inspects cached directories as one report."""
+        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
+        await test_api.project.add(tmp_path)
+
+        report = await test_api.project.inspect_cached()
+
+        assert report.summary.projects == 1
+        assert report.summary.inspected == 1
+        assert report.projects[0].state == ProjectState.INSPECTED
+
+
+class TestToolCommands:
+    """Managed tool command behavior."""
+
+    @staticmethod
+    async def test_upgrade_cached_uses_latest_strategy() -> None:
+        """Bulk cached tool updates use the LATEST strategy."""
+        captured: list[SetupParameters] = []
+
+        class _FakeSync:
+            @staticmethod
+            async def run(params: SetupParameters, **_kwargs: object) -> SyncRunReport:
+                captured.append(params)
+                return SyncRunReport(results=BatchSetupResults())
+
+        commands = ToolCommands(cast(Any, _FakeSync()), MagicMock())
+
+        report = await commands.upgrade_cached(plugin_names={'pip'}, include_packages={'requests'})
+
+        assert report.operation == 'upgrade_cached'
+        assert captured[0].strategy == SyncStrategy.LATEST
+        assert captured[0].plugins == {'pip'}
+        assert captured[0].include_packages == {'requests'}
+
+    @staticmethod
+    async def test_upgrade_package_wraps_package_result() -> None:
+        """Single-package updates return a stable managed tool report."""
+        action = SetupAction(
+            description='Upgrade requests',
+            installer='pip',
+            package=PackageRef.model_validate('requests'),
+        )
+        package_commands = MagicMock()
+        package_commands.upgrade = AsyncMock(return_value=SetupActionResult(action=action, success=True))
+        commands = ToolCommands(MagicMock(), cast(Any, package_commands))
+
+        report = await commands.upgrade_package('pip', 'requests')
+
+        assert report.operation == 'upgrade_package'
+        assert report.updated == 1
+        assert report.results[0].plugin == 'pip'
+        assert report.results[0].package == 'requests'
+
+
+class TestProfileCommands:
+    """Setup profile resolution tests."""
+
+    @staticmethod
+    async def test_resolve_profile_downloads_and_validates(test_api: API) -> None:
+        """profile.resolve downloads a portable setup profile."""
+        profile_data = {
+            'version': '1',
+            'name': 'Workstation',
+            'manifests': ['https://example.com/porringer.json'],
+        }
+
+        async def _fake_download(params) -> DownloadResult:
+            params.destination.write_text(json.dumps(profile_data), encoding='utf-8')
+            return DownloadResult(success=True, path=params.destination)
+
+        with patch('porringer.backend.command.profile.download_file', side_effect=_fake_download):
+            profile = await test_api.profile.resolve('https://example.com/profile.json')
+
+        assert profile.name == 'Workstation'
+        assert [manifest.url for manifest in profile.manifests] == ['https://example.com/porringer.json']
+
+    @staticmethod
+    async def test_resolve_profile_manifest_hash_entries(test_api: API) -> None:
+        """Profile manifest objects carry optional expected_hash values."""
+        profile_data = {
+            'version': '1',
+            'name': 'Pinned Workstation',
+            'manifests': [
+                {
+                    'url': 'https://example.com/porringer.json',
+                    'expected_hash': 'sha256:abc123',
+                }
+            ],
+        }
+
+        async def _fake_download(params) -> DownloadResult:
+            params.destination.write_text(json.dumps(profile_data), encoding='utf-8')
+            return DownloadResult(success=True, path=params.destination)
+
+        with patch('porringer.backend.command.profile.download_file', side_effect=_fake_download):
+            profile = await test_api.profile.resolve('https://example.com/profile.json')
+
+        assert profile.manifests[0].url == 'https://example.com/porringer.json'
+        assert profile.manifests[0].expected_hash == 'sha256:abc123'
+
+    @staticmethod
+    async def test_resolve_profile_threads_expected_hash(test_api: API) -> None:
+        """profile.resolve forwards expected_hash to the profile download call."""
+        profile_data = {
+            'version': '1',
+            'name': 'Pinned Workstation',
+            'manifests': ['https://example.com/porringer.json'],
+        }
+        captured_hashes: list[str | None] = []
+
+        async def _fake_download(params) -> DownloadResult:
+            captured_hashes.append(params.expected_hash)
+            params.destination.write_text(json.dumps(profile_data), encoding='utf-8')
+            return DownloadResult(success=True, path=params.destination)
+
+        with patch('porringer.backend.command.profile.download_file', side_effect=_fake_download):
+            await test_api.profile.resolve('https://example.com/profile.json', expected_hash='sha256:deadbeef')
+
+        assert captured_hashes[0] == 'sha256:deadbeef'
+
+    @staticmethod
+    async def test_resolve_profile_rejects_http(test_api: API) -> None:
+        """Profiles intentionally require HTTPS URLs."""
+        with pytest.raises(ValueError, match='Only HTTPS URLs'):
+            await test_api.profile.resolve('http://example.com/profile.json')
+
+
+@pytest.mark.mock_packages
+class TestClientSnapshot:
+    """Aggregate client snapshot tests."""
+
+    @staticmethod
+    async def test_snapshot_includes_projects_and_plugins(test_api: API, tmp_path: Path) -> None:
+        """client.snapshot returns plugin and cached-project state together."""
+        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
+        await test_api.project.add(tmp_path)
+
+        snapshot = await test_api.client.snapshot()
+
+        assert snapshot.inspection_mode == InspectionMode.FAST
+        assert snapshot.plugins
+        assert snapshot.projects.summary.projects == 1
+        assert snapshot.projects.projects[0].state == ProjectState.INSPECTED

@@ -1,0 +1,6 @@
+[project]
+name = "porringer-python-bootstrap-example"
+version = "0.0.0"
+
+[tool.pdm]
+distribution = false

@@ -10,29 +10,60 @@
 
 # Porringer
 
-A CLI and API that can discover and orchestrate multiple underlying package managers through a plugin system.
+A CLI and Python API for synchronizing developer environments from a declarative manifest. Porringer reads the packages, tools, runtimes, repositories, and project sync work you want, then delegates the actual work to installed package managers through plugins.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![PyPI version](https://img.shields.io/pypi/v/porringer.svg)](https://pypi.org/project/porringer/)
 
 ## Features
 
-## Setup
+- Manifest-driven setup from `porringer.json` or `[tool.porringer]` in `pyproject.toml`.
+- Plugin-based installers for Python, Node, system packages, project sync, runtimes, and source repositories.
+- Read-only previews with stable action IDs, command previews, diagnostics, and JSON output.
+- Sync strategies for minimal installs, latest allowed versions, or exact declared constraints.
+- JSONL progress streams, replay records, and trace artifacts for downstream clients.
+- Python APIs for inspection, execution, cached projects, profiles, tools, progress events, and client snapshots.
 
-See [Setup](https://synodic.github.io/porringer/setup) for setup instructions.
+## Quick Start
+
+Install Porringer into an isolated CLI environment, then preview a manifest before running it:
+
+```shell
+pipx install porringer
+porringer preview examples/python-dev
+porringer install examples/python-dev
+```
+
+See [Setup](https://synodic.github.io/porringer/setup/) for `uv`, `pip`, and development checkout instructions.
 
 ## Development
 
-We use [pdm](https://pdm-project.org/en/latest/) as our build system and package manager. Scripts for development tasks are defined in `pyproject.toml` under the `[tool.pdm.scripts]` section.
+Porringer uses [PDM](https://pdm-project.org/en/latest/) for local development. Common tasks are defined in `pyproject.toml` under `[tool.pdm.scripts]`:
 
-See [Development](https://synodic.github.io/porringer/development) for additional build, test, and installation instructions.
+```shell
+pdm install
+pdm run test
+pdm run generate
+```
+
+See [Development](https://synodic.github.io/porringer/development/) for test lanes, traces, smoke tests, and diagnostics.
 
 For contribution guidelines, see [CONTRIBUTING.md](https://github.com/synodic/.github/blob/stable/CONTRIBUTING.md).
 
 ## Documentation
 
+- [Documentation home](https://synodic.github.io/porringer/)
+- [Setup](https://synodic.github.io/porringer/setup/)
+- [Install links](https://synodic.github.io/porringer/links/)
+- [Install command](https://synodic.github.io/porringer/install/)
+- [Preview command](https://synodic.github.io/porringer/preview/)
+- [Check command](https://synodic.github.io/porringer/check/)
+- [Download command](https://synodic.github.io/porringer/download/)
+- [API surface](https://synodic.github.io/porringer/api/)
+- [Development](https://synodic.github.io/porringer/development/)
+
 ## License
 
-This project is licensed under the MIT License — see [LICENSE.md](LICENSE.md) for details.
+This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.
 
 Copyright © 2025 Synodic Software

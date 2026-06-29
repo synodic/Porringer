@@ -1,3 +1,5 @@
+"""Data models and schemas for plugin."""
+
 """Plugin metadata schemas."""
 
 from dataclasses import dataclass
@@ -56,7 +58,7 @@ class PluginInfo:
 
 @dataclass(slots=True)
 class PluginOperationResult:
-    """Result of a plugin operation (install/uninstall/update).
+    """Result of a plugin operation (install/upgrade/uninstall).
 
     Args:
         plugin_name: The name of the plugin that was operated on.

@@ -1,5 +1,48 @@
 [project]
 site_name = "Porringer"
+site_description = "CLI and Python API documentation for Porringer, a plugin-driven package-manager orchestrator."
+site_author = "Synodic Software"
 site_url = "https://synodic.github.io/porringer"
+repo_url = "https://github.com/synodic/porringer"
+repo_name = "synodic/porringer"
+edit_uri = "edit/development/docs"
 docs_dir = "docs"
 site_dir = "dist"
+copyright = "Copyright &copy; 2025-2026 Synodic Software"
+
+nav = [
+	{ "Overview" = "index.md" },
+	{ "Setup" = "setup.md" },
+	{ "Install Links" = "links.md" },
+	{ "Commands" = [
+		{ "Install" = "install.md" },
+		{ "Preview" = "preview.md" },
+		{ "Check" = "check.md" },
+		{ "Download" = "download.md" },
+	] },
+	{ "API Surface" = "api.md" },
+	{ "Development" = "development.md" },
+]
+
+[project.theme]
+variant = "modern"
+features = [
+	"content.action.edit",
+	"content.code.annotate",
+	"content.code.copy",
+	"content.code.select",
+	"content.tooltips",
+	"navigation.footer",
+	"navigation.indexes",
+	"navigation.instant",
+	"navigation.instant.prefetch",
+	"navigation.instant.progress",
+	"navigation.path",
+	"navigation.sections",
+	"navigation.top",
+	"navigation.tracking",
+	"search.highlight",
+]
+
+[project.theme.icon]
+logo = "lucide/package-open"

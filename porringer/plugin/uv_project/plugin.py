@@ -1,3 +1,5 @@
+"""Plugin integration for plugin."""
+
 """Plugin implementation for UV project environment."""
 
 from typing import override
@@ -14,6 +16,8 @@ class UvProjectEnvironment(ProjectEnvironment):
     """
 
     _sync_verb: str = 'sync'
+    _project_evidence_files = ('uv.lock',)
+    _pyproject_tool_tables = (('tool', 'uv'),)
 
     @staticmethod
     @override

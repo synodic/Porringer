@@ -13,12 +13,14 @@ dynamic = ["version"]
 requires-python = ">=3.14"
 
 dependencies = [
-  "typer[all]>=0.24.1",
-  "pydantic>=2.12.5",
-  "platformdirs>=4.9.6",
+  "typer[all]>=0.26.8",
+  "pydantic>=2.13.4",
+  "platformdirs>=4.10.0",
   "userpath>=1.9.2",
-  "packaging>=26.0",
-  "aiohttp>=3.13.5",
+  "packaging>=26.2",
+  "aiohttp>=3.14.1",
+  "stamina>=26.1.0",
+  "filelock>=3.29.4",
 ]
 
 [project.urls]
@@ -26,14 +28,21 @@ homepage = "https://github.com/synodic/porringer"
 repository = "https://github.com/synodic/porringer"
 
 [dependency-groups]
-lint = ["ruff>=0.15.10", "pyrefly>=0.60.2"]
-test = [
-  "pytest>=9.0.3",
-  "pytest-cov>=7.1.0",
-  "pytest-mock>=3.15.1",
-  "pytest-asyncio>=1.3.0",
+lint = [
+    "ruff>=0.15.20",
+    "pyrefly>=1.1.1",
 ]
-docs = ["zensical>=0.0.32"]
+test = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-subprocess>=1.6.0",
+    "dirty-equals>=0.11",
+    "hypothesis>=6.155.7",
+    "pytest-socket>=0.8.0",
+]
+docs = [
+    "zensical>=0.0.46",
+]
 
 [project.entry-points."porringer.environment"]
 pip = "porringer.plugin.pip.plugin:PIPEnvironment"
@@ -42,8 +51,6 @@ winget = "porringer.plugin.winget.plugin:WingetEnvironment"
 uv = "porringer.plugin.uv.plugin:UvEnvironment"
 npm = "porringer.plugin.npm.plugin:NPMEnvironment"
 pnpm = "porringer.plugin.pnpm.plugin:PNPMEnvironment"
-bun = "porringer.plugin.bun.plugin:BunEnvironment"
-deno = "porringer.plugin.deno.plugin:DenoEnvironment"
 pim = "porringer.plugin.pim.plugin:PIMEnvironment"
 pyenv = "porringer.plugin.pyenv.plugin:PyenvEnvironment"
 brew = "porringer.plugin.brew.plugin:BrewEnvironment"
@@ -56,14 +63,13 @@ poetry = "porringer.plugin.poetry.plugin:PoetryEnvironment"
 npm-project = "porringer.plugin.npm_project.plugin:NPMProjectEnvironment"
 pnpm-project = "porringer.plugin.pnpm_project.plugin:PNPMProjectEnvironment"
 yarn-project = "porringer.plugin.yarn_project.plugin:YarnProjectEnvironment"
-bun-project = "porringer.plugin.bun_project.plugin:BunProjectEnvironment"
-deno-project = "porringer.plugin.deno_project.plugin:DenoProjectEnvironment"
 
 [project.entry-points."porringer.scm"]
 git = "porringer.plugin.git.plugin:GitScm"
 
 [project.scripts]
 porringer = "porringer.console.entry:app"
+porr = "porringer.console.entry:app"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -72,7 +78,6 @@ testpaths = ["tests"]
 markers = [
   "fresh_plugins: invalidate the plugin discovery cache before this test",
   "mock_packages: use a cached package list instead of real subprocess calls",
-  "bare_environment: simulate a bare system with only the primary tool on PATH",
 ]
 
 [tool.ruff]
@@ -80,17 +85,18 @@ line-length = 120
 preview = true
 
 [tool.ruff.lint]
-ignore = ["D206", "D300", "D415", "E111", "E114", "E117"]
+ignore = ["D206", "D300", "E111", "E114", "E117", "ASYNC109", "ASYNC240"]
 select = [
-  "D",   # pydocstyle
-  "F",   # Pyflakes
-  "I",   # isort
-  "PL",  # pylint
-  "UP",  # pyupgrade
-  "E",   # pycodestyle
-  "B",   # flake8-bugbear
-  "SIM", # flake8-simplify
-  "PT",  # flake8-pytest-style
+  "D",     # pydocstyle
+  "F",     # Pyflakes
+  "I",     # isort
+  "PL",    # pylint
+  "UP",    # pyupgrade
+  "E",     # pycodestyle
+  "B",     # flake8-bugbear
+  "SIM",   # flake8-simplify
+  "PT",    # flake8-pytest-style
+  "ASYNC", # flake8-async (blocking calls on the event loop)
 ]
 
 [tool.ruff.lint.pylint]
@@ -103,9 +109,6 @@ convention = "google"
 docstring-code-format = true
 indent-style = "space"
 quote-style = "single"
-
-[tool.coverage.report]
-skip_empty = true
 
 [tool.pyrefly]
 project-excludes = ["examples"]
@@ -120,10 +123,11 @@ source = "scm"
 analyze = "ruff check"
 format = "ruff format"
 lint = { composite = ["analyze", "format", "type-check"] }
-test = "pytest --cov=porringer --verbose tests"
+test = "pytest --disable-socket --allow-hosts=127.0.0.1,::1 tests"
 type-check = "pyrefly check"
-generate = "zensical build --clean"
-serve = "zensical serve"
+docs-schema = "porringer schema --output docs/schema.json"
+generate = { composite = ["docs-schema", "zensical build --clean --strict"] }
+serve = { composite = ["docs-schema", "zensical serve"] }
 
 [build-system]
 build-backend = "pdm.backend"

@@ -1,9 +1,11 @@
+"""Core helpers and types for scm."""
+
 """Plugin utilities for source-control management (SCM) environments.
 
 An `ScmEnvironment` plugin wraps an SCM tool (e.g. Git) and
 provides clone and presence-check operations.  The sync engine invokes
-SCM actions after project sync but before post-sync commands, so that
-cloned repositories are available for any post-sync scripts.
+SCM actions after project sync, so repositories are cloned after dependency
+synchronisation.
 """
 
 import logging

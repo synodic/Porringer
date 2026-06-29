@@ -1,4 +1,6 @@
-"""Tests plugin schemas"""
+"""Helpers for test environment."""
+
+"""Tests plugin schemas."""
 
 import shutil
 import sys
@@ -10,12 +12,12 @@ from porringer.test.pytest.tests import EnvironmentIntegrationTests
 
 
 class TestEnvironment(EnvironmentIntegrationTests[WingetEnvironment]):
-    """The tests for the winget environment plugin"""
+    """The tests for the winget environment plugin."""
 
     @staticmethod
     @pytest.fixture(name='plugin_type', scope='session')
     def fixture_plugin_type() -> type[WingetEnvironment]:
-        """A required testing hook that allows type generation
+        """A required testing hook that allows type generation.
 
         Returns:
             The type of the Environment

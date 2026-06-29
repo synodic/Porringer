@@ -1,4 +1,6 @@
-"""Provides test data for plugin tests"""
+"""Tests covering the variants behavior."""
+
+"""Provides test data for plugin tests."""
 
 from collections.abc import Sequence
 
@@ -14,7 +16,7 @@ from porringer.test.mock.scm import MockScm
 
 
 def _mock_environment_list() -> Sequence[type[Environment]]:
-    """Mocked list of environments
+    """Mocked list of environments.
 
     Returns:
         List of mock environments
@@ -56,7 +58,7 @@ def _mock_scm_environment_list() -> Sequence[type[ScmEnvironment]]:
 
 
 def _porringer_distribution_list() -> Sequence[Distribution]:
-    """Mocked list of plugin distributions
+    """Mocked list of plugin distributions.
 
     Returns:
         Distributions for the plugin

@@ -1,3 +1,5 @@
+"""Core helpers and types for plugin manager."""
+
 """Protocol for tools that manage their own plugins natively.
 
 Tools like PDM and Poetry support native plugin management via their
@@ -11,7 +13,6 @@ The protocol follows the same mixin pattern used by
 plugin management is available.
 """
 
-import asyncio
 import logging
 import re
 import shutil
@@ -23,7 +24,6 @@ from typing import Protocol, runtime_checkable
 
 from porringer.core.plugin_schema.environment import PackageParameters
 from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind
-from porringer.core.transport import Transport
 from porringer.utility.utility import run_command
 
 
@@ -40,8 +40,6 @@ class PluginManager(Protocol):
     ``ToolBasedPlugin``) which is used to match the ``plugin_target``
     on a ``SetupAction``.
     """
-
-    _transport: Transport
 
     @classmethod
     @abstractmethod
@@ -64,14 +62,14 @@ class PluginManager(Protocol):
         ...
 
     @abstractmethod
-    def plugin_add_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
-        """Return the CLI command that adds a plugin natively.
+    def plugin_install_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+        """Return the CLI command that installs a plugin natively.
 
         This is used for dry-run / preview display and as the
-        default implementation for ``plugin_add``.
+        default implementation for ``plugin_install``.
 
         Args:
-            plugin: The sub-package to add.
+            plugin: The sub-package to install.
             include_prereleases: When ``True``, allow pre-release
                 versions (e.g. append ``--pre`` for pip-based tools).
 
@@ -82,11 +80,11 @@ class PluginManager(Protocol):
         ...
 
     @abstractmethod
-    def plugin_update_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
+    def plugin_upgrade_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
         """Return the CLI command that upgrades an installed plugin.
 
         This is used for dry-run / preview display and as the
-        default implementation for ``plugin_update``.
+        default implementation for ``plugin_upgrade``.
 
         Args:
             plugin: The sub-package to upgrade.
@@ -100,18 +98,18 @@ class PluginManager(Protocol):
         ...
 
     @abstractmethod
-    def plugin_remove_command(self, plugin: PackageRef) -> list[str]:
-        """Return the CLI command that removes an installed plugin.
+    def plugin_uninstall_command(self, plugin: PackageRef) -> list[str]:
+        """Return the CLI command that uninstalls an installed plugin.
 
         This is used for dry-run / preview display and as the
-        default implementation for ``plugin_remove``.
+        default implementation for ``plugin_uninstall``.
 
-        Unlike ``plugin_add_command`` and ``plugin_update_command``,
+        Unlike ``plugin_install_command`` and ``plugin_upgrade_command``,
         there is no ``include_prereleases`` parameter because
-        pre-release handling is irrelevant when removing a plugin.
+                pre-release handling is irrelevant when uninstalling a plugin.
 
         Args:
-            plugin: The sub-package to remove.
+            plugin: The sub-package to uninstall.
 
         Returns:
             A list of command arguments
@@ -161,19 +159,12 @@ class PluginManager(Protocol):
         """
         tool = self.tool_name()
         _logger = logging.getLogger(f'porringer.{tool}.plugin_list')
+        args = list(self.plugin_list_command())
         try:
-            args = list(self.plugin_list_command())
-            transformed = self._transport.transform_args(args)
-            proc = await asyncio.create_subprocess_exec(
-                *transformed,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30)
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ''
-            if proc.returncode != 0:
-                stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
-                _logger.debug('plugin list failed: %s', stderr)
+            result = await run_command(args, timeout=30)
+            stdout = result.stdout
+            if result.returncode != 0:
+                _logger.debug('plugin list failed: %s', result.stderr)
                 return []
             relation = PackageRelation(host=tool, kind=PackageRelationKind.PLUGIN)
             return [pkg.model_copy(update={'relation': relation}) for pkg in self.parse_plugin_list(stdout)]
@@ -184,10 +175,10 @@ class PluginManager(Protocol):
             _logger.debug('Failed to list plugins for %s: %s', tool, e)
             return []
 
-    async def plugin_add(self, params: PackageParameters) -> Package | None:
-        """Asynchronously add a plugin via the tool's native command.
+    async def plugin_install(self, params: PackageParameters) -> Package | None:
+        """Asynchronously install a plugin via the tool's native command.
 
-        The default implementation delegates to ``plugin_add_command``
+        The default implementation delegates to ``plugin_install_command``
         and runs the result as an async subprocess.
 
         Args:
@@ -196,11 +187,11 @@ class PluginManager(Protocol):
         Returns:
             The installed package, or ``None`` on failure.
         """
-        args = self.plugin_add_command(params.package, include_prereleases=params.include_prereleases)
+        args = self.plugin_install_command(params.package, include_prereleases=params.include_prereleases)
         tool = self.tool_name()
-        _logger = logging.getLogger(f'porringer.{tool}.plugin_add')
+        _logger = logging.getLogger(f'porringer.{tool}.plugin_install')
         try:
-            result = await run_command(self._transport.transform_args(args))
+            result = await run_command(args)
             _logger.info(result.stdout)
             if result.returncode != 0:
                 _logger.error(result.stderr)
@@ -209,14 +200,14 @@ class PluginManager(Protocol):
             _logger.error('%s not found', tool)
             return None
         except Exception as e:
-            _logger.error('Failed to add plugin %s: %s', params.package.name, e)
+            _logger.error('Failed to install plugin %s: %s', params.package.name, e)
             return None
         return Package(name=params.package.name, version=None)
 
-    async def plugin_update(self, params: PackageParameters) -> Package | None:
+    async def plugin_upgrade(self, params: PackageParameters) -> Package | None:
         """Asynchronously upgrade an installed plugin via the tool's native command.
 
-        The default implementation delegates to ``plugin_update_command``
+        The default implementation delegates to ``plugin_upgrade_command``
         and runs the result as an async subprocess.
 
         Args:
@@ -225,11 +216,11 @@ class PluginManager(Protocol):
         Returns:
             The upgraded package, or ``None`` on failure.
         """
-        args = self.plugin_update_command(params.package, include_prereleases=params.include_prereleases)
+        args = self.plugin_upgrade_command(params.package, include_prereleases=params.include_prereleases)
         tool = self.tool_name()
-        _logger = logging.getLogger(f'porringer.{tool}.plugin_update')
+        _logger = logging.getLogger(f'porringer.{tool}.plugin_upgrade')
         try:
-            result = await run_command(self._transport.transform_args(args))
+            result = await run_command(args)
             _logger.info(result.stdout)
             if result.returncode != 0:
                 _logger.error(result.stderr)
@@ -238,27 +229,27 @@ class PluginManager(Protocol):
             _logger.error('%s not found', tool)
             return None
         except Exception as e:
-            _logger.error('Failed to update plugin %s: %s', params.package.name, e)
+            _logger.error('Failed to upgrade plugin %s: %s', params.package.name, e)
             return None
         return Package(name=params.package.name, version=None)
 
-    async def plugin_remove(self, params: PackageParameters) -> Package | None:
-        """Asynchronously remove an installed plugin via the tool's native command.
+    async def plugin_uninstall(self, params: PackageParameters) -> Package | None:
+        """Asynchronously uninstall a plugin via the tool's native command.
 
-        The default implementation delegates to ``plugin_remove_command``
+        The default implementation delegates to ``plugin_uninstall_command``
         and runs the result as an async subprocess.
 
         Args:
             params: Package parameters (``params.package`` is the plugin).
 
         Returns:
-            The removed package, or ``None`` on failure.
+            The uninstalled package, or ``None`` on failure.
         """
-        args = self.plugin_remove_command(params.package)
+        args = self.plugin_uninstall_command(params.package)
         tool = self.tool_name()
-        _logger = logging.getLogger(f'porringer.{tool}.plugin_remove')
+        _logger = logging.getLogger(f'porringer.{tool}.plugin_uninstall')
         try:
-            result = await run_command(self._transport.transform_args(args))
+            result = await run_command(args)
             _logger.info(result.stdout)
             if result.returncode != 0:
                 _logger.error(result.stderr)
@@ -267,7 +258,7 @@ class PluginManager(Protocol):
             _logger.error('%s not found', tool)
             return None
         except Exception as e:
-            _logger.error('Failed to remove plugin %s: %s', params.package.name, e)
+            _logger.error('Failed to uninstall plugin %s: %s', params.package.name, e)
             return None
         return Package(name=params.package.name, version=None)
 

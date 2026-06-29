@@ -1,7 +1,9 @@
+"""CLI command implementation for plugin."""
+
 """The plugin command module.
 
-Manages *porringer extension* packages — installing, updating, and
-removing plugins that extend porringer's capabilities (e.g.
+Manages *porringer extension* packages — installing, upgrading, and
+uninstalling plugins that extend porringer's capabilities (e.g.
 ``porringer-plugin-apt``).  For operations on packages *managed by*
 plugins (e.g. ``requests`` via pip), see :mod:`.package`.
 """
@@ -9,7 +11,6 @@ plugins (e.g. ``requests`` via pip), see :mod:`.package`.
 import asyncio
 import builtins
 import logging
-import subprocess
 import sys
 from importlib import metadata
 
@@ -23,13 +24,13 @@ from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin, PluginKind
 from porringer.schema import PluginInfo, PluginOperationResult
 from porringer.utility.exception import PluginError
-from porringer.utility.utility import is_pipx_installation
+from porringer.utility.utility import is_pipx_installation, run_command
 
 logger = logging.getLogger(__name__)
 
 
 class PluginCommands:
-    """Plugin commands.
+    """Extension package commands.
 
     All methods are static — the class acts as a namespace and does
     not require instantiation.  Use `PluginCommands.list()` directly
@@ -85,12 +86,12 @@ class PluginCommands:
             environments = discover_environments()
 
             # Project-environment plugins (project sync)
-            project_types = Builder.find_plugins('project_environment', ProjectEnvironment)
+            project_types, _ = Builder.find_plugins('project_environment', ProjectEnvironment)
             project_instances = Builder.build_plugins(project_types)
             projects = {info.name: inst for info, inst in zip(project_types, project_instances, strict=True)}
 
             # SCM plugins (source control)
-            scm_types = Builder.find_plugins('scm', ScmEnvironment)
+            scm_types, _ = Builder.find_plugins('scm', ScmEnvironment)
             scm_instances = Builder.build_plugins(scm_types)
             scm_plugins = {info.name: inst for info, inst in zip(scm_types, scm_instances, strict=True)}
 
@@ -168,14 +169,14 @@ class PluginCommands:
         return [sys.executable, '-m', 'pip', 'uninstall', '-y', name]
 
     @staticmethod
-    def _build_update_args(name: str) -> builtins.list[str]:
-        """Build the update command for a plugin package."""
+    def _build_upgrade_args(name: str) -> builtins.list[str]:
+        """Build the upgrade command for a plugin package."""
         if is_pipx_installation():
             return ['pipx', 'runpip', 'porringer', 'install', '--upgrade', name]
         return [sys.executable, '-m', 'pip', 'install', '--upgrade', name]
 
     @staticmethod
-    def _run_plugin_operation(
+    async def _run_plugin_operation(
         name: str,
         args: builtins.list[str],
         *,
@@ -187,12 +188,12 @@ class PluginCommands:
 
         Centralises the dry-run check, subprocess invocation, error
         handling, and result construction shared by install / uninstall /
-        update.
+        upgrade.
 
         Args:
             name: Plugin package name.
             args: Full command-line arguments.
-            verb: Human-readable verb (``"install"``, ``"uninstall"``, ``"update"``).
+            verb: Human-readable verb (``"install"``, ``"uninstall"``, ``"upgrade"``).
             dry_run: If ``True``, only report what would be done.
             timeout: Subprocess timeout in seconds.
 
@@ -211,7 +212,7 @@ class PluginCommands:
             )
 
         try:
-            result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=timeout)
+            result = await run_command(args, timeout=timeout)
             if result.returncode != 0:
                 logger.error('%s failed for %s: %s', verb.capitalize(), name, result.stderr)
                 return PluginOperationResult(
@@ -232,7 +233,7 @@ class PluginCommands:
                 success=False,
                 message=f'Command not found: {e}',
             )
-        except subprocess.SubprocessError as e:
+        except (OSError, TimeoutError) as e:
             logger.error('Subprocess error: %s', e)
             return PluginOperationResult(
                 plugin_name=name,
@@ -241,7 +242,7 @@ class PluginCommands:
             )
 
     @staticmethod
-    def install(name: str, *, dry_run: bool = False) -> PluginOperationResult:
+    async def install(name: str, *, dry_run: bool = False) -> PluginOperationResult:
         """Install a plugin package.
 
         Installs the specified PyPI package and validates that it provides
@@ -266,9 +267,9 @@ class PluginCommands:
         args = PluginCommands._build_install_args(name)
 
         if dry_run:
-            return PluginCommands._run_plugin_operation(name, args, verb='install', dry_run=True, timeout=120)
+            return await PluginCommands._run_plugin_operation(name, args, verb='install', dry_run=True, timeout=120)
 
-        result = PluginCommands._run_plugin_operation(name, args, verb='install', dry_run=False, timeout=120)
+        result = await PluginCommands._run_plugin_operation(name, args, verb='install', dry_run=False, timeout=120)
         if not result.success:
             return result
 
@@ -278,27 +279,27 @@ class PluginCommands:
 
         if not new_plugins:
             logger.warning("Package '%s' does not provide a porringer plugin entry point. Uninstalling.", name)
-            PluginCommands._uninstall_package(name)
+            await PluginCommands._uninstall_package(name)
             groups = ', '.join(PluginCommands._PLUGIN_GROUPS)
             raise PluginError(f"Package '{name}' is not a valid Porringer plugin (no entry point in {groups})")
 
         return result
 
     @staticmethod
-    def _uninstall_package(name: str) -> subprocess.CompletedProcess[str]:
+    async def _uninstall_package(name: str) -> None:
         """Internal helper to uninstall a package.
 
         Args:
             name: Package name to uninstall.
 
         Returns:
-            The completed process result.
+            None.
         """
         args = PluginCommands._build_uninstall_args(name)
-        return subprocess.run(args, capture_output=True, text=True, check=False, timeout=60)
+        await run_command(args, timeout=60)
 
     @staticmethod
-    def uninstall(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
+    async def uninstall(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
         """Uninstall plugin packages.
 
         Args:
@@ -314,17 +315,17 @@ class PluginCommands:
             logger.info('Uninstalling plugin: %s', name)
             args = PluginCommands._build_uninstall_args(name)
             results.append(
-                PluginCommands._run_plugin_operation(name, args, verb='uninstall', dry_run=dry_run, timeout=60)
+                await PluginCommands._run_plugin_operation(name, args, verb='uninstall', dry_run=dry_run, timeout=60)
             )
 
         return results
 
     @staticmethod
-    def update(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
-        """Update plugin packages.
+    async def upgrade(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
+        """Upgrade plugin packages.
 
         Args:
-            names: Package names to update.
+            names: Package names to upgrade.
             dry_run: If `True`, only report what would be done.
 
         Returns:
@@ -333,10 +334,10 @@ class PluginCommands:
         results: list[PluginOperationResult] = []
 
         for name in names:
-            logger.info('Updating plugin: %s', name)
-            args = PluginCommands._build_update_args(name)
+            logger.info('Upgrading plugin: %s', name)
+            args = PluginCommands._build_upgrade_args(name)
             results.append(
-                PluginCommands._run_plugin_operation(name, args, verb='update', dry_run=dry_run, timeout=120)
+                await PluginCommands._run_plugin_operation(name, args, verb='upgrade', dry_run=dry_run, timeout=120)
             )
 
         return results
