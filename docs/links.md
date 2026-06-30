@@ -15,7 +15,7 @@ A link is a way to find and preview a setup profile. It is not permission to ins
 ## What a Link Does
 
 - Opens a read-only preview of the referenced setup profile through `porringer open`.
-- Shows the packages, tools, runtimes, repositories, and project-sync actions that would run.
+- Shows the packages, tools, runtimes, repositories, and project-install actions that would run.
 - Displays the source origin before any action is taken.
 - Stops after preview. A person must run or confirm `porringer install <link>` before anything executes.
 
@@ -49,7 +49,7 @@ The `porringer://` scheme is declared by packaged application builds. The operat
 
 - A click should never be an install. Running commands on a machine requires a deliberate action.
 - Links are wired to inspection first, so a link can show a plan that the user declines.
-- Project-sync actions remain plugin-owned. Links can preview those actions, but installed plugins still select them from repository evidence.
+- Project-install actions remain plugin-owned. Links can preview those actions, but installed plugins still select them from repository evidence.
 - Integrity is not the same as trust. HTTPS and hashes prove bytes are intact; they do not prove the author is trustworthy.
 
 See [Scope and Non-goals](scope.md) for the boundary of what Porringer does, and

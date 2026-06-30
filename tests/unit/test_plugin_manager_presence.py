@@ -16,7 +16,7 @@ from porringer.backend.command.core.resolution import (
     ResolutionContext,
 )
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.schema import (
     Distribution,
     Ecosystem,
@@ -39,7 +39,7 @@ _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0
 
 def _make_plugins(
     environments: dict[str, Environment] | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    project_environments: dict[str, ProjectInstaller] | None = None,
 ) -> DiscoveredPlugins:
     """Build a ``DiscoveredPlugins`` container for test helpers."""
     return DiscoveredPlugins(
@@ -183,11 +183,11 @@ class TestInspectionPluginPresence:
     def _make_envs(
         *,
         installed: list[Package] | None = None,
-    ) -> tuple[MockPluginManager, dict[str, Environment], dict[str, ProjectEnvironment]]:
+    ) -> tuple[MockPluginManager, dict[str, Environment], dict[str, ProjectInstaller]]:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=installed)
         mock_pipx = make_environment(tool_name='pipx')
         environments: dict[str, Environment] = {'pipx': mock_pipx}
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         return mock_pm, environments, project_environments
 
     async def test_skips_when_plugin_installed(self) -> None:
@@ -275,7 +275,7 @@ class TestExecutePackagePluginPresence:
     async def test_skips_installed_plugin_on_minimal() -> None:
         """execute_package skips plugin-target action when already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
@@ -288,7 +288,7 @@ class TestExecutePackagePluginPresence:
     async def test_installs_missing_plugin_on_minimal() -> None:
         """execute_package installs plugin when not already installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)

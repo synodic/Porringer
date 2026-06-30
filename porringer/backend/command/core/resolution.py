@@ -32,7 +32,7 @@ from porringer.core.plugin_schema.plugin_manager import (
     PluginManager,
     find_plugin_manager,
 )
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PluginKind
@@ -282,7 +282,7 @@ class ResolutionContext:
 
     project_path: Path | None = None
     """Project directory for scoped package queries."""
-    project_environments: dict[str, ProjectEnvironment] | None = None
+    project_environments: dict[str, ProjectInstaller] | None = None
     """Dict of project-environment plugins, used to look up
     ``PluginManager`` instances for plugin-target actions."""
     http_client: aiohttp.ClientSession | None = None

@@ -6,17 +6,22 @@ Plugin implementation.
 from pathlib import Path
 from typing import override
 
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef
 
 
-class UvEnvironment(PythonEnvironment):
+class UvEnvironment(PythonEnvironment, ProjectInstaller):
     """Represents a Python environment managed by uv.
 
-    Provides methods to install, search, uninstall, upgrade, and list Python packages using uv
-    as the backend package manager.
+    Installs individual packages via ``uv pip install`` and also installs
+    whole projects via ``uv sync`` (the project-install capability).
     """
+
+    _install_verb = 'sync'
+    _project_evidence_files = ('uv.lock',)
+    _pyproject_tool_tables = (('tool', 'uv'),)
 
     def _python_args(self, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Return `['--python', '<path>']` when an override is active.

@@ -123,11 +123,10 @@ class TestListRuntimeConsumerVisibility:
         # but available when a runtime context with 'python' is present.
         mock_env = make_environment(available=lambda rc=None: rc is not None and 'python' in rc.executables)
 
+        discovered = DiscoveredPlugins(environments={'pip': mock_env}, project_environments={}, scm_environments={})
         with (
-            patch('porringer.backend.command.plugin.discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.plugin.discover_all_plugins', return_value=discovered),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
-            patch.object(Builder, 'find_plugins', return_value=([], {})),
-            patch.object(Builder, 'build_plugins', return_value=[]),
         ):
             results = await PluginCommands.list(kinds=[PluginKind.PACKAGE])
 
@@ -142,11 +141,10 @@ class TestListRuntimeConsumerVisibility:
 
         mock_env = make_environment(available=lambda rc=None: rc is not None and 'python' in rc.executables)
 
+        discovered = DiscoveredPlugins(environments={'pip': mock_env}, project_environments={}, scm_environments={})
         with (
-            patch('porringer.backend.command.plugin.discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.plugin.discover_all_plugins', return_value=discovered),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock, return_value=ctx),
-            patch.object(Builder, 'find_plugins', return_value=([], {})),
-            patch.object(Builder, 'build_plugins', return_value=[]),
         ):
             results = await PluginCommands.list(kinds=[PluginKind.PACKAGE])
 
@@ -161,11 +159,10 @@ class TestListRuntimeConsumerVisibility:
 
         mock_env = make_environment()
 
+        discovered = DiscoveredPlugins(environments={'pip': mock_env}, project_environments={}, scm_environments={})
         with (
-            patch('porringer.backend.command.plugin.discover_environments', return_value={'pip': mock_env}),
+            patch('porringer.backend.command.plugin.discover_all_plugins', return_value=discovered),
             patch.object(Builder, 'resolve_runtime_context', new_callable=AsyncMock) as mock_resolve,
-            patch.object(Builder, 'find_plugins', return_value=([], {})),
-            patch.object(Builder, 'build_plugins', return_value=[]),
         ):
             await PluginCommands.list(runtime_context=ctx)
 

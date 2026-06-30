@@ -11,12 +11,12 @@ Use Porringer when you want one repeatable entry point for setup while still rel
 ## Features
 
 - Manifest-driven setup from `porringer.json` or `[tool.porringer]` in `pyproject.toml`.
-- Plugin-based installers for Python, Node, system packages, project sync, runtimes, and source repositories.
+- Plugin-based installers for Python, Node, system packages, project install, runtimes, and source repositories.
 - Backend resolution: declare an ecosystem such as `python`, and Porringer selects an available installer such as `uv` or `pip`.
 - Read-only previews with stable action IDs, native command previews, diagnostics, and JSON output.
 - Sync strategies for minimal installs, latest allowed versions, or exact declared constraints.
 - Download and profile flows with HTTPS and hash verification.
-- Python APIs for inspection, execution, cached projects, profiles, tools, progress events, and client snapshots.
+- Python APIs for inspection, execution, profiles, tools, progress events, and client snapshots.
 
 ## Commands
 
@@ -27,7 +27,6 @@ Use Porringer when you want one repeatable entry point for setup while still rel
 | `porringer open` | Open a `porringer://` link as a read-only preview. |
 | `porringer check` | Check available package updates through installed plugins. |
 | `porringer download` | Download files with optional hash and size verification. |
-| `porringer cache` | Manage saved manifest directories. |
 | `porringer plugin list` | List available installer, project, runtime, and SCM plugins. |
 | `porringer package` | List, install, upgrade, or uninstall packages through a named plugin. |
 | `porringer env info` | Print local environment and plugin diagnostics. |

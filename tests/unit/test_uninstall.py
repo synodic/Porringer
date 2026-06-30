@@ -30,7 +30,7 @@ from porringer.backend.command.core.resolution import (
 )
 from porringer.backend.command.package import PackageCommands
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
 from porringer.schema import SetupAction, Skip, SkipReason, Uninstall
@@ -43,7 +43,7 @@ _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0
 
 def _make_plugins(
     environments: dict[str, Environment] | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    project_environments: dict[str, ProjectInstaller] | None = None,
 ) -> DiscoveredPlugins:
     return DiscoveredPlugins(
         environments=environments or {},
@@ -167,7 +167,7 @@ class TestResolveUninstallOperation:
         """Plugin-target: plugin installed → UNINSTALL."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_uninstall_operation(action, {}, ResolutionContext(project_environments=proj_envs))
         assert isinstance(resolved.operation, Uninstall)
@@ -178,7 +178,7 @@ class TestResolveUninstallOperation:
         """Plugin-target: plugin not installed → SKIP/NOT_INSTALLED."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_uninstall_operation(action, {}, ResolutionContext(project_environments=proj_envs))
         assert isinstance(resolved.operation, Skip)
@@ -265,7 +265,7 @@ class TestExecuteUninstall:
         """execute_uninstall routes plugin-target to plugin_uninstall."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=proj_envs)
 
         result = await execute_uninstall(action, {}, asyncio.Queue(), context)
@@ -278,7 +278,7 @@ class TestExecuteUninstall:
         """execute_uninstall skips when plugin is not installed."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = _make_action(package='cppython', installer='pipx', plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=proj_envs)
 
         result = await execute_uninstall(action, {}, asyncio.Queue(), context)

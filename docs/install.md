@@ -62,13 +62,13 @@ Manifest entries are grouped by kind, then by ecosystem. Ecosystem names are dec
 | `python` | `packages` | `uv`, `pip` |
 | `python` | `tools` | `pipx` |
 | `python` | `runtimes` | `pim`, `pyenv` |
-| `python` | project sync | `uv`, `pdm`, `poetry` |
+| `python` | project install | `uv`, `pdm`, `poetry` |
 | `system` | `packages` | `brew`, `apt`, `winget` |
 | `node` | `packages` | `npm`, `pnpm` |
-| `node` | project sync | `npm`, `pnpm`, `yarn` |
+| `node` | project install | `npm`, `pnpm` |
 | `git` | `scm` | `git` |
 
-Project sync is implicit. Project-environment plugins inspect the repository for marker files, lock files, and tool-specific configuration. Porringer then chooses one project-sync owner per ecosystem.
+Project install is implicit. Project-install plugins inspect the repository for marker files, lock files, and tool-specific configuration. Porringer then chooses one project-install owner per ecosystem.
 
 ## Package Plugins
 
@@ -112,7 +112,6 @@ porringer install
 porringer install ./my-project
 porringer install ./my-project --strategy latest
 porringer install ./my-project --strategy exact
-porringer install --all
 ```
 
 Use `--only-action` to run one or more stable action IDs from a previous preview:
@@ -126,19 +125,18 @@ porringer install ./my-project --only-action 0:2
 
 | Option | Description |
 | --- | --- |
-| `--project-dir`, `-d` | Working directory for project-sync actions. |
+| `--project-dir`, `-d` | Working directory for project-install actions. |
 | `--fail-fast / --no-fail-fast` | Stop on the first error, or continue and report all failures. |
 | `--strategy`, `-s` | Use `minimal`, `latest`, or `exact` resolution. |
 | `--plugin` | Include only actions for selected plugin names. Repeatable. |
 | `--only-action` | Run only a stable action ID such as `0:2`. Repeatable. |
 | `--jsonl` | Emit progress events and the final result as newline-delimited JSON. |
 | `--record` | Write a replayable JSON run record to the given path. |
-| `--all`, `-a` | Run on all cached directories. |
 | `--yes`, `-y` | Skip the confirmation prompt. |
 
 ## Execution Order
 
-Porringer installs runtimes before packages and tools, then handles project sync and source repositories. After package installation, it discovers plugins again. That lets tools installed earlier in the same run become installers for later actions.
+Porringer installs runtimes before packages and tools, then handles project install and source repositories. After package installation, it discovers plugins again. That lets tools installed earlier in the same run become installers for later actions.
 
 This is called deferred tool resolution. A tool action whose installer is not available during preview can be created with `installer=None` and resolved just before execution.
 
@@ -163,7 +161,7 @@ See `examples/python-bootstrap/` for a complete bootstrap example.
 
 ## Project Directory Resolution
 
-Project-sync backends discover their own project root by walking up from the manifest location and looking for ecosystem marker files.
+Project-install backends discover their own project root by walking up from the manifest location and looking for ecosystem marker files.
 
 | Ecosystem | Marker file |
 | --- | --- |
@@ -194,7 +192,7 @@ porringer install manifest.json --project-dir ./my-project
 
 ## Standalone Manifests
 
-When a manifest has no associated project, pass `project_directory=False` through the API. Package, tool, runtime, and SCM actions still run. Project-sync actions are reported as skipped instead of failed.
+When a manifest has no associated project, pass `project_directory=False` through the API. Package, tool, runtime, and SCM actions still run. Project-install actions are reported as skipped instead of failed.
 
 ```python
 import asyncio
@@ -351,9 +349,8 @@ Porringer owns reusable backend contracts for CLIs, GUIs, and agents:
 - `api.sync.inspect(...)` for manifest inspection.
 - `api.sync.run(..., on_event=...)` for execution with live progress.
 - `SetupParameters.action_ids` for stable action selectors.
-- `api.project.inspect(...)` and `api.project.inspect_cached(...)` for cached project health and action status.
-- `api.tool.check_updates(...)`, `api.tool.upgrade_cached(...)`, `api.tool.upgrade_package(...)`, and `api.tool.uninstall_package(...)` for managed package and tool operations.
+- `api.tool.check_updates(...)`, `api.tool.upgrade_project(...)`, `api.tool.upgrade_package(...)`, and `api.tool.uninstall_package(...)` for managed package and tool operations.
 - `api.profile.resolve(...)`, `api.profile.inspect(...)`, and `api.profile.run(...)` for portable HTTPS setup profiles.
-- `api.client.snapshot(...)` for low-latency plugin and cached-project state.
+- `api.client.snapshot(...)` for low-latency plugin and managed-tool update state.
 
 Downstream applications should own application-specific behavior such as saved profile lists, tray menus, URI confirmation, update schedules, sorting, and display labels.

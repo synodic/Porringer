@@ -13,7 +13,7 @@ from pathlib import Path
 from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.schema import (
     ManifestMetadata,
@@ -100,7 +100,7 @@ def action_description(
 def _get_plugin_cli_command(
     action: SetupAction,
     strategy: SyncStrategy,
-    project_environments: dict[str, ProjectEnvironment] | None,
+    project_environments: dict[str, ProjectInstaller] | None,
 ) -> list[str]:
     """Return the native CLI command for a plugin-management action.
 
@@ -152,7 +152,7 @@ def get_cli_command(
         case PluginKind.PROJECT:
             proj_envs = project_environments or {}
             if action.installer and action.installer in proj_envs:
-                cmd = proj_envs[action.installer].sync_command()
+                cmd = proj_envs[action.installer].project_install_command()
         case PluginKind.SCM:
             scm_envs = scm_environments or {}
             if action.installer and action.package and action.installer in scm_envs:

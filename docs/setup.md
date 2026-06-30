@@ -4,7 +4,7 @@ icon: lucide/play
 
 # Setup
 
-Install Porringer, then run `preview` before the first `install`. Preview is read-only, so it is the safest way to confirm which plugins, packages, runtimes, repositories, and project-sync actions Porringer sees.
+Install Porringer, then run `preview` before the first `install`. Preview is read-only, so it is the safest way to confirm which plugins, packages, runtimes, repositories, and project-install actions Porringer sees.
 
 ## Install
 
@@ -38,7 +38,7 @@ porringer preview examples/python-dev
 porringer install examples/python-dev --strategy minimal
 ```
 
-Use `preview` for the inspection step in any workflow. It reports selected plugins, actions, diagnostics, native command previews, and stable action IDs without installing packages or running project-sync commands.
+Use `preview` for the inspection step in any workflow. It reports selected plugins, actions, diagnostics, native command previews, and stable action IDs without installing packages or running project-install commands.
 
 ## Manifest Locations
 
@@ -48,16 +48,6 @@ Porringer looks for manifests in this order:
 2. `[tool.porringer]` in `pyproject.toml`.
 
 You can pass a directory, a manifest file, an HTTPS setup profile, or a `porringer://` install link to commands that inspect or run setup.
-
-## Cached Projects
-
-Cached directories let you inspect or sync a saved set of manifests:
-
-```shell
-porringer cache add .
-porringer cache list
-porringer preview --all
-```
 
 ## Development Checkout
 

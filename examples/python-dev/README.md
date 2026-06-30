@@ -4,7 +4,7 @@ This example shows a small Python development environment managed by Porringer. 
 
 ## What the Manifest Declares
 
-The `porringer.json` manifest groups entries by kind and ecosystem. Porringer resolves each ecosystem to an available installer at runtime, then detects project sync from repository files when a project plugin has ownership evidence.
+The `porringer.json` manifest groups entries by kind and ecosystem. Porringer resolves each ecosystem to an available installer at runtime, then detects project install from repository files when a project plugin has ownership evidence.
 
 | Manifest section | Resolves to | Installs |
 | --- | --- | --- |

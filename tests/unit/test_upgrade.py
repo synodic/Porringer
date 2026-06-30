@@ -19,7 +19,7 @@ from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.core.execution import execute_package
 from porringer.backend.command.package import PackageCommands
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Distribution, Ecosystem, Package, PackageRef, PluginKind, PluginParameters
 from porringer.schema import SetupAction, SetupActionResult, SyncStrategy
@@ -31,7 +31,7 @@ _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0
 
 def _make_plugins(
     environments: dict[str, Environment] | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    project_environments: dict[str, ProjectInstaller] | None = None,
 ) -> DiscoveredPlugins:
     return DiscoveredPlugins(
         environments=environments or {},

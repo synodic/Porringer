@@ -44,14 +44,14 @@ class TestInstallCLI:
 
     @staticmethod
     def test_non_tty_refuses_without_yes(tmp_path: Path, test_config) -> None:
-        """Non-interactive install without --yes refuses to execute."""
+        """Non-interactive install without --yes aborts with an actionable hint."""
         _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
         runner = CliRunner()
 
         result = runner.invoke(app, ['install', str(tmp_path)], obj=test_config)
 
         assert result.exit_code == 1
-        assert 'Refusing to execute' in result.output
+        assert 'PORRINGER_ASSUME_YES' in result.output
 
     @staticmethod
     def test_removed_command_hook_option_is_not_advertised(tmp_path: Path, test_config) -> None:

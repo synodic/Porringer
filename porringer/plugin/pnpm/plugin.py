@@ -7,16 +7,24 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
+from porringer.core.plugin_schema.project_environment import NodeProjectInstaller
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
-class PNPMEnvironment(Environment):
+class PNPMEnvironment(Environment, NodeProjectInstaller):
     """Represents a Node.js environment managed by pnpm.
 
-    Provides methods to install, search, uninstall, upgrade, and list
-    Node.js packages using pnpm as the backend package manager.
+    Installs individual packages via ``pnpm add -g`` and also installs
+    whole projects via ``pnpm install`` (the project-install capability).
+
+    pnpm does not support ``--dry-run``, so project-install dry runs log
+    the command without executing it.
     """
+
+    _supports_dry_run: bool = False
+    _project_evidence_files = ('pnpm-lock.yaml',)
+    _package_manager_names = ('pnpm@',)
 
     @staticmethod
     @override

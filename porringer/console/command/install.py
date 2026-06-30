@@ -10,11 +10,25 @@ from typing import Annotated
 
 import typer
 
+from porringer.api import API
 from porringer.console.command import sync as sync_command
-from porringer.console.common import EXIT_FAILURE, create_api, parse_strategy, sniff_profile
+from porringer.console.common import (
+    EXIT_FAILURE,
+    OnlyActionOption,
+    PluginOption,
+    ProjectDirOption,
+    StrategyOption,
+    TargetArgument,
+    TargetPlan,
+    build_setup_parameters,
+    classify_target,
+    confirm_or_abort,
+    create_api,
+    parse_shared_options,
+    resolve_target_or_exit,
+)
 from porringer.console.schema import ConsoleConfiguration
-from porringer.core.target import TargetKind, TargetResolution, resolve_target
-from porringer.schema import InspectionMode, InspectionSummary, SetupParameters, SyncStrategy
+from porringer.schema import InspectionMode, InspectionSummary, SyncStrategy
 
 
 @dataclass(slots=True)
@@ -26,22 +40,14 @@ class _InstallOptions:
     strategy: SyncStrategy = SyncStrategy.MINIMAL
     plugins: set[str] | None = None
     action_ids: set[str] | None = None
-    all_cached: bool = False
     as_jsonl: bool = False
     record_path: Path | None = None
     yes: bool = False
 
 
-def _confirm_or_exit(configuration: ConsoleConfiguration, yes: bool) -> bool:
-    """Require a local confirmation unless ``--yes`` was provided."""
-    if yes:
-        return True
-
-    if not configuration.console.is_terminal:
-        configuration.output.error('Refusing to execute without --yes in non-interactive mode')
-        raise typer.Exit(EXIT_FAILURE)
-
-    return typer.confirm('Apply this setup plan?', default=False)
+def _confirm_or_abort(configuration: ConsoleConfiguration, yes: bool) -> None:
+    """Require confirmation for the setup plan unless ``--yes`` was provided."""
+    confirm_or_abort(configuration, yes=yes, prompt='Apply this setup plan?')
 
 
 def _summary_line(prefix: str, summary: InspectionSummary) -> str:
@@ -55,57 +61,28 @@ def _summary_line(prefix: str, summary: InspectionSummary) -> str:
     )
 
 
-def _setup_parameters(options: _InstallOptions, paths: Path | list[str] | None) -> SetupParameters:
-    """Build setup parameters from install options."""
-    return SetupParameters(
-        paths=paths,
-        project_directory=options.project_directory,
-        fail_fast=options.fail_fast,
-        strategy=options.strategy,
-        plugins=options.plugins,
-        action_ids=options.action_ids,
-        inspection_mode=InspectionMode.FAST,
-    )
-
-
-def _manifest_paths(
-    configuration: ConsoleConfiguration, target: TargetResolution, options: _InstallOptions
-) -> Path | list[str] | None:
-    """Resolve the manifest paths for a non-link install target."""
-    if options.all_cached:
-        return None
-
-    if target.kind == TargetKind.PATH:
-        if target.path is None or not target.path.exists():
-            configuration.output.error(f'Path does not exist: {target.path}')
-            raise typer.Exit(EXIT_FAILURE)
-        return target.path.resolve()
-
-    if target.kind == TargetKind.URL and target.url is not None:
-        return [target.url]
-
-    configuration.output.error(f'Unsupported install target: {target.kind}')
-    raise typer.Exit(EXIT_FAILURE)
-
-
 def _run_manifest_install(
     configuration: ConsoleConfiguration,
-    target: TargetResolution,
+    api: API,
+    paths: Path | list[str] | None,
     options: _InstallOptions,
 ) -> None:
     """Execute a manifest-oriented install target."""
-    setup_params = _setup_parameters(options, _manifest_paths(configuration, target, options))
-
-    api = create_api(configuration)
+    setup_params = build_setup_parameters(
+        paths,
+        project_directory=options.project_directory,
+        strategy=options.strategy,
+        plugins=options.plugins,
+        action_ids=options.action_ids,
+        fail_fast=options.fail_fast,
+    )
 
     # JSONL output must stay machine-clean, so the human preview is skipped there.
     if not options.as_jsonl:
         report = asyncio.run(api.sync.inspect(setup_params))
         configuration.output.print(_summary_line('Preview', report.summary))
 
-    if not _confirm_or_exit(configuration, options.yes):
-        configuration.output.warning('Aborted')
-        return
+    _confirm_or_abort(configuration, options.yes)
 
     if options.as_jsonl or options.record_path is not None:
         execute_results = sync_command._execute_observable(
@@ -131,34 +108,39 @@ def _run_manifest_install(
 
 def _run_profile_install(
     configuration: ConsoleConfiguration,
-    target: TargetResolution,
+    api: API,
+    plan: TargetPlan,
     options: _InstallOptions,
 ) -> None:
     """Execute a profile-oriented install target."""
-    if target.profile_url is None:
+    if plan.profile_url is None:
         configuration.output.error('Install link target is missing profile URL')
         raise typer.Exit(EXIT_FAILURE)
 
-    api = create_api(configuration)
     inspection = asyncio.run(
         api.profile.inspect(
-            target.profile_url,
+            plan.profile_url,
             inspection_mode=InspectionMode.FAST,
-            expected_hash=target.expected_hash,
+            expected_hash=plan.expected_hash,
         )
     )
     summary = inspection.inspection.summary
     configuration.output.print(_summary_line('Profile preview', summary))
 
-    if not _confirm_or_exit(configuration, options.yes):
-        configuration.output.warning('Aborted')
-        return
+    _confirm_or_abort(configuration, options.yes)
 
     execution = asyncio.run(
         api.profile.run(
-            target.profile_url,
-            parameters=_setup_parameters(options, None),
-            expected_hash=target.expected_hash,
+            plan.profile_url,
+            parameters=build_setup_parameters(
+                None,
+                project_directory=options.project_directory,
+                strategy=options.strategy,
+                plugins=options.plugins,
+                action_ids=options.action_ids,
+                fail_fast=options.fail_fast,
+            ),
+            expected_hash=plan.expected_hash,
         )
     )
 
@@ -169,94 +151,62 @@ def _run_profile_install(
 
 def install_default(  # noqa: PLR0913
     context: typer.Context,
-    target: Annotated[
-        str | None,
-        typer.Argument(help='Optional target: local path, https URL, or porringer:// install link'),
-    ] = None,
+    target: TargetArgument = None,
     *,
-    project_dir: Annotated[
-        Path | None,
-        typer.Option(
-            '--project-dir',
-            '-d',
-            help='Working directory for project-sync actions',
-        ),
-    ] = None,
+    project_dir: ProjectDirOption = None,
     fail_fast: Annotated[
         bool,
-        typer.Option('--fail-fast/--no-fail-fast', help='Stop on first error'),
+        typer.Option('--fail-fast/--no-fail-fast', help='Stop on the first error'),
     ] = True,
-    strategy: Annotated[
-        str,
-        typer.Option('--strategy', '-s', help='Install strategy: minimal (default), latest, or exact'),
-    ] = 'minimal',
-    plugin: Annotated[
-        list[str] | None,
-        typer.Option('--plugin', help='Only include actions from these plugins (repeatable).'),
-    ] = None,
-    only_action: Annotated[
-        list[str] | None,
-        typer.Option('--only-action', help='Only run a stable action id such as 0:2 (repeatable).'),
-    ] = None,
+    strategy: StrategyOption = 'minimal',
+    plugin: PluginOption = None,
+    only_action: OnlyActionOption = None,
     jsonl: Annotated[
         bool,
-        typer.Option('--jsonl', help='Emit progress events and final result as newline-delimited JSON'),
+        typer.Option('--jsonl', help='Stream progress and the final result as newline-delimited JSON'),
     ] = False,
     record: Annotated[
         Path | None,
         typer.Option('--record', help='Write a replayable JSON run record to this path'),
     ] = None,
-    all_cached: Annotated[
-        bool,
-        typer.Option('--all', '-a', help='Run on all cached directories'),
-    ] = False,
     yes: Annotated[
         bool,
-        typer.Option('--yes', '-y', help='Skip confirmation prompt'),
+        typer.Option(
+            '--yes',
+            '-y',
+            envvar='PORRINGER_ASSUME_YES',
+            help='Skip confirmation prompt (also honoured via the PORRINGER_ASSUME_YES env var)',
+        ),
     ] = False,
 ) -> None:
-    """Install from the nearest manifest, an explicit path, URL, or install link."""
+    """Synchronize an environment from a manifest, profile, or install link.
+
+    With no target, Porringer uses the nearest manifest in the current directory
+    tree. You can also pass a local path, an https URL, or a porringer:// link.
+    Porringer previews the plan and asks for confirmation before changing
+    anything. Pass --yes (or set PORRINGER_ASSUME_YES=1) to run unattended.
+    """
     configuration = context.ensure_object(ConsoleConfiguration)
 
+    shared = parse_shared_options(
+        configuration, strategy=strategy, project_dir=project_dir, plugin=plugin, only_action=only_action
+    )
     options = _InstallOptions(
-        project_directory=project_dir.resolve() if project_dir else None,
+        project_directory=shared.project_directory,
         fail_fast=fail_fast,
-        strategy=parse_strategy(configuration, strategy),
-        plugins=set(plugin) if plugin else None,
-        action_ids=set(only_action) if only_action else None,
-        all_cached=all_cached,
+        strategy=shared.strategy,
+        plugins=shared.plugins,
+        action_ids=shared.action_ids,
         as_jsonl=jsonl,
         record_path=record,
         yes=yes,
     )
 
-    if all_cached:
-        _run_manifest_install(configuration, TargetResolution(kind=TargetKind.PATH), options)
-        return
+    resolved_target = resolve_target_or_exit(configuration, target)
+    api = create_api(configuration)
+    plan = classify_target(configuration, api, resolved_target)
 
-    try:
-        resolved_target = resolve_target(target)
-    except ValueError as exc:
-        configuration.output.error(str(exc))
-        raise typer.Exit(EXIT_FAILURE) from exc
-
-    if resolved_target.kind == TargetKind.URL and resolved_target.url is not None:
-        # A bare https URL is ambiguous; a strict profile parse decides.
-        api = create_api(configuration)
-        try:
-            profile = asyncio.run(sniff_profile(api, resolved_target.url))
-        except ValueError as exc:
-            configuration.output.error(str(exc))
-            raise typer.Exit(EXIT_FAILURE) from exc
-        if profile is not None:
-            resolved_target = TargetResolution(
-                kind=TargetKind.LINK,
-                profile_url=resolved_target.url,
-                expected_hash=resolved_target.expected_hash,
-            )
-
-    if resolved_target.kind == TargetKind.LINK:
-        _run_profile_install(configuration, resolved_target, options)
-        return
-
-    _run_manifest_install(configuration, resolved_target, options)
+    if plan.is_profile:
+        _run_profile_install(configuration, api, plan, options)
+    else:
+        _run_manifest_install(configuration, api, plan.manifest_paths, options)

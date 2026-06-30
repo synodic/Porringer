@@ -46,7 +46,7 @@ def build_plugin_info(
 ) -> list[PluginInfo]:
     """Build metadata for discovered plugins, optionally filtered by kind.
 
-    Accepts any `Plugin` instance (`Environment`, `ProjectEnvironment`,
+    Accepts any `Plugin` instance (`Environment`, `ProjectInstaller`,
     `ScmEnvironment`).  The `tool_version` field is populated for any
     `ToolBasedPlugin` that reports itself as available.
 

@@ -18,7 +18,7 @@ import pytest
 
 from porringer.backend.command.core.discovery import discover_all_plugins
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.schema import PackageRef
 from tests.fixtures.command_process import CommandProcess
 
@@ -27,7 +27,7 @@ def _env_pairs() -> list[tuple[str, Environment]]:
     return sorted(discover_all_plugins(use_cache=False).environments.items())
 
 
-def _proj_pairs() -> list[tuple[str, ProjectEnvironment]]:
+def _proj_pairs() -> list[tuple[str, ProjectInstaller]]:
     return sorted(discover_all_plugins(use_cache=False).project_environments.items())
 
 
@@ -58,10 +58,10 @@ def test_environment_command_builders_perform_no_subprocess(
 @pytest.mark.parametrize(('name', 'plugin'), _PROJ, ids=_PROJ_IDS)
 def test_project_sync_command_performs_no_subprocess(
     name: str,
-    plugin: ProjectEnvironment,
+    plugin: ProjectInstaller,
     command_process: CommandProcess,
 ) -> None:
     """``sync_command`` is pure."""
     del name
-    plugin.sync_command()
+    plugin.project_install_command()
     command_process.assert_no_calls()

@@ -24,8 +24,7 @@ Use complete mode for final diagnostics. Use fast mode for live refresh loops wh
 | Option | Description |
 | --- | --- |
 | `--path`, `-p` | Manifest file or directory containing a manifest. |
-| `--all`, `-a` | Inspect all cached directories. |
-| `--project-dir`, `-d` | Working directory for project-sync actions. |
+| `--project-dir`, `-d` | Working directory for project-install actions. |
 | `--strategy`, `-s` | Use `minimal`, `latest`, or `exact` resolution. |
 | `--mode` | Use `complete` or `fast` inspection. |
 | `--plugin` | Include only actions for selected plugin names. Repeatable. |

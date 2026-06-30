@@ -27,7 +27,6 @@ from urllib.parse import urlparse
 import aiohttp
 
 from porringer.backend.builder import Builder
-from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.core.plugin_schema.runtime import RuntimeConsumer
 from porringer.core.schema import PluginKind
@@ -35,6 +34,8 @@ from porringer.schema import (
     ActionCompletedEvent,
     ActionRef,
     BatchSetupResults,
+    DirectoryState,
+    DirectoryStatus,
     DownloadParameters,
     DownloadResult,
     FailedPathInspection,
@@ -101,13 +102,8 @@ class SyncCommands:
     has moved to :class:`~porringer.backend.command.package.PackageCommands`.
     """
 
-    def __init__(self, cache_manager: DirectoryCacheManager | None = None) -> None:
-        """Initialize the SyncCommands class.
-
-        Args:
-            cache_manager: Optional cache manager for resolving cached paths.
-        """
-        self._cache_manager = cache_manager
+    def __init__(self) -> None:
+        """Initialize the SyncCommands class."""
 
     # --- Static helpers delegated to sub-modules ---
 
@@ -185,26 +181,18 @@ class SyncCommands:
         return local, urls
 
     def _resolve_paths(self, parameters: SetupParameters) -> tuple[list[Path], list[str]]:
-        """Resolve paths from parameters, using cache if needed.
+        """Resolve paths from parameters.
+
+        When ``parameters.paths`` is ``None`` the current working directory is
+        used, so Porringer operates on the nearest manifest.
 
         Returns:
             ``(local_paths, urls)`` — local paths to process and URLs
             to download.
-
-        Raises:
-            ValueError: If no paths can be resolved.
         """
         if parameters.paths is not None:
             return self._partition_paths(parameters.paths)
-
-        if self._cache_manager is None:
-            return [Path('.')], []
-
-        paths = self._cache_manager.get_paths()
-        if not paths:
-            raise ValueError('No cached directories. Add directories first with "porringer cache add".')
-
-        return paths, []
+        return [Path('.')], []
 
     @staticmethod
     async def _download_urls(
@@ -410,6 +398,66 @@ class SyncCommands:
         finally:
             if tmp_dir is not None:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    async def inspect_paths(
+        self,
+        paths: Sequence[str | Path],
+        *,
+        inspection_mode: InspectionMode = InspectionMode.FAST,
+        plugins: DiscoveredPlugins | None = None,
+    ) -> tuple[DirectoryStatus, ...]:
+        """Inspect a caller-supplied list of directories, one status per path.
+
+        Stateless: the caller (e.g. a downstream GUI) owns the list of
+        project directories. Each path is classified as missing, lacking a
+        manifest, inspected, or failed, with an action summary when a
+        manifest is present. Plugins are discovered once and shared across
+        every path.
+
+        Args:
+            paths: Directories (or manifest files) to inspect.
+            inspection_mode: Inspection depth for directories with a manifest.
+            plugins: Pre-discovered plugins. Discovered once when omitted.
+
+        Returns:
+            One :class:`DirectoryStatus` per input path, in order.
+        """
+        shared_plugins = plugins
+        if shared_plugins is None:
+            shared_plugins = await asyncio.to_thread(discover_all_plugins, use_cache=True)
+
+        statuses: list[DirectoryStatus] = []
+        for raw in paths:
+            path = await asyncio.to_thread(Path(raw).resolve)
+            exists = await asyncio.to_thread(path.exists)
+            if not exists:
+                statuses.append(DirectoryStatus(path=path, name=path.name, exists=False, state=DirectoryState.MISSING))
+                continue
+
+            if not await asyncio.to_thread(self.has_manifest, path):
+                statuses.append(
+                    DirectoryStatus(path=path, name=path.name, exists=True, state=DirectoryState.NO_MANIFEST)
+                )
+                continue
+
+            report = await self.inspect(
+                SetupParameters(paths=path, inspection_mode=inspection_mode, fail_fast=False),
+                plugins=shared_plugins,
+            )
+            error = None if report.success else next((failed.error for failed in report.failed_paths), None)
+            statuses.append(
+                DirectoryStatus(
+                    path=path,
+                    name=path.name,
+                    exists=True,
+                    has_manifest=True,
+                    state=DirectoryState.INSPECTED if report.success else DirectoryState.FAILED,
+                    summary=report.summary,
+                    error=error,
+                )
+            )
+
+        return tuple(statuses)
 
     # --- Execution API ---
 

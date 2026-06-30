@@ -251,7 +251,7 @@ class SetupParameters(PorringerModel):
         description=(
             'Path(s) to manifest file(s) or directories, or URL strings '
             '(``http://`` / ``https://``) pointing to remote manifests. '
-            'None uses all cached directories.'
+            'None uses the nearest manifest in the current directory.'
         ),
     )
     project_directory: Path | Literal[False] | None = Field(

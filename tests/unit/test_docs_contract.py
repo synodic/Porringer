@@ -22,7 +22,6 @@ def test_documented_command_index_matches_cli_surface() -> None:
     """The command index names the current top-level CLI surfaces."""
     index = _docs_file('index.md')
     expected_commands = {
-        'porringer cache',
         'porringer plugin list',
         'porringer package',
         'porringer preview',

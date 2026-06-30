@@ -10,8 +10,8 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from porringer.console.command.cache import app as cache_app
 from porringer.console.command.check import app as check_app
+from porringer.console.command.doc import doc_default
 from porringer.console.command.download import app as download_app
 from porringer.console.command.env import app as env_app
 from porringer.console.command.install import install_default
@@ -27,8 +27,8 @@ from porringer.console.schema import LOG_LEVELS, MAX_VERBOSITY_LEVEL, VERBOSITY_
 __version__ = version('porringer')
 
 app = typer.Typer()
-app.add_typer(cache_app, name='cache')
 app.add_typer(check_app, name='check')
+app.command(name='doc')(doc_default)
 app.add_typer(download_app, name='download')
 app.add_typer(env_app, name='env')
 app.command(name='install')(install_default)

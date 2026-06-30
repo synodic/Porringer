@@ -50,11 +50,10 @@ asyncio.run(main())
 
 | Namespace | Main operations |
 | --- | --- |
-| `api.sync` | Inspect manifests and run them with optional progress events. |
+| `api.sync` | Inspect manifests and run them with optional progress events. Use `inspect_paths([...])` for a stateless per-directory dashboard view. |
 | `api.package` | List, install, upgrade, uninstall, and check package updates through environment plugins. |
 | `api.extension` | List, install, upgrade, and uninstall Porringer extension packages. |
-| `api.project` | Add, remove, list, clear, inspect, and inspect cached project directories. |
-| `api.tool` | Check, upgrade, or uninstall packages and tools from cached manifests. |
+| `api.tool` | Check, upgrade, or uninstall packages and tools for the current project. |
 | `api.profile` | Resolve, inspect, and run HTTPS setup profiles. |
 | `api.client` | Build aggregate snapshots for long-lived clients. |
 
@@ -93,9 +92,9 @@ Prefer importing schemas from `porringer.schema` instead of individual schema mo
 ```python
 from porringer.schema import (
     ActionProgress,
+    DirectoryStatus,
     FollowUpAction,
     InspectionMode,
-    ProjectInspectionReport,
     ResultEnvelope,
     SetupParameters,
     SyncInspectionReport,
@@ -111,7 +110,7 @@ Plugin authors should build on `porringer.core.plugin_schema` and `porringer.cor
 | Surface | Use when implementing |
 | --- | --- |
 | `Environment` | Package manager plugins such as `pip`, `npm`, `apt`, or `winget`. |
-| `ProjectEnvironment` | Project dependency sync plugins such as `pdm`, `poetry`, or `npm-project`. |
+| `ProjectInstaller` | The project-install capability. Mix into a package plugin (e.g. `uv`, `npm`, `pnpm`) so one plugin drives both phases, or subclass `ProjectEnvironment` for a project-only tool such as `pdm` or `poetry`. |
 | `ScmEnvironment` | Source-control plugins such as `git`. |
 | `RuntimeProvider` | Plugins that discover or install language runtimes. |
 | `RuntimeConsumer` | Plugins that can target a resolved runtime executable. |

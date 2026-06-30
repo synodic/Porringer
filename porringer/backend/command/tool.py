@@ -1,6 +1,6 @@
 """CLI command implementation for tool.
 
-Managed tool/package operations over cached manifests.
+Managed tool/package operations over the current project's manifest.
 """
 
 from collections.abc import Callable
@@ -45,7 +45,7 @@ class ToolCommands:
         plugin_names: set[str] | None = None,
         include_packages: set[str] | None = None,
     ) -> ManagedToolReport:
-        """Check cached manifests for managed packages with updates available."""
+        """Check the current project's manifest for managed packages with updates available."""
         params = SetupParameters(
             paths=None,
             inspection_mode=InspectionMode.COMPLETE,
@@ -56,7 +56,7 @@ class ToolCommands:
         report = await self._sync.inspect(params, plugins=plugins)
         return _report_from_inspection('check_updates', report)
 
-    async def upgrade_cached(
+    async def upgrade_project(
         self,
         *,
         plugins: DiscoveredPlugins | None = None,
@@ -64,9 +64,9 @@ class ToolCommands:
         include_packages: set[str] | None = None,
         on_event: Callable[[ProgressEvent], object] | None = None,
     ) -> ManagedToolReport:
-        """Upgrade managed packages declared by cached manifests.
+        """Upgrade managed packages declared by the current project's manifest.
 
-        Cached-manifest tool upgrades change package/tool state and do not
+        Tool upgrades change package/tool state and do not
         execute separate project-command hooks.
         """
         params = SetupParameters(
@@ -77,7 +77,7 @@ class ToolCommands:
             fail_fast=False,
         )
         report = await self._sync.run(params, plugins=plugins, on_event=on_event)
-        return _report_from_batch('upgrade_cached', report.results)
+        return _report_from_batch('upgrade_project', report.results)
 
     async def upgrade_plugin(
         self,
@@ -89,7 +89,7 @@ class ToolCommands:
         plugins: DiscoveredPlugins | None = None,
         on_event: Callable[[ProgressEvent], object] | None = None,
     ) -> ManagedToolReport:
-        """Upgrade one plugin through cached manifests, or one package imperatively."""
+        """Upgrade one plugin through the current project's manifest, or one package imperatively."""
         if package is not None:
             return await self.upgrade_package(plugin_name, package, runtime_tag=runtime_tag, plugins=plugins)
         if runtime_tag is not None:
@@ -99,7 +99,7 @@ class ToolCommands:
                 include_packages=include_packages,
                 plugins=plugins,
             )
-        return await self.upgrade_cached(
+        return await self.upgrade_project(
             plugins=plugins,
             plugin_names={plugin_name},
             include_packages=include_packages,

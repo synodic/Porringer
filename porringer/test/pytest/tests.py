@@ -174,7 +174,7 @@ class ProjectEnvironmentUnitTests[T: ProjectEnvironment](
         """sync_command() should return a non-empty list of strings."""
         params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
         instance = plugin_type(params)
-        cmd = instance.sync_command()
+        cmd = instance.project_install_command()
         assert isinstance(cmd, list)
         assert len(cmd) > 0
         assert all(isinstance(part, str) for part in cmd)

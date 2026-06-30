@@ -17,7 +17,7 @@ from porringer.backend.command.core.resolution import (
     resolve_operation,
 )
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.schema import (
     Distribution,
@@ -47,7 +47,7 @@ _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0
 
 def _make_plugins(
     environments: dict[str, Environment] | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    project_environments: dict[str, ProjectInstaller] | None = None,
 ) -> DiscoveredPlugins:
     """Build a ``DiscoveredPlugins`` container for test helpers."""
     return DiscoveredPlugins(
@@ -283,7 +283,7 @@ class TestResolveOperation:
         """Plugin: MINIMAL + installed -> SKIP."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -300,7 +300,7 @@ class TestResolveOperation:
         """Plugin: MINIMAL + not installed -> INSTALL."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -316,7 +316,7 @@ class TestResolveOperation:
         """Plugin: LATEST + installed -> UPGRADE."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -332,7 +332,7 @@ class TestResolveOperation:
         """Plugin: LATEST + not installed -> INSTALL (fallback)."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
         action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -387,7 +387,7 @@ class TestPluginUpgradeRouting:
     async def test_latest_routes_to_upgrade() -> None:
         """execute_package with LATEST calls plugin_upgrade for installed plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context)
@@ -400,7 +400,7 @@ class TestPluginUpgradeRouting:
     async def test_latest_installs_when_not_present() -> None:
         """execute_package with LATEST calls plugin_install for missing plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.LATEST, asyncio.Queue(), context)
@@ -412,7 +412,7 @@ class TestPluginUpgradeRouting:
     async def test_minimal_always_uses_install() -> None:
         """execute_package with MINIMAL uses plugin_install for new plugin."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[])
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(_PLUGIN_ACTION, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
@@ -437,7 +437,7 @@ class TestCliCommandUpgradePreview:
         """get_cli_command returns plugin_upgrade_command for LATEST strategy."""
         mock_pm = self._make_mock_pm()
         ref = PackageRef.model_validate('cppython')
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         action = SetupAction(
             description="Upgrade plugin 'cppython' to 'mock-pm'",
@@ -462,7 +462,7 @@ class TestCliCommandUpgradePreview:
         """get_cli_command returns plugin_install_command for MINIMAL strategy."""
         mock_pm = self._make_mock_pm()
         ref = PackageRef.model_validate('cppython')
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         action = SetupAction(
             description="Install plugin 'cppython' to 'mock-pm'",
@@ -488,7 +488,7 @@ class TestCliCommandUpgradePreview:
         """Poetry: LATEST returns same as install (Poetry upgrade delegates to install)."""
         poetry_env = PoetryEnvironment(_MOCK_PARAMS)
         ref = PackageRef.model_validate('poetry-plugin-export')
-        project_environments: dict[str, ProjectEnvironment] = {'poetryproject': poetry_env}
+        project_environments: dict[str, ProjectInstaller] = {'poetryproject': poetry_env}
 
         action = SetupAction(
             description="Upgrade plugin 'poetry-plugin-export' to 'poetry'",
@@ -678,7 +678,7 @@ class TestExtrasReinstall:
         """Plugin: MINIMAL + installed + no extras -> SKIP."""
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         action = self._make_action(name='cppython', plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -696,7 +696,7 @@ class TestExtrasReinstall:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')
         action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         with patch(
             'porringer.backend.command.core.resolution.fetch_plugin_extras_context',
@@ -718,7 +718,7 @@ class TestExtrasReinstall:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')
         action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         with patch(
             'porringer.backend.command.core.resolution.fetch_plugin_extras_context',
@@ -739,7 +739,7 @@ class TestExtrasReinstall:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         # tool_python() returns None by default on MockPluginManager
         action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
 
         resolved = await resolve_operation(
             action,
@@ -758,7 +758,7 @@ class TestExtrasReinstall:
         mock_pm = MockPluginManager(_MOCK_PARAMS, installed=[Package(name='cppython', version='0.9.14')])
         mock_pm.tool_python = MagicMock(return_value='/usr/bin/python')
         action = self._make_action(plugin_target='mock-pm')
-        proj_envs: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        proj_envs: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=proj_envs)
 
         with patch(

@@ -13,7 +13,6 @@ from rich.console import Console
 
 from porringer.api import API
 from porringer.backend.builder import Builder
-from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core import discovery as _discovery
 from porringer.backend.command.core.discovery import invalidate_plugin_cache
 from porringer.backend.schema import GlobalConfiguration
@@ -236,13 +235,6 @@ def temp_cache_dir():
         data_dir = tmp_path / 'data'
         data_dir.mkdir()
         yield tmp_path, data_dir
-
-
-@pytest.fixture
-def cache_manager(temp_cache_dir):
-    """DirectoryCacheManager instance for testing."""
-    _, data_dir = temp_cache_dir
-    return DirectoryCacheManager(data_dir)
 
 
 @pytest.fixture

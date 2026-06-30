@@ -15,12 +15,10 @@ import sys
 from importlib import metadata
 
 from porringer.backend.builder import Builder
-from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_environments
+from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins
 from porringer.backend.resolver import build_plugin_info
 from porringer.core.plugin_schema.plugin_manager import PluginManager
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
-from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.schema import Plugin, PluginKind
 from porringer.schema import PluginInfo, PluginOperationResult
 from porringer.utility.exception import PluginError
@@ -83,17 +81,10 @@ class PluginCommands:
             scm_plugins = plugins.scm_environments
             runtime_context = plugins.resolved_runtime(runtime_context)
         else:
-            environments = discover_environments()
-
-            # Project-environment plugins (project sync)
-            project_types, _ = Builder.find_plugins('project_environment', ProjectEnvironment)
-            project_instances = Builder.build_plugins(project_types)
-            projects = {info.name: inst for info, inst in zip(project_types, project_instances, strict=True)}
-
-            # SCM plugins (source control)
-            scm_types, _ = Builder.find_plugins('scm', ScmEnvironment)
-            scm_instances = Builder.build_plugins(scm_types)
-            scm_plugins = {info.name: inst for info, inst in zip(scm_types, scm_instances, strict=True)}
+            discovered = discover_all_plugins()
+            environments = discovered.environments
+            projects = discovered.project_environments
+            scm_plugins = discovered.scm_environments
 
         # Auto-resolve runtime context when the caller did not supply one.
         if runtime_context is None:
@@ -136,7 +127,6 @@ class PluginCommands:
 
     _PLUGIN_GROUPS = (
         'porringer.environment',
-        'porringer.project_environment',
         'porringer.scm',
     )
 
