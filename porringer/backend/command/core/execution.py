@@ -79,7 +79,6 @@ from .resolution import (
     PackageCache,
     ResolutionContext,
     resolve_operation,
-    resolve_uninstall_operation,
     resolved_to_result,
 )
 
@@ -574,7 +573,7 @@ def _prepare_action_context(
 ) -> tuple[dict[str, Environment], ResolutionContext]:
     """Apply per-action WSL routing and cache/runtime-context merges.
 
-    Shared by :func:`execute_package` and :func:`execute_uninstall`.
+    Shared by :func:`execute_package` and other execution helpers.
     Merges a caller-provided ``package_cache`` into the resolution
     context.
 
@@ -730,101 +729,6 @@ async def _attempt_package_operation(
     )
 
 
-async def execute_uninstall(
-    action: SetupAction,
-    environments: dict[str, Environment],
-    event_queue: asyncio.Queue[ProgressEvent | None],
-    context: ResolutionContext | None = None,
-    *,
-    package_cache: PackageCache | None = None,
-    teardown_complete: set[str] | None = None,
-) -> SetupActionResult:
-    """Execute a package uninstall after resolving presence.
-
-    Delegates to :func:`resolve_uninstall_operation` to determine
-    whether the package is installed, then dispatches to
-    ``uninstall`` (or ``plugin_uninstall`` for plugin-target
-    actions).
-
-    Args:
-        action: The package action describing what to uninstall.
-        environments: Dict of instantiated environment plugins.
-        event_queue: Queue to emit action progress events into.
-        context: Optional resolution context providing runtime paths,
-            project-environment references, and package cache.
-        package_cache: Optional shared cache for ``packages()`` results.
-        teardown_complete: Optional set tracking which environments have
-            already had their ``teardown`` invoked, used to avoid
-            redundant teardown across multiple uninstall actions.
-
-    Returns:
-        The result of the operation.
-    """
-    if action.installer is None or action.package is None:
-        return SetupActionResult(action=action, success=False, message='Installer or package not specified')
-
-    environments, ctx = _prepare_action_context(action, environments, context, package_cache)
-
-    resolved = await resolve_uninstall_operation(
-        action,
-        environments,
-        ctx,
-    )
-
-    # --- Skip (not installed) ---------------------------------------------
-    if isinstance(resolved.operation, Skip):
-        logger.info("Skipping uninstall of '%s': %s", action.package, resolved.message)
-        return resolved_to_result(resolved)
-
-    # --- Plugin-management actions ----------------------------------------
-    if action.plugin_target is not None:
-        result = await _attempt_plugin_operation(
-            action,
-            operation=Uninstall(),
-            event_queue=event_queue,
-            plugin_manager=resolved.plugin_manager,
-            project_environments=ctx.project_environments,
-        )
-        forward_version_metadata(result, resolved.operation)
-        return result
-
-    # --- Normal package actions -------------------------------------------
-    environment = environments[action.installer]
-    logger.info("Uninstalling '%s' via %s", action.package, action.installer)
-    result = await _attempt_operation(
-        action,
-        spec=OperationSpec(
-            execute=environment.uninstall,
-            verb='uninstall',
-            verb_past='Uninstalled',
-        ),
-        event_queue=event_queue,
-        runtime_context=ctx.runtime_context,
-    )
-    forward_version_metadata(result, resolved.operation)
-    invalidate_runtime_cache_after_mutation(action, environments, result)
-
-    # --- Teardown when the plugin has no remaining packages ----------------
-    if result.success:
-        if teardown_complete is not None and action.installer in teardown_complete:
-            pass  # already torn down this sync
-        else:
-            try:
-                remaining = await environment.packages()
-                if not remaining:
-                    if teardown_complete is not None and action.installer:
-                        teardown_complete.add(action.installer)
-                    await environment.teardown()
-            except Exception:
-                logger.warning(
-                    "teardown() failed for plugin '%s'",
-                    action.installer,
-                    exc_info=True,
-                )
-
-    return result
-
-
 async def _attempt_plugin_operation(
     action: SetupAction,
     *,
@@ -867,9 +771,6 @@ async def _attempt_plugin_operation(
         case Upgrade():
             execute = plugin_manager.plugin_upgrade
             verb, verb_past, suffix = 'upgrade plugin', 'Upgraded', f' to {action.plugin_target.name} (native)'
-        case Uninstall():
-            execute = plugin_manager.plugin_uninstall
-            verb, verb_past, suffix = 'uninstall plugin', 'Uninstalled', f' from {action.plugin_target.name} (native)'
         case _:
             msg = f'Unexpected operation {operation} for plugin action'
             return SetupActionResult(action=action, success=False, message=msg)

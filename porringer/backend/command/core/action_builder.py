@@ -163,37 +163,6 @@ def get_cli_command(
     return tuple(cmd)
 
 
-def get_uninstall_cli_command(
-    action: SetupAction,
-    plugins: DiscoveredPlugins,
-) -> list[str]:
-    """Gets the CLI command for an uninstall action.
-
-    Args:
-        action: The action to get the uninstall command for.
-        plugins: Discovered plugin container.
-
-    Returns:
-        The CLI command as a list of strings, or empty list if not applicable.
-    """
-    environments = plugins.environments
-    project_environments = plugins.project_environments
-
-    match action.kind:
-        case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
-            if action.installer and action.package and action.installer in environments:
-                env = environments[action.installer]
-                if action.plugin_target is not None:
-                    manager = find_plugin_manager(action.plugin_target.name, project_environments)
-                    if manager is not None and action.package is not None:
-                        return manager.plugin_uninstall_command(action.package)
-                    return []
-                return env.uninstall_command(action.package)
-        case _:
-            pass
-    return []
-
-
 def _log_unresolved(resolver: BackendResolver, kind: PluginKind, ecosystem: Ecosystem) -> None:
     """Log an appropriate message when no installer could be resolved.
 

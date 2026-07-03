@@ -16,7 +16,6 @@ from porringer.console.command.download import app as download_app
 from porringer.console.command.env import app as env_app
 from porringer.console.command.install import install_default
 from porringer.console.command.open import open_default
-from porringer.console.command.package import app as package_app
 from porringer.console.command.plugin import app as plugin_app
 from porringer.console.command.preview import preview_default
 from porringer.console.command.schema import app as schema_app
@@ -33,7 +32,6 @@ app.add_typer(download_app, name='download')
 app.add_typer(env_app, name='env')
 app.command(name='install')(install_default)
 app.command(name='open')(open_default)
-app.add_typer(package_app, name='package')
 app.command(name='preview')(preview_default)
 app.add_typer(schema_app, name='schema')
 app.add_typer(plugin_app, name='plugin')

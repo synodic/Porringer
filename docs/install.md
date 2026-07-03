@@ -349,7 +349,7 @@ Porringer owns reusable backend contracts for CLIs, GUIs, and agents:
 - `api.sync.inspect(...)` for manifest inspection.
 - `api.sync.run(..., on_event=...)` for execution with live progress.
 - `SetupParameters.action_ids` for stable action selectors.
-- `api.tool.check_updates(...)`, `api.tool.upgrade_project(...)`, `api.tool.upgrade_package(...)`, and `api.tool.uninstall_package(...)` for managed package and tool operations.
+- `api.tool.check_updates(...)` and `api.tool.upgrade_project(...)` for managed package and tool operations.
 - `api.profile.resolve(...)`, `api.profile.inspect(...)`, and `api.profile.run(...)` for portable HTTPS setup profiles.
 - `api.client.snapshot(...)` for low-latency plugin and managed-tool update state.
 

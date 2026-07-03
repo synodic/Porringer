@@ -194,20 +194,6 @@ def fresh_plugin_cache() -> None:
     invalidate_plugin_cache()
 
 
-@pytest.fixture(params=[False, True], ids=['pip', 'pipx'])
-def installer_is_pipx(request: pytest.FixtureRequest) -> Generator[bool]:
-    """Parametrize a test across pip and pipx installation modes.
-
-    Patches ``is_pipx_installation`` in the plugin command module and yields
-    the active mode as a bool so the test can assert the mode-specific command.
-    """
-    with patch(
-        'porringer.backend.command.plugin.is_pipx_installation',
-        return_value=request.param,
-    ):
-        yield request.param
-
-
 @pytest.fixture
 def stub_runtime_context() -> Generator[RuntimeContext]:
     """Patch ``Builder.resolve_runtime_context`` to return an empty context.

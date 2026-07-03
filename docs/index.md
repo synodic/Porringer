@@ -28,7 +28,6 @@ Use Porringer when you want one repeatable entry point for setup while still rel
 | `porringer check` | Check available package updates through installed plugins. |
 | `porringer download` | Download files with optional hash and size verification. |
 | `porringer plugin list` | List available installer, project, runtime, and SCM plugins. |
-| `porringer package` | List, install, upgrade, or uninstall packages through a named plugin. |
 | `porringer env info` | Print local environment and plugin diagnostics. |
 | `porringer schema` | Export the manifest JSON Schema. |
 | `porringer self check` | Check PyPI for a newer Porringer release. |

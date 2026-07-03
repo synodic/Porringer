@@ -51,7 +51,7 @@ asyncio.run(main())
 | Namespace | Main operations |
 | --- | --- |
 | `api.sync` | Inspect manifests and run them with optional progress events. Use `inspect_paths([...])` for a stateless per-directory dashboard view. |
-| `api.package` | List, install, upgrade, uninstall, and check package updates through environment plugins. |
+| `api.package` | Check package updates through environment plugins. |
 | `api.extension` | List, install, upgrade, and uninstall Porringer extension packages. |
 | `api.tool` | Check, upgrade, or uninstall packages and tools for the current project. |
 | `api.profile` | Resolve, inspect, and run HTTPS setup profiles. |
@@ -114,7 +114,7 @@ Plugin authors should build on `porringer.core.plugin_schema` and `porringer.cor
 | `ScmEnvironment` | Source-control plugins such as `git`. |
 | `RuntimeProvider` | Plugins that discover or install language runtimes. |
 | `RuntimeConsumer` | Plugins that can target a resolved runtime executable. |
-| `PluginManager` | Plugins that install, upgrade, and uninstall extension packages. |
+| `PluginManager` | Plugins that install and upgrade extension packages through a host tool. |
 | `ToolBasedPlugin` | Shared base for plugins driven by command-line tools. |
 
 ```python

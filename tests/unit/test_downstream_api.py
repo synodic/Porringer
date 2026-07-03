@@ -7,7 +7,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -181,7 +181,7 @@ class TestToolCommands:
                 captured.append(params)
                 return SyncRunReport(results=BatchSetupResults())
 
-        commands = ToolCommands(cast(Any, _FakeSync()), MagicMock())
+        commands = ToolCommands(cast(Any, _FakeSync()))
 
         report = await commands.upgrade_project(plugin_names={'pip'}, include_packages={'requests'})
 
@@ -189,25 +189,6 @@ class TestToolCommands:
         assert captured[0].strategy == SyncStrategy.LATEST
         assert captured[0].plugins == {'pip'}
         assert captured[0].include_packages == {'requests'}
-
-    @staticmethod
-    async def test_upgrade_package_wraps_package_result() -> None:
-        """Single-package updates return a stable managed tool report."""
-        action = SetupAction(
-            description='Upgrade requests',
-            installer='pip',
-            package=PackageRef.model_validate('requests'),
-        )
-        package_commands = MagicMock()
-        package_commands.upgrade = AsyncMock(return_value=SetupActionResult(action=action, success=True))
-        commands = ToolCommands(MagicMock(), cast(Any, package_commands))
-
-        report = await commands.upgrade_package('pip', 'requests')
-
-        assert report.operation == 'upgrade_package'
-        assert report.updated == 1
-        assert report.results[0].plugin == 'pip'
-        assert report.results[0].package == 'requests'
 
 
 class TestProfileCommands:

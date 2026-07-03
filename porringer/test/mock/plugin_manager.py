@@ -66,10 +66,6 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
         return ['mock-pm', 'upgrade', plugin.specifier]
 
     @override
-    def plugin_uninstall_command(self, plugin: PackageRef) -> list[str]:
-        return ['mock-pm', 'uninstall', plugin.name]
-
-    @override
     def plugin_list_command(self) -> list[str]:
         return ['mock-pm', 'list']
 
@@ -87,11 +83,6 @@ class MockPluginManager(MockProjectEnvironment, PluginManager):
     @override
     async def plugin_upgrade(self, params: PackageParameters) -> Package | None:
         self.operations.append(('upgrade', params.package))
-        return Package(name=params.package.name, version=None)
-
-    @override
-    async def plugin_uninstall(self, params: PackageParameters) -> Package | None:
-        self.operations.append(('uninstall', params.package))
         return Package(name=params.package.name, version=None)
 
     @override

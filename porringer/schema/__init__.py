@@ -7,7 +7,7 @@ All public types are re-exported here for flat access via
 """
 
 from porringer.schema.cache import LocalConfiguration
-from porringer.schema.check import CheckParameters, CheckResult, PackageUpdateInfo, RuntimeCheckResult
+from porringer.schema.check import CheckParameters, CheckResult, PackageUpdateInfo
 from porringer.schema.directory import DirectoryState, DirectoryStatus
 from porringer.schema.download import DownloadParameters, DownloadResult, HashAlgorithm, ProgressCallback
 from porringer.schema.execution import (
@@ -70,9 +70,6 @@ from porringer.schema.observability import (
 from porringer.schema.plugin import (
     PluginCapability,
     PluginInfo,
-    PluginOperationResult,
-    RuntimePackageResult,
-    ScopedPackage,
 )
 from porringer.schema.profile import SetupProfile, SetupProfileExecution, SetupProfileInspection, SetupProfileManifest
 from porringer.schema.progress import (
@@ -109,7 +106,6 @@ __all__ = [
     'CancellationToken',
     'CheckParameters',
     'CheckResult',
-    'RuntimeCheckResult',
     'CloneStatus',
     'CloneStatusKind',
     'DirectoryState',
@@ -150,10 +146,8 @@ __all__ = [
     'PackageUpdateInfo',
     'PluginCapability',
     'PluginInfo',
-    'PluginOperationResult',
     'PluginsDiscoveredEvent',
     'PluginSpec',
-    'RuntimePackageResult',
     'Remediation',
     'ReplayRecord',
     'ResultEnvelope',
@@ -163,7 +157,6 @@ __all__ = [
     'ProgressEvent',
     'ProgressEventSnapshot',
     'SCHEMA_VERSION',
-    'ScopedPackage',
     'SetupAction',
     'SetupActionResult',
     'SetupActionResultSnapshot',

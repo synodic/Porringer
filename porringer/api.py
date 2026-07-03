@@ -61,7 +61,7 @@ class API:
         self.extension = PluginCommands()
         self.package = PackageCommands()
         self.sync = SyncCommands()
-        self.tool = ToolCommands(self.sync, self.package)
+        self.tool = ToolCommands(self.sync)
         self.profile = ProfileCommands(self.sync)
         self.client = ClientCommands(self.tool)
 
@@ -78,8 +78,8 @@ class API:
         This is the recommended entry-point for GUI callers.  It
         returns a :class:`DiscoveredPlugins` object that can be
         forwarded to every subsequent operation
-        (``api.sync.inspect``, ``api.sync.run``, ``api.package.list``,
-        ``api.package.upgrade``, etc.) so that plugin discovery and
+        (``api.sync.inspect``, ``api.sync.run``, ``api.package.check_updates``,
+        ``api.tool.upgrade_project``, etc.) so that plugin discovery and
         runtime resolution happen exactly once.
 
         Args:

@@ -2,17 +2,14 @@
 
 The plugin command module.
 
-Manages *porringer extension* packages — installing, upgrading, and
-uninstalling plugins that extend porringer's capabilities (e.g.
-``porringer-plugin-apt``).  For operations on packages *managed by*
-plugins (e.g. ``requests`` via pip), see :mod:`.package`.
+Lists *porringer extension* plugins (e.g. ``porringer-plugin-apt``)
+that extend porringer's capabilities.  For operations on packages
+*managed by* plugins (e.g. ``requests`` via pip), see :mod:`.package`.
 """
 
 import asyncio
 import builtins
 import logging
-import sys
-from importlib import metadata
 
 from porringer.backend.builder import Builder
 from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins
@@ -20,9 +17,7 @@ from porringer.backend.resolver import build_plugin_info
 from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Plugin, PluginKind
-from porringer.schema import PluginInfo, PluginOperationResult
-from porringer.utility.exception import PluginError
-from porringer.utility.utility import is_pipx_installation, run_command
+from porringer.schema import PluginInfo
 
 logger = logging.getLogger(__name__)
 
@@ -122,236 +117,5 @@ class PluginCommands:
                 for task in tasks:
                     managed_results.extend(task.result())
                 results.extend(managed_results)
-
-        return results
-
-    _PLUGIN_GROUPS = (
-        'porringer.environment',
-        'porringer.scm',
-    )
-
-    @staticmethod
-    def _get_existing_plugin_packages() -> set[str]:
-        """Get the set of package names that provide any porringer plugin entry point.
-
-        Returns:
-            Set of distribution names that provide porringer plugins.
-        """
-        packages: set[str] = set()
-        for group in PluginCommands._PLUGIN_GROUPS:
-            for entry_point in metadata.entry_points(group=group):
-                if entry_point.dist is not None:
-                    packages.add(entry_point.dist.name)
-        return packages
-
-    @staticmethod
-    def _build_install_args(name: str) -> builtins.list[str]:
-        """Build the install command for a plugin package."""
-        if is_pipx_installation():
-            return ['pipx', 'inject', 'porringer', name]
-        return [sys.executable, '-m', 'pip', 'install', name]
-
-    @staticmethod
-    def _build_uninstall_args(name: str) -> builtins.list[str]:
-        """Build the uninstall command for a plugin package."""
-        if is_pipx_installation():
-            return ['pipx', 'uninject', 'porringer', name]
-        return [sys.executable, '-m', 'pip', 'uninstall', '-y', name]
-
-    @staticmethod
-    def _build_upgrade_args(name: str) -> builtins.list[str]:
-        """Build the upgrade command for a plugin package."""
-        if is_pipx_installation():
-            return ['pipx', 'runpip', 'porringer', 'install', '--upgrade', name]
-        return [sys.executable, '-m', 'pip', 'install', '--upgrade', name]
-
-    @staticmethod
-    async def _run_plugin_operation(
-        name: str,
-        args: builtins.list[str],
-        *,
-        verb: str,
-        dry_run: bool,
-        timeout_seconds: int,
-    ) -> PluginOperationResult:
-        """Execute a plugin subprocess operation with dry-run support.
-
-        Centralises the dry-run check, subprocess invocation, error
-        handling, and result construction shared by install / uninstall /
-        upgrade.
-
-        Args:
-            name: Plugin package name.
-            args: Full command-line arguments.
-            verb: Human-readable verb (``"install"``, ``"uninstall"``, ``"upgrade"``).
-            dry_run: If ``True``, only report what would be done.
-            timeout_seconds: Subprocess timeout in seconds.
-
-        Returns:
-            PluginOperationResult indicating outcome.
-        """
-        past = f'{verb}ed' if not verb.endswith('e') else f'{verb}d'
-
-        if dry_run:
-            cmd_str = ' '.join(args)
-            logger.info('Dry run: would execute: %s', cmd_str)
-            return PluginOperationResult(
-                plugin_name=name,
-                success=True,
-                message=f'Would {verb}: {cmd_str}',
-            )
-
-        try:
-            result = await run_command(args, timeout=timeout_seconds)
-            if result.returncode != 0:
-                logger.error('%s failed for %s: %s', verb.capitalize(), name, result.stderr)
-                return PluginOperationResult(
-                    plugin_name=name,
-                    success=False,
-                    message=f'{verb.capitalize()} failed: {result.stderr.strip()}',
-                )
-            logger.info('Successfully %s plugin: %s', past, name)
-            return PluginOperationResult(
-                plugin_name=name,
-                success=True,
-                message=f"Successfully {past} plugin '{name}'",
-            )
-        except FileNotFoundError as e:
-            logger.error('Command not found: %s', e)
-            return PluginOperationResult(
-                plugin_name=name,
-                success=False,
-                message=f'Command not found: {e}',
-            )
-        except (OSError, TimeoutError) as e:
-            logger.error('Subprocess error: %s', e)
-            return PluginOperationResult(
-                plugin_name=name,
-                success=False,
-                message=f'Subprocess error: {e}',
-            )
-
-    @staticmethod
-    async def install(name: str, *, dry_run: bool = False) -> PluginOperationResult:
-        """Install a plugin package.
-
-        Installs the specified PyPI package and validates that it provides
-        a porringer plugin entry point. If validation fails, the package
-        is uninstalled.
-
-        Args:
-            name: PyPI package name to install.
-            dry_run: If `True`, only report what would be done.
-
-        Returns:
-            PluginOperationResult indicating success or failure.
-
-        Raises:
-            PluginError: If installation fails or package is not a valid plugin.
-        """
-        logger.info('Installing plugin: %s', name)
-
-        # Get plugins before installation for comparison
-        plugins_before = PluginCommands._get_existing_plugin_packages()
-
-        args = PluginCommands._build_install_args(name)
-
-        if dry_run:
-            return await PluginCommands._run_plugin_operation(
-                name,
-                args,
-                verb='install',
-                dry_run=True,
-                timeout_seconds=120,
-            )
-
-        result = await PluginCommands._run_plugin_operation(
-            name,
-            args,
-            verb='install',
-            dry_run=False,
-            timeout_seconds=120,
-        )
-        if not result.success:
-            return result
-
-        # Validate that the package provides a porringer plugin entry point
-        plugins_after = PluginCommands._get_existing_plugin_packages()
-        new_plugins = plugins_after - plugins_before
-
-        if not new_plugins:
-            logger.warning("Package '%s' does not provide a porringer plugin entry point. Uninstalling.", name)
-            await PluginCommands._uninstall_package(name)
-            groups = ', '.join(PluginCommands._PLUGIN_GROUPS)
-            raise PluginError(f"Package '{name}' is not a valid Porringer plugin (no entry point in {groups})")
-
-        return result
-
-    @staticmethod
-    async def _uninstall_package(name: str) -> None:
-        """Internal helper to uninstall a package.
-
-        Args:
-            name: Package name to uninstall.
-
-        Returns:
-            None.
-        """
-        args = PluginCommands._build_uninstall_args(name)
-        await run_command(args, timeout=60)
-
-    @staticmethod
-    async def uninstall(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
-        """Uninstall plugin packages.
-
-        Args:
-            names: Package names to uninstall.
-            dry_run: If `True`, only report what would be done.
-
-        Returns:
-            List of PluginOperationResult for each package.
-        """
-        results: list[PluginOperationResult] = []
-
-        for name in names:
-            logger.info('Uninstalling plugin: %s', name)
-            args = PluginCommands._build_uninstall_args(name)
-            results.append(
-                await PluginCommands._run_plugin_operation(
-                    name,
-                    args,
-                    verb='uninstall',
-                    dry_run=dry_run,
-                    timeout_seconds=60,
-                )
-            )
-
-        return results
-
-    @staticmethod
-    async def upgrade(names: builtins.list[str], *, dry_run: bool = False) -> builtins.list[PluginOperationResult]:
-        """Upgrade plugin packages.
-
-        Args:
-            names: Package names to upgrade.
-            dry_run: If `True`, only report what would be done.
-
-        Returns:
-            List of PluginOperationResult for each package.
-        """
-        results: list[PluginOperationResult] = []
-
-        for name in names:
-            logger.info('Upgrading plugin: %s', name)
-            args = PluginCommands._build_upgrade_args(name)
-            results.append(
-                await PluginCommands._run_plugin_operation(
-                    name,
-                    args,
-                    verb='upgrade',
-                    dry_run=dry_run,
-                    timeout_seconds=120,
-                )
-            )
 
         return results

@@ -4,7 +4,6 @@ Check/update schemas.
 """
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from packaging.version import Version
 from pydantic import Field
@@ -52,27 +51,6 @@ class CheckResult:
     def updates_available(self) -> int:
         """The count of packages with updates available."""
         return sum(1 for p in self.packages if p.update_available)
-
-
-@dataclass(slots=True)
-class RuntimeCheckResult:
-    """Result of checking updates for a plugin against a specific runtime.
-
-    Produced by :meth:`PackageCommands.check_updates_by_runtime` — one
-    entry per successfully queried runtime.
-
-    Attributes:
-        provider: Canonical name of the runtime-provider plugin.
-        tag: The version tag that was queried.
-        executable: Absolute path to the resolved interpreter.
-        results: Per-plugin :class:`CheckResult` entries for this
-            runtime.
-    """
-
-    provider: str
-    tag: str
-    executable: Path
-    results: list[CheckResult] = field(default_factory=list)
 
 
 class CheckParameters(PorringerModel):

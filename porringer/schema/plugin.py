@@ -5,11 +5,10 @@ Plugin metadata schemas.
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from pathlib import Path
 
 from packaging.version import Version
 
-from porringer.core.schema import Package, PluginKind
+from porringer.core.schema import PluginKind
 
 
 class PluginCapability(Enum):
@@ -55,66 +54,3 @@ class PluginInfo:
     installed: bool
     tool_version: Version | None
     host_tool: str | None = None
-
-
-@dataclass(slots=True)
-class PluginOperationResult:
-    """Result of a plugin operation (install/upgrade/uninstall).
-
-    Args:
-        plugin_name: The name of the plugin that was operated on.
-        success: Whether the operation succeeded.
-        message: Human-readable message describing the result.
-    """
-
-    plugin_name: str
-    success: bool
-    message: str
-
-
-@dataclass(slots=True)
-class RuntimePackageResult:
-    """Packages installed under a single resolved runtime.
-
-    Returned by
-    :meth:`PackageCommands.list_by_runtime
-    <porringer.backend.command.package.PackageCommands.list_by_runtime>`
-    — one instance per successfully queried runtime tag.
-
-    Attributes:
-        provider: Canonical name of the runtime-provider plugin
-            (e.g. ``"pim"``).
-        tag: The version tag (e.g. ``"3.14"``).
-        executable: Absolute path to the resolved interpreter.
-        packages: Packages reported by the queried plugin for this
-            runtime.
-    """
-
-    provider: str
-    tag: str
-    executable: Path
-    packages: list[Package]
-
-
-@dataclass(slots=True)
-class ScopedPackage:
-    """A package annotated with the scope it was discovered in.
-
-    Returned by :meth:`PackageCommands.list_all_scopes` — wraps a
-    :class:`Package` with the scope label and optional directory
-    that it was found in.
-
-    Attributes:
-        package: The underlying package identity.
-        scope_label: Human-readable scope label (``"global"`` or the
-            directory name/path).
-        scope_path: The directory that was queried, or ``None`` for
-            the global / default environment.
-        plugin_name: Canonical name of the plugin that reported
-            this package.
-    """
-
-    package: Package
-    scope_label: str
-    scope_path: Path | None
-    plugin_name: str

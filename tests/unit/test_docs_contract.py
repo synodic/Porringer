@@ -23,7 +23,6 @@ def test_documented_command_index_matches_cli_surface() -> None:
     index = _docs_file('index.md')
     expected_commands = {
         'porringer plugin list',
-        'porringer package',
         'porringer preview',
         'porringer install',
         'porringer open',

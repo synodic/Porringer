@@ -74,11 +74,6 @@ class PoetryEnvironment(ProjectEnvironment, PluginManager):
         return self.plugin_install_command(plugin, include_prereleases=include_prereleases)
 
     @override
-    def plugin_uninstall_command(self, plugin: PackageRef) -> list[str]:
-        """Return ``poetry self remove <plugin>``."""
-        return ['poetry', 'self', 'remove', plugin.name]
-
-    @override
     def plugin_list_command(self) -> list[str]:
         """Return ``poetry self show plugins``."""
         return ['poetry', 'self', 'show', 'plugins']
