@@ -6,13 +6,9 @@ All public types are re-exported here for flat access via
 ``from porringer.schema import X``.
 """
 
-from porringer.schema.cache import (
-    DirectoryCache,
-    DirectoryValidationResult,
-    LocalConfiguration,
-    ManifestDirectory,
-)
-from porringer.schema.check import CheckParameters, CheckResult, PackageUpdateInfo, RuntimeCheckResult
+from porringer.schema.cache import LocalConfiguration
+from porringer.schema.check import CheckParameters, CheckResult, PackageUpdateInfo
+from porringer.schema.directory import DirectoryState, DirectoryStatus
 from porringer.schema.download import DownloadParameters, DownloadResult, HashAlgorithm, ProgressCallback
 from porringer.schema.execution import (
     BatchSetupResults,
@@ -74,9 +70,6 @@ from porringer.schema.observability import (
 from porringer.schema.plugin import (
     PluginCapability,
     PluginInfo,
-    PluginOperationResult,
-    RuntimePackageResult,
-    ScopedPackage,
 )
 from porringer.schema.profile import SetupProfile, SetupProfileExecution, SetupProfileInspection, SetupProfileManifest
 from porringer.schema.progress import (
@@ -97,13 +90,6 @@ from porringer.schema.progress import (
     SetupActionResultSnapshot,
     progress_event_snapshot,
 )
-from porringer.schema.project import (
-    ProjectDirectorySnapshot,
-    ProjectInspection,
-    ProjectInspectionReport,
-    ProjectInspectionSummary,
-    ProjectState,
-)
 from porringer.schema.snapshot import ClientSnapshot
 from porringer.schema.tool import ManagedPackageResult, ManagedToolReport
 from porringer.utility.exception import ManifestValidationCode
@@ -120,11 +106,10 @@ __all__ = [
     'CancellationToken',
     'CheckParameters',
     'CheckResult',
-    'RuntimeCheckResult',
     'CloneStatus',
     'CloneStatusKind',
-    'DirectoryCache',
-    'DirectoryValidationResult',
+    'DirectoryState',
+    'DirectoryStatus',
     'Diagnostic',
     'DiagnosticSeverity',
     'DiagnosticTarget',
@@ -144,7 +129,6 @@ __all__ = [
     'ManifestDiagnostic',
     'ManifestDiagnosticSnapshot',
     'ManifestDiagnosticSeverity',
-    'ManifestDirectory',
     'ManifestFailedEvent',
     'ManifestLoadedEvent',
     'ManifestMetadata',
@@ -162,10 +146,8 @@ __all__ = [
     'PackageUpdateInfo',
     'PluginCapability',
     'PluginInfo',
-    'PluginOperationResult',
     'PluginsDiscoveredEvent',
     'PluginSpec',
-    'RuntimePackageResult',
     'Remediation',
     'ReplayRecord',
     'ResultEnvelope',
@@ -174,13 +156,7 @@ __all__ = [
     'ProgressCallback',
     'ProgressEvent',
     'ProgressEventSnapshot',
-    'ProjectDirectorySnapshot',
-    'ProjectInspection',
-    'ProjectInspectionReport',
-    'ProjectInspectionSummary',
-    'ProjectState',
     'SCHEMA_VERSION',
-    'ScopedPackage',
     'SetupAction',
     'SetupActionResult',
     'SetupActionResultSnapshot',

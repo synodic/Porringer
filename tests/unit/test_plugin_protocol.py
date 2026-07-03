@@ -19,7 +19,7 @@ from packaging.utils import canonicalize_name
 
 from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectInstaller
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import PackageRef
@@ -53,11 +53,46 @@ def _entry_point_keys(group: _PluginGroup) -> tuple[_PluginKey, ...]:
     return tuple(_PluginKey(group=group, name=name) for name in names)
 
 
+def _classify_environment_group() -> tuple[tuple[_PluginKey, ...], tuple[_PluginKey, ...]]:
+    """Load and classify every ``porringer.environment`` entry point.
+
+    There is no separate "project" plugin type — ``Environment`` and
+    project-only ``ProjectInstaller`` plugins are all registered under
+    ``porringer.environment``.  This mirrors the production partition
+    in ``porringer.backend.command.core.discovery.scan_environment_group``:
+    plugins that install packages (with or without an additional
+    project-install capability) are classified as environments;
+    project-only plugins (``pdm``, ``poetry``) are classified as
+    project environments.
+
+    Returns:
+        Tuple of ``(environment_keys, project_environment_keys)``.
+    """
+    entry_points = metadata.entry_points(group='porringer.environment')
+    environments: set[str] = set()
+    project_environments: set[str] = set()
+    for entry_point in entry_points:
+        name = str(canonicalize_name(entry_point.name))
+        try:
+            loaded = entry_point.load()
+        except Exception:
+            continue
+        if not isinstance(loaded, type):
+            continue
+        if issubclass(loaded, Environment):
+            environments.add(name)
+        elif issubclass(loaded, ProjectInstaller):
+            project_environments.add(name)
+    return (
+        tuple(_PluginKey(group='environment', name=name) for name in sorted(environments)),
+        tuple(_PluginKey(group='project_environment', name=name) for name in sorted(project_environments)),
+    )
+
+
 @cache
 def _plugin_matrix() -> _PluginMatrix:
     """Return cached collection keys for the protocol matrix."""
-    environments = _entry_point_keys('environment')
-    project_environments = _entry_point_keys('project_environment')
+    environments, project_environments = _classify_environment_group()
     scm_environments = _entry_point_keys('scm')
     all_plugins = tuple(sorted((*environments, *project_environments, *scm_environments), key=lambda key: key.name))
     return _PluginMatrix(
@@ -227,7 +262,7 @@ class TestProjectEnvironmentContract:
     def test_sync_command_shape(project_environment_plugin: ProjectEnvironment) -> None:
         """``sync_command()`` returns a non-empty argv list referencing the tool."""
         plugin = project_environment_plugin
-        argv = plugin.sync_command()
+        argv = plugin.project_install_command()
         _assert_argv(argv, expected_first=plugin.tool_name())
 
     @staticmethod

@@ -314,50 +314,6 @@ class TestSetupBatch:
             assert len(results.manifest_results) == SINGLE_MANIFEST
             assert len(results.failed_paths) == SINGLE_FAILED_PATH
 
-    @staticmethod
-    async def test_preview_batch_from_cache(test_api: API, temp_cache_dir) -> None:
-        """Test batch preview using cached directories."""
-        tmp_path, _ = temp_cache_dir
-        project1 = tmp_path / 'project1'
-        project1.mkdir()
-
-        (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'python': ['requests']}}))
-
-        # Add to cache
-        await test_api.project.add(project1)
-
-        # Preview from cache (paths=None)
-        params = SetupParameters(paths=None)
-        report = await test_api.sync.run(params)
-        results = report.results
-
-        assert len(results.manifest_results) == SINGLE_MANIFEST
-        assert results.total_actions == SINGLE_MANIFEST
-
-    @staticmethod
-    async def test_preview_batch_from_all_cached(test_api: API, temp_cache_dir) -> None:
-        """Test batch preview using all cached directories."""
-        tmp_path, _ = temp_cache_dir
-        project1 = tmp_path / 'project1'
-        project2 = tmp_path / 'project2'
-        project1.mkdir()
-        project2.mkdir()
-
-        (project1 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'python': ['requests']}}))
-        (project2 / 'porringer.json').write_text(json.dumps({'version': '1', 'packages': {'python': ['flask']}}))
-
-        # Add directories to cache
-        await test_api.project.add(project1)
-        await test_api.project.add(project2)
-
-        # Preview from all cached
-        params = SetupParameters(paths=None)
-        report = await test_api.sync.run(params)
-        results = report.results
-
-        assert len(results.manifest_results) == DUAL_MANIFESTS
-        assert results.total_actions == TWO_ACTIONS
-
 
 @pytest.mark.mock_packages
 class TestManifestMetadata:

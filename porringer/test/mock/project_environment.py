@@ -12,7 +12,7 @@ from porringer.core.schema import Ecosystem
 class MockProjectEnvironment(ProjectEnvironment):
     """Mocked project environment plugin for testing."""
 
-    _sync_verb: str = 'sync'
+    _install_verb: str = 'sync'
 
     @staticmethod
     @override

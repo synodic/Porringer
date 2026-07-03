@@ -12,6 +12,7 @@ from pathlib import Path
 from packaging.version import Version
 
 from porringer.backend.backend import BackendResolver
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Distribution, Ecosystem, PluginKind, PluginParameters
@@ -302,6 +303,76 @@ class TestResolverRegistration:
         """An empty resolver has nothing registered."""
         resolver = BackendResolver({})
         assert resolver.is_registered(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) is False
+
+
+# ---------------------------------------------------------------------------
+# Dual-kind capability — a plugin declared PACKAGE that also implements
+# the ProjectInstaller capability must resolve under BOTH kinds.
+# ---------------------------------------------------------------------------
+
+
+class _StubProjectCapablePackage(ProjectInstaller):
+    """A PACKAGE-kind plugin (like ``uv``) that also implements ``ProjectInstaller``."""
+
+    @staticmethod
+    def ecosystem() -> Ecosystem:
+        return _DEFAULT_ECOSYSTEM
+
+    @staticmethod
+    def plugin_kind() -> PluginKind:
+        return PluginKind.PACKAGE
+
+    @classmethod
+    def tool_name(cls) -> str:
+        return 'stub-tool'
+
+    @classmethod
+    def consumed_runtime_kind(cls) -> str:
+        return 'test'
+
+    @staticmethod
+    def is_supported() -> bool:
+        return True
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return True
+
+    @staticmethod
+    def package_name_validator() -> str | None:
+        return None
+
+    @staticmethod
+    def dependencies() -> list:
+        return []
+
+    async def setup(self) -> None:
+        """No-op plugin setup; satisfies the Plugin protocol."""
+
+    async def teardown(self) -> None:
+        """No-op plugin teardown; satisfies the Plugin protocol."""
+
+
+class TestResolverProjectCapability:
+    """A plugin's declared kind and its ``ProjectInstaller`` capability both resolve."""
+
+    @staticmethod
+    def test_project_capable_package_resolves_under_both_kinds() -> None:
+        """A PACKAGE-kind plugin that is also a ProjectInstaller resolves for PACKAGE and PROJECT."""
+        plugin = _StubProjectCapablePackage(_PARAMS)
+        resolver = BackendResolver({'stub': plugin})
+
+        assert resolver.resolve(PluginKind.PACKAGE, _DEFAULT_ECOSYSTEM) == 'stub'
+        assert resolver.resolve(PluginKind.PROJECT, _DEFAULT_ECOSYSTEM) == 'stub'
+        assert resolver.is_registered(PluginKind.PROJECT, _DEFAULT_ECOSYSTEM) is True
+
+    @staticmethod
+    def test_plain_package_plugin_not_registered_under_project() -> None:
+        """A plugin without the ProjectInstaller capability is not indexed under PROJECT."""
+        plugins = {'alpha': _make('alpha')}
+        resolver = BackendResolver(plugins)
+
+        assert resolver.is_registered(PluginKind.PROJECT, _DEFAULT_ECOSYSTEM) is False
 
 
 # ---------------------------------------------------------------------------

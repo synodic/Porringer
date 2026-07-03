@@ -8,7 +8,7 @@ Supports three modes:
 1. **Native** — a standalone ``porringer.json`` file.
 2. **Inline embed** — a ``[tool.porringer]`` (or equivalent) section
    inside a host config file (``pyproject.toml``, ``package.json``),
-   contributed by project plugins via the
+   contributed by environment plugins via the
    ``ManifestContributor`` protocol.
 3. **Reference** — a host config section containing only a
    ``manifest = "relative/path.json"`` key that redirects to an
@@ -28,9 +28,7 @@ from packaging.utils import canonicalize_name
 from pydantic import ValidationError
 
 from porringer.backend.backend import BackendResolver
-from porringer.backend.builder import Builder
 from porringer.core.plugin_schema.manifest import ManifestContributor
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
 from porringer.core.schema import ManifestContribution, Plugin, PluginKind
 from porringer.schema import (
     ManifestDiagnostic,
@@ -41,7 +39,7 @@ from porringer.schema import (
 from porringer.schema.manifest import MANIFEST_SCHEMA_DIALECT, MANIFEST_SCHEMA_URL, ManifestResult
 from porringer.utility.exception import ManifestError, ManifestValidationCode
 
-from .core.discovery import discover_all_plugins, register_invalidation_hook
+from .core.discovery import discover_all_plugins, register_invalidation_hook, scan_environment_group
 
 logger = logging.getLogger(__name__)
 
@@ -72,15 +70,15 @@ def invalidate_manifest_cache() -> None:
 
 
 # Wire into the plugin scan invalidation so that newly installed
-# project-environment plugins (and their manifest contributions)
+# environment plugins (and their manifest contributions)
 # are visible after a cache clear.
 register_invalidation_hook(invalidate_manifest_cache)
 
 
 def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
-    """Discover manifest contributions from all installed project plugins.
+    """Discover manifest contributions from all installed environment plugins.
 
-    Scans ``porringer.project_environment`` entry points, calls
+    Scans the single ``porringer.environment`` entry-point group, calls
     ``manifest_contribution()`` on each class that implements
     ``ManifestContributor``, and returns a deduplicated tuple of
     contributions ordered by first occurrence.
@@ -97,8 +95,8 @@ def collect_manifest_contributions() -> tuple[ManifestContribution, ...]:
     seen_filenames: set[str] = set()
     contributions: list[ManifestContribution] = []
 
-    infos, _ = Builder.find_plugins('project_environment', ProjectEnvironment)
-    for info in infos:
+    env_infos, proj_infos, _ = scan_environment_group()
+    for info in [*env_infos, *proj_infos]:
         cls = info.type
         if isinstance(cls, type) and issubclass(cls, ManifestContributor):
             contrib = cls.manifest_contribution()

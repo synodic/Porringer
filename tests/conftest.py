@@ -13,7 +13,6 @@ from rich.console import Console
 
 from porringer.api import API
 from porringer.backend.builder import Builder
-from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.core import discovery as _discovery
 from porringer.backend.command.core.discovery import invalidate_plugin_cache
 from porringer.backend.schema import GlobalConfiguration
@@ -195,20 +194,6 @@ def fresh_plugin_cache() -> None:
     invalidate_plugin_cache()
 
 
-@pytest.fixture(params=[False, True], ids=['pip', 'pipx'])
-def installer_is_pipx(request: pytest.FixtureRequest) -> Generator[bool]:
-    """Parametrize a test across pip and pipx installation modes.
-
-    Patches ``is_pipx_installation`` in the plugin command module and yields
-    the active mode as a bool so the test can assert the mode-specific command.
-    """
-    with patch(
-        'porringer.backend.command.plugin.is_pipx_installation',
-        return_value=request.param,
-    ):
-        yield request.param
-
-
 @pytest.fixture
 def stub_runtime_context() -> Generator[RuntimeContext]:
     """Patch ``Builder.resolve_runtime_context`` to return an empty context.
@@ -236,13 +221,6 @@ def temp_cache_dir():
         data_dir = tmp_path / 'data'
         data_dir.mkdir()
         yield tmp_path, data_dir
-
-
-@pytest.fixture
-def cache_manager(temp_cache_dir):
-    """DirectoryCacheManager instance for testing."""
-    _, data_dir = temp_cache_dir
-    return DirectoryCacheManager(data_dir)
 
 
 @pytest.fixture

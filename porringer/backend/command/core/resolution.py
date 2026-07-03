@@ -32,7 +32,7 @@ from porringer.core.plugin_schema.plugin_manager import (
     PluginManager,
     find_plugin_manager,
 )
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Package, PackageRef, PluginKind
@@ -282,7 +282,7 @@ class ResolutionContext:
 
     project_path: Path | None = None
     """Project directory for scoped package queries."""
-    project_environments: dict[str, ProjectEnvironment] | None = None
+    project_environments: dict[str, ProjectInstaller] | None = None
     """Dict of project-environment plugins, used to look up
     ``PluginManager`` instances for plugin-target actions."""
     http_client: aiohttp.ClientSession | None = None
@@ -756,7 +756,7 @@ async def _resolve_latest_installed(
     http_client: aiohttp.ClientSession | None,
     runtime_context: RuntimeContext | None,
 ) -> ResolvedOperation:
-    """Resolve a LATEST/EXACT operation for an already-installed package.
+    """Resolve a LATEST operation for an already-installed package.
 
     Queries for a newer version when possible.  Falls back to an
     unconditional upgrade when no update-check environment is available.
@@ -900,7 +900,7 @@ async def _apply_strategy(
             plugin_manager=plugin_manager,
         )
 
-    # LATEST or EXACT strategy
+    # LATEST strategy
     if presence.is_installed:
         return await _resolve_latest_installed(
             action=action,
@@ -911,7 +911,7 @@ async def _apply_strategy(
             runtime_context=runtime_context,
         )
 
-    # Not installed under LATEST/EXACT → fall back to install
+    # Not installed under LATEST → fall back to install
     return ResolvedOperation(
         action=action,
         operation=Install(
@@ -919,131 +919,6 @@ async def _apply_strategy(
         ),
         message='not installed, will install instead',
         plugin_manager=plugin_manager,
-    )
-
-
-async def resolve_uninstall_operation(
-    action: SetupAction,
-    environments: dict[str, Environment],
-    context: ResolutionContext | None = None,
-) -> ResolvedOperation:
-    """Determine whether a package can be uninstalled.
-
-    Checks the system for the package's presence and returns
-    :class:`Uninstall` when found or :class:`Skip` with
-    ``NOT_INSTALLED`` when the package is absent.
-
-    Unlike :func:`resolve_operation`, this function is not
-    strategy-driven — uninstall is an imperative operation.
-
-    Args:
-        action: The action describing the package to uninstall.
-        environments: Dict of instantiated environment plugins.
-        context: Optional resolution context with project path and
-            package cache.
-
-    Returns:
-        A resolved operation descriptor.
-    """
-    ctx = context or ResolutionContext()
-
-    if action.installer is None or action.package is None:
-        return ResolvedOperation(
-            action=action,
-            operation=Skip(),
-            message='Installer or package not specified',
-        )
-
-    # --- Plugin-management actions -----------------------------------------
-    if action.plugin_target is not None:
-        return await _resolve_plugin_uninstall(action, ctx)
-
-    # --- Normal package actions --------------------------------------------
-    if action.installer not in environments:
-        return ResolvedOperation(
-            action=action,
-            operation=Skip(),
-            message=f"Installer '{action.installer}' is not available",
-        )
-
-    environment = environments[action.installer]
-    validator = type(environment).package_name_validator()
-
-    try:
-        installed_packages = await _query_installed_packages(action.installer, environment, ctx)
-        logger.debug(
-            'packages query for %s returned %d entries',
-            action.installer,
-            len(installed_packages),
-        )
-        is_installed, detail, matched = is_package_installed(action.package, installed_packages, validator, action.kind)
-        logger.debug(
-            "is_package_installed('%s'): found=%s matched=%s",
-            action.package.name,
-            is_installed,
-            matched.name if matched else None,
-        )
-    except Exception as e:
-        logger.debug('Could not check installed packages for %s: %s', action.installer, e)
-        is_installed, detail, matched = False, None, None
-
-    if not is_installed:
-        return ResolvedOperation(
-            action=action,
-            operation=Skip(reason=SkipReason.NOT_INSTALLED),
-            message=f"'{action.package.name}' is not installed",
-        )
-
-    return ResolvedOperation(
-        action=action,
-        operation=Uninstall(installed_version=matched.version if matched else None),
-        message=detail,
-    )
-
-
-async def _resolve_plugin_uninstall(
-    action: SetupAction,
-    ctx: ResolutionContext,
-) -> ResolvedOperation:
-    """Resolve an uninstall operation for a plugin-management action.
-
-    Args:
-        action: The action describing the plugin to uninstall.
-        ctx: Resolution context with project environments and cache.
-
-    Returns:
-        A resolved operation descriptor.
-    """
-    assert action.plugin_target is not None
-    assert action.package is not None
-
-    manager = find_plugin_manager(action.plugin_target.name, ctx.project_environments)
-    if manager is None:
-        return ResolvedOperation(
-            action=action,
-            operation=Skip(),
-            message=f"No PluginManager found for '{action.plugin_target.name}'",
-        )
-
-    try:
-        installed = await _query_installed_plugins(action.plugin_target.name, manager, ctx)
-        is_installed, detail, matched = is_package_installed(action.package, installed)
-    except Exception as e:
-        logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
-        is_installed, detail, matched = False, None, None
-
-    if not is_installed:
-        return ResolvedOperation(
-            action=action,
-            operation=Skip(reason=SkipReason.NOT_INSTALLED),
-            message=f"Plugin '{action.package.name}' is not installed in '{action.plugin_target.name}'",
-            plugin_manager=manager,
-        )
-    return ResolvedOperation(
-        action=action,
-        operation=Uninstall(installed_version=matched.version if matched else None),
-        message=detail,
-        plugin_manager=manager,
     )
 
 

@@ -145,7 +145,7 @@ class SetupManifest(PorringerModel):
 
     Manifest entries are grouped by **kind** (`packages`, `tools`,
     `runtimes`), each containing a dict keyed by **ecosystem**
-    (e.g. `"python"`, `"node"`, `"system"`). Project sync is now
+    (e.g. `"python"`, `"node"`, `"system"`). Project install is now
     resolved implicitly from relevant project plugins based on the
     repository contents.
 

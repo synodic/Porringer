@@ -152,7 +152,7 @@ class ToolPhase(_PhaseBase):
 
 
 class ProjectPhase(_PhaseBase):
-    """Phase 3: run project-sync (pdm install, uv sync, etc.)."""
+    """Phase 3: install projects (pdm install, uv sync, etc.)."""
 
     _kind = PluginKind.PROJECT
 
@@ -162,7 +162,7 @@ class ProjectPhase(_PhaseBase):
         await asyncio.to_thread(state.refresh_all_plugins)
 
     async def execute(self, state: ExecutionState) -> PhaseResult:
-        """Run project sync actions."""
+        """Run project-install actions."""
         results = await state.run_project_phase(state.phases[self._kind])
         failed = any(not r.success and not r.skipped for r in results)
         ok = not (failed and state.parameters.fail_fast)

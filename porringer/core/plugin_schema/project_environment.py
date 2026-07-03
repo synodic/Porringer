@@ -2,11 +2,11 @@
 
 Plugin utilities for project-scoped environments.
 
-A `ProjectEnvironment` plugin wraps a project dependency manager
+A `ProjectInstaller` plugin wraps a project dependency manager
 (PDM, Poetry, uv) and delegates venv creation, dependency resolution,
-and lock-file synchronisation entirely to the underlying tool.
+and lock-file installation entirely to the underlying tool.
 
-The sync engine invokes `ProjectEnvironment.sync()` after all
+The engine invokes `ProjectInstaller.install_project()` after all
 per-package actions have completed so that the tool itself is already
 installed (e.g. via pipx).  When the manifest file lives in a
 subdirectory of the project root, each plugin auto-discovers the
@@ -47,7 +47,7 @@ ECOSYSTEM_CONTRIBUTIONS: dict[Ecosystem, ManifestContribution] = {
 }
 
 
-class ProjectSyncParameters(PorringerModel):
+class ProjectInstallParameters(PorringerModel):
     """Parameters for a project-level sync operation."""
 
     directory: Path = Field(description='Working directory for the sync command (manifest location)')
@@ -67,12 +67,13 @@ class ProjectCommandPlan(PorringerModel):
     steps: list[list[str]] = Field(default_factory=list, description='Ordered command steps to execute')
 
 
-class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
-    """Plugin definition for project-scoped dependency managers.
+class ProjectInstaller(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
+    """Capability base for installing a project's declared dependencies.
 
     Unlike `Environment`,
-    which installs individual packages, a `ProjectEnvironment` runs the
-    tool's native *sync* / *install* command inside the project directory.
+    which installs individual packages, a `ProjectInstaller` runs the
+    tool's native install command (e.g. ``pdm install``, ``uv sync``)
+    inside the project directory.
     Venv creation, lock-file handling, and dependency resolution are left
     entirely to the wrapped tool.
 
@@ -85,7 +86,7 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     methods that need to know which interpreter to target.
     """
 
-    _sync_verb: str = 'install'
+    _install_verb: str = 'install'
     """The sub-command the tool uses for project synchronisation.
 
     Defaults to `"install"` (used by PDM and Poetry).
@@ -96,8 +97,8 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     """Whether the wrapped tool supports a native ``--dry-run`` flag.
 
     When `True` (the default), `sync()` appends `--dry-run` for dry
-    runs.  Override to `False` for tools that lack it (e.g. pnpm,
-    Yarn Berry); dry runs then log the command without
+    runs.  Override to `False` for tools that lack it (e.g. pnpm);
+    dry runs then log the command without
     executing it.
     """
 
@@ -136,11 +137,6 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         Examples: `"python"`, `"node"`.
         """
         ...
-
-    @staticmethod
-    def plugin_kind() -> PluginKind:
-        """Project environments always have kind `PROJECT`."""
-        return PluginKind.PROJECT
 
     @classmethod
     @abstractmethod
@@ -240,10 +236,10 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
 
         return None
 
-    def sync_command(self, *, runtime_context: RuntimeContext | None = None) -> list[str]:
+    def project_install_command(self, *, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Return the CLI command for syncing the project.
 
-        Built from `tool_name()` and `_sync_verb`, with
+        Built from `tool_name()` and `_install_verb`, with
         `--python <path>` appended when *runtime_context* supplies
         a resolved interpreter for this plugin's consumed runtime kind.
 
@@ -253,7 +249,7 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
             runtime_context: Resolved runtime paths for this execution
                 run.  ``None`` means use defaults.
         """
-        cmd = [self.tool_name(), self._sync_verb]
+        cmd = [self.tool_name(), self._install_verb]
         if runtime_context is not None:
             exe = runtime_context.get(self.consumed_runtime_kind())
             if exe is not None:
@@ -311,14 +307,14 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
     def command_plan(cls, search_from: Path, *, runtime_context: RuntimeContext | None = None) -> ProjectCommandPlan:
         """Build a sync command plan for the provided directory."""
         directory = cls.resolve_project_root(search_from) or search_from
-        cmd = [cls.tool_name(), cls._sync_verb]
+        cmd = [cls.tool_name(), cls._install_verb]
         if runtime_context is not None:
             exe = runtime_context.get(cls.consumed_runtime_kind())
             if exe is not None:
                 cmd.extend(['--python', str(exe)])
         return ProjectCommandPlan(directory=directory, argv=cmd, steps=[cmd])
 
-    async def sync(self, params: ProjectSyncParameters) -> bool:
+    async def install_project(self, params: ProjectInstallParameters) -> bool:
         """Run the tool's native sync/install in *params.directory*.
 
         The default implementation builds the command from
@@ -338,19 +334,19 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         Returns:
             `True` on success, `False` on failure.
         """
-        args = list(self.sync_command(runtime_context=params.runtime_context))
+        args = list(self.project_install_command(runtime_context=params.runtime_context))
         if params.dry:
             if not self._supports_dry_run:
                 logger.info('Dry run: %s', ' '.join(args))
                 return True
             args.append('--dry-run')
-        return await self._run_sync(args, params.directory)
+        return await self._run_project_install(args, params.directory)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _run_sync(self, args: list[str], directory: Path) -> bool:
+    async def _run_project_install(self, args: list[str], directory: Path) -> bool:
         """Run a sync subprocess and return success.
 
         Shared helper that handles logging and error handling so each
@@ -366,8 +362,23 @@ class ProjectEnvironment(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
         return await self._run_bool_command(args, cwd=directory, label='sync')
 
 
-class NodeProjectEnvironment(ProjectEnvironment):
-    """Base for Node-ecosystem project environments (npm, pnpm, yarn).
+class ProjectEnvironment(ProjectInstaller):
+    """Project-install plugin classified under :data:`PluginKind.PROJECT`.
+
+    Thin base for project-only tools (PDM, Poetry, uv project install). Plugins
+    that also install individual packages mix in :class:`ProjectInstaller`
+    alongside an :class:`Environment` base instead of subclassing this.
+    """
+
+    @staticmethod
+    @override
+    def plugin_kind() -> PluginKind:
+        """Project environments always have kind `PROJECT`."""
+        return PluginKind.PROJECT
+
+
+class NodeProjectInstaller(ProjectInstaller):
+    """Node-ecosystem project-install capability (npm, pnpm).
 
     Centralises the `node` ecosystem and consumed-runtime kind so that
     each concrete plugin only declares its `tool_name()` and any CLI
@@ -377,13 +388,13 @@ class NodeProjectEnvironment(ProjectEnvironment):
     @staticmethod
     @override
     def ecosystem() -> Ecosystem:
-        """Node project environments belong to the `node` ecosystem."""
+        """Node project installers belong to the `node` ecosystem."""
         return Ecosystem('node')
 
     @classmethod
     @override
     def consumed_runtime_kind(cls) -> str:
-        """Node project environments consume a Node runtime."""
+        """Node project installers consume a Node runtime."""
         return 'node'
 
 

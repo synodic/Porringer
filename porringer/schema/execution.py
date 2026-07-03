@@ -224,13 +224,10 @@ class SyncStrategy(Enum):
              Already-installed packages are left untouched.
     LATEST:  Upgrade every package to its latest allowed version.
              Falls back to install if a package isn't installed.
-    EXACT:   Ensure each package satisfies the declared constraint.
-             Upgrade if installed, install if not.
     """
 
     MINIMAL = auto()
     LATEST = auto()
-    EXACT = auto()
 
 
 class InspectionMode(StrEnum):
@@ -251,7 +248,7 @@ class SetupParameters(PorringerModel):
         description=(
             'Path(s) to manifest file(s) or directories, or URL strings '
             '(``http://`` / ``https://``) pointing to remote manifests. '
-            'None uses all cached directories.'
+            'None uses the nearest manifest in the current directory.'
         ),
     )
     project_directory: Path | Literal[False] | None = Field(
@@ -268,7 +265,7 @@ class SetupParameters(PorringerModel):
         ),
     )
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
-    strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal, latest, or exact')
+    strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal or latest')
     inspection_mode: InspectionMode = Field(
         default=InspectionMode.COMPLETE,
         description=(

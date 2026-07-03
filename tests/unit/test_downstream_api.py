@@ -7,7 +7,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -16,9 +16,9 @@ from porringer.backend.command.tool import ToolCommands
 from porringer.core.schema import PackageRef
 from porringer.schema import (
     BatchSetupResults,
+    DirectoryState,
     DownloadResult,
     InspectionMode,
-    ProjectState,
     SetupAction,
     SetupActionResult,
     SetupParameters,
@@ -167,40 +167,11 @@ class TestObservableResults:
         assert diagnostics[0].target.action_id is None
 
 
-@pytest.mark.mock_packages
-class TestProjectInspectionAPI:
-    """Project inspection API tests."""
-
-    @staticmethod
-    async def test_inspect_returns_project_inspection(session_api: API, tmp_path: Path) -> None:
-        """project.inspect returns an inspect-derived project report."""
-        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
-
-        inspection = await session_api.project.inspect(tmp_path)
-
-        assert inspection.state == ProjectState.INSPECTED
-        assert inspection.summary.actions == 1
-        assert inspection.manifest is not None
-        assert inspection.manifest.actions[0].action_id == '0:0'
-
-    @staticmethod
-    async def test_inspect_cached_uses_cached_directories(test_api: API, tmp_path: Path) -> None:
-        """project.inspect_cached inspects cached directories as one report."""
-        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
-        await test_api.project.add(tmp_path)
-
-        report = await test_api.project.inspect_cached()
-
-        assert report.summary.projects == 1
-        assert report.summary.inspected == 1
-        assert report.projects[0].state == ProjectState.INSPECTED
-
-
 class TestToolCommands:
     """Managed tool command behavior."""
 
     @staticmethod
-    async def test_upgrade_cached_uses_latest_strategy() -> None:
+    async def test_upgrade_project_uses_latest_strategy() -> None:
         """Bulk cached tool updates use the LATEST strategy."""
         captured: list[SetupParameters] = []
 
@@ -210,33 +181,14 @@ class TestToolCommands:
                 captured.append(params)
                 return SyncRunReport(results=BatchSetupResults())
 
-        commands = ToolCommands(cast(Any, _FakeSync()), MagicMock())
+        commands = ToolCommands(cast(Any, _FakeSync()))
 
-        report = await commands.upgrade_cached(plugin_names={'pip'}, include_packages={'requests'})
+        report = await commands.upgrade_project(plugin_names={'pip'}, include_packages={'requests'})
 
-        assert report.operation == 'upgrade_cached'
+        assert report.operation == 'upgrade_project'
         assert captured[0].strategy == SyncStrategy.LATEST
         assert captured[0].plugins == {'pip'}
         assert captured[0].include_packages == {'requests'}
-
-    @staticmethod
-    async def test_upgrade_package_wraps_package_result() -> None:
-        """Single-package updates return a stable managed tool report."""
-        action = SetupAction(
-            description='Upgrade requests',
-            installer='pip',
-            package=PackageRef.model_validate('requests'),
-        )
-        package_commands = MagicMock()
-        package_commands.upgrade = AsyncMock(return_value=SetupActionResult(action=action, success=True))
-        commands = ToolCommands(MagicMock(), cast(Any, package_commands))
-
-        report = await commands.upgrade_package('pip', 'requests')
-
-        assert report.operation == 'upgrade_package'
-        assert report.updated == 1
-        assert report.results[0].plugin == 'pip'
-        assert report.results[0].package == 'requests'
 
 
 class TestProfileCommands:
@@ -317,14 +269,35 @@ class TestClientSnapshot:
     """Aggregate client snapshot tests."""
 
     @staticmethod
-    async def test_snapshot_includes_projects_and_plugins(test_api: API, tmp_path: Path) -> None:
-        """client.snapshot returns plugin and cached-project state together."""
-        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
-        await test_api.project.add(tmp_path)
-
+    async def test_snapshot_includes_plugins(test_api: API) -> None:
+        """client.snapshot returns plugin state for downstream clients."""
         snapshot = await test_api.client.snapshot()
 
         assert snapshot.inspection_mode == InspectionMode.FAST
         assert snapshot.plugins
-        assert snapshot.projects.summary.projects == 1
-        assert snapshot.projects.projects[0].state == ProjectState.INSPECTED
+
+
+@pytest.mark.mock_packages
+class TestInspectPaths:
+    """Stateless multi-directory inspection for GUI clients."""
+
+    @staticmethod
+    async def test_inspect_paths_classifies_each_directory(session_api: API, tmp_path: Path) -> None:
+        """sync.inspect_paths reports per-path state without persisting a registry."""
+        valid = tmp_path / 'valid'
+        valid.mkdir()
+        _write_manifest(valid, {'version': '1', 'packages': {'python': ['requests']}})
+        no_manifest = tmp_path / 'empty'
+        no_manifest.mkdir()
+        missing = tmp_path / 'missing'
+
+        statuses = await session_api.sync.inspect_paths([valid, no_manifest, missing])
+
+        by_name = {status.name: status for status in statuses}
+        assert by_name['valid'].state == DirectoryState.INSPECTED
+        assert by_name['valid'].has_manifest is True
+        assert by_name['valid'].summary is not None
+        assert by_name['valid'].summary.actions == 1
+        assert by_name['empty'].state == DirectoryState.NO_MANIFEST
+        assert by_name['missing'].state == DirectoryState.MISSING
+        assert by_name['missing'].exists is False

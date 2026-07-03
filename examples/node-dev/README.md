@@ -7,7 +7,7 @@ This example shows a Node.js development environment managed by Porringer. It in
 | Manifest section | Resolves to | Installs or runs |
 | --- | --- | --- |
 | `packages.node` | `pnpm` or `npm` | `typescript`, `@biomejs/biome`, `tsx` |
-| project sync | `npm`, `pnpm`, or `yarn` project plugin | The project's native install command |
+| project install | `npm` or `pnpm` project plugin | The project's native install command |
 
 Porringer passes Node package specifiers to the selected tool using that ecosystem's native syntax.
 

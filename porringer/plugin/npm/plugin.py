@@ -7,16 +7,20 @@ from pathlib import Path
 from typing import override
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
+from porringer.core.plugin_schema.project_environment import NodeProjectInstaller
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.schema import Ecosystem, Package, PackageRef
 
 
-class NPMEnvironment(Environment):
+class NPMEnvironment(Environment, NodeProjectInstaller):
     """Represents a Node.js environment managed by npm.
 
-    Provides methods to install, search, uninstall, upgrade, and list Node.js packages using npm
-    as the backend package manager.
+    Installs individual packages via ``npm install -g`` and also installs
+    whole projects via ``npm install`` (the project-install capability).
     """
+
+    _project_evidence_files = ('package-lock.json', 'npm-shrinkwrap.json')
+    _package_manager_names = ('npm@',)
 
     @staticmethod
     @override

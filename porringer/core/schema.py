@@ -52,7 +52,7 @@ class PluginKind(Enum):
     """Install CLI tools in isolated environments."""
 
     PROJECT = 'projects'
-    """Synchronise a project's dependency lock-file / venv."""
+    """Install a project's declared dependencies from its lock-file / manifest."""
 
     RUNTIME = 'runtimes'
     """Manage language runtime installations."""

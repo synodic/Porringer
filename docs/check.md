@@ -63,7 +63,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Long-lived callers should discover plugins once and reuse the same plugin map across checks, inspection, sync, and cached project inspection:
+Long-lived callers should discover plugins once and reuse the same plugin map across checks, inspection, and sync:
 
 ```python
 import asyncio

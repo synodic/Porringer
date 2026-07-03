@@ -13,10 +13,21 @@ import typer
 from rich.panel import Panel
 from rich.table import Table
 
-from porringer.console.common import EXIT_FAILURE, create_api, parse_strategy, sniff_profile
+from porringer.console.common import (
+    EXIT_FAILURE,
+    OnlyActionOption,
+    PluginOption,
+    ProjectDirOption,
+    StrategyOption,
+    TargetArgument,
+    build_setup_parameters,
+    classify_target,
+    create_api,
+    parse_shared_options,
+    resolve_target_or_exit,
+)
 from porringer.console.schema import ConsoleConfiguration
-from porringer.core.target import TargetKind, TargetResolution, resolve_target
-from porringer.schema import ActionInspection, InspectionMode, SetupParameters, SyncInspectionReport, SyncStrategy
+from porringer.schema import ActionInspection, InspectionMode, SyncInspectionReport, SyncStrategy
 from porringer.utility.observability import explain_inspection_report, inspection_envelope
 
 
@@ -24,7 +35,6 @@ from porringer.utility.observability import explain_inspection_report, inspectio
 class _PreviewOptions:
     """Bundled options for manifest preview."""
 
-    all_cached: bool = False
     strategy: SyncStrategy = SyncStrategy.MINIMAL
     inspection_mode: InspectionMode = InspectionMode.COMPLETE
     project_directory: Path | None = None
@@ -42,38 +52,6 @@ def _parse_inspection_mode(configuration: ConsoleConfiguration, mode: str) -> In
     except ValueError as exc:
         configuration.output.error(f"Invalid mode '{mode}'. Use: complete or fast")
         raise typer.Exit(EXIT_FAILURE) from exc
-
-
-def _setup_parameters(
-    configuration: ConsoleConfiguration,
-    options: _PreviewOptions,
-    target: TargetResolution | None,
-) -> SetupParameters:
-    """Build setup parameters from preview options."""
-    path_value: Path | None
-    if options.all_cached:
-        path_value = None
-    elif target is not None and target.path is not None:
-        if not target.path.exists():
-            configuration.output.error(f'Path does not exist: {target.path}')
-            raise typer.Exit(EXIT_FAILURE)
-        path_value = target.path.resolve()
-    else:
-        path_value = Path('.').resolve()
-
-    paths: Path | list[str] | None = path_value
-    if target is not None and target.kind == TargetKind.URL and target.url is not None:
-        paths = [target.url]
-
-    return SetupParameters(
-        paths=paths,
-        project_directory=options.project_directory,
-        fail_fast=False,
-        strategy=options.strategy,
-        inspection_mode=options.inspection_mode,
-        plugins=options.plugins,
-        action_ids=options.action_ids,
-    )
 
 
 def _command_text(action: ActionInspection) -> str:
@@ -193,35 +171,15 @@ def preview_profile(
 
 def preview_default(  # noqa: PLR0913
     context: typer.Context,
-    target: Annotated[
-        str | None,
-        typer.Argument(help='Optional target: local path, https URL, or porringer:// install link'),
-    ] = None,
+    target: TargetArgument = None,
     *,
-    project_dir: Annotated[
-        Path | None,
-        typer.Option(
-            '--project-dir',
-            '-d',
-            help='Working directory for project-sync actions',
-        ),
-    ] = None,
-    all_cached: Annotated[
-        bool,
-        typer.Option('--all', '-a', help='Preview all cached directories'),
-    ] = False,
-    strategy: Annotated[
-        str,
-        typer.Option('--strategy', '-s', help='Install strategy: minimal (default), latest, or exact'),
-    ] = 'minimal',
+    project_dir: ProjectDirOption = None,
+    strategy: StrategyOption = 'minimal',
     mode: Annotated[
         str,
         typer.Option('--mode', help='Inspection mode: complete (default) or fast'),
     ] = InspectionMode.COMPLETE.value,
-    plugin: Annotated[
-        list[str] | None,
-        typer.Option('--plugin', help='Only include actions from these plugins (repeatable).'),
-    ] = None,
+    plugin: PluginOption = None,
     as_json: Annotated[
         bool,
         typer.Option('--json', help='Emit machine-readable JSON'),
@@ -234,58 +192,41 @@ def preview_default(  # noqa: PLR0913
         bool,
         typer.Option('--explain', help='Explain diagnostics and available follow-up actions'),
     ] = False,
-    only_action: Annotated[
-        list[str] | None,
-        typer.Option('--only-action', help='Only include a stable action id such as 0:2 (repeatable).'),
-    ] = None,
+    only_action: OnlyActionOption = None,
 ) -> None:
     """Preview what Porringer would do, without executing any actions."""
     configuration = context.ensure_object(ConsoleConfiguration)
+    shared = parse_shared_options(
+        configuration, strategy=strategy, project_dir=project_dir, plugin=plugin, only_action=only_action
+    )
     options = _PreviewOptions(
-        all_cached=all_cached,
-        strategy=parse_strategy(configuration, strategy),
+        strategy=shared.strategy,
         inspection_mode=_parse_inspection_mode(configuration, mode),
-        project_directory=project_dir.resolve() if project_dir else None,
-        plugins=set(plugin) if plugin else None,
-        action_ids=set(only_action) if only_action else None,
+        project_directory=shared.project_directory,
+        plugins=shared.plugins,
+        action_ids=shared.action_ids,
         as_json=as_json,
         as_envelope=as_envelope,
         explain=explain,
     )
 
-    resolved_target: TargetResolution | None = None
-    if not all_cached:
-        try:
-            resolved_target = resolve_target(target)
-        except ValueError as exc:
-            configuration.output.error(str(exc))
-            raise typer.Exit(EXIT_FAILURE) from exc
+    resolved_target = resolve_target_or_exit(configuration, target)
+    api = create_api(configuration)
+    plan = classify_target(configuration, api, resolved_target)
 
-    if resolved_target is not None and resolved_target.kind == TargetKind.URL and resolved_target.url is not None:
-        api = create_api(configuration)
-        try:
-            profile = asyncio.run(sniff_profile(api, resolved_target.url))
-        except ValueError as exc:
-            configuration.output.error(str(exc))
-            raise typer.Exit(EXIT_FAILURE) from exc
-        if profile is not None:
-            preview_profile(configuration, resolved_target.url, options)
-            return
-
-    if resolved_target is not None and resolved_target.kind == TargetKind.LINK:
-        if resolved_target.profile_url is None:
-            configuration.output.error('Install link target is missing profile URL')
-            raise typer.Exit(EXIT_FAILURE)
-        preview_profile(
-            configuration,
-            resolved_target.profile_url,
-            options,
-            expected_hash=resolved_target.expected_hash,
-        )
+    if plan.is_profile and plan.profile_url is not None:
+        preview_profile(configuration, plan.profile_url, options, expected_hash=plan.expected_hash)
         return
 
-    api = create_api(configuration)
-    params = _setup_parameters(configuration, options, resolved_target)
+    params = build_setup_parameters(
+        plan.manifest_paths,
+        project_directory=options.project_directory,
+        strategy=options.strategy,
+        plugins=options.plugins,
+        action_ids=options.action_ids,
+        inspection_mode=options.inspection_mode,
+        fail_fast=False,
+    )
 
     try:
         report = asyncio.run(api.sync.inspect(params))

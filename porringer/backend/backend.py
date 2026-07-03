@@ -12,6 +12,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Mapping
 
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.runtime import RuntimeContext
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, Plugin, PluginKind
@@ -65,11 +66,25 @@ class BackendResolver:
         self._runtime_context = runtime_context
 
         # Index registered plugin names by `(kind, ecosystem)` pair.
+        #
+        # A plugin's declared `plugin_kind()` reflects its primary manifest
+        # section (package/tool/runtime/scm). `PROJECT` is different: it is
+        # a derived *capability* rather than a declared identity, so a
+        # plugin that also implements `ProjectInstaller` (e.g. `uv`, which
+        # both installs packages and can `uv sync` a project) must be
+        # additionally indexed under `(PROJECT, ecosystem)` even though its
+        # declared kind is `PACKAGE`. Without this, `resolve(PROJECT, ...)`
+        # silently fails to find such plugins whenever selection isn't
+        # evidence-based (see `_build_implicit_project_actions`).
         self._backend_plugins: dict[tuple[PluginKind, Ecosystem], list[str]] = defaultdict(list)
         for name, plugin in self._all_plugins.items():
             ecosystem = type(plugin).ecosystem()
-            if ecosystem is not None:
-                self._backend_plugins[(type(plugin).plugin_kind(), ecosystem)].append(name)
+            if ecosystem is None:
+                continue
+            declared_kind = type(plugin).plugin_kind()
+            self._backend_plugins[(declared_kind, ecosystem)].append(name)
+            if declared_kind != PluginKind.PROJECT and isinstance(plugin, ProjectInstaller):
+                self._backend_plugins[(PluginKind.PROJECT, ecosystem)].append(name)
 
         # Resolve only the pairs the caller needs right away. When
         # *needed_pairs* is ``None``, every registered pair is resolved to

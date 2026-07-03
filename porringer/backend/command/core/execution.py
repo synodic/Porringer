@@ -3,7 +3,7 @@
 Phased execution engine.
 
 Orchestrates the multi-phase setup flow: runtime → packages → tools →
-project-sync → SCM.  Each phase ensures its prerequisites are met before
+project-install → SCM.  Each phase ensures its prerequisites are met before
 proceeding.
 """
 
@@ -27,7 +27,7 @@ from porringer.core.plugin_schema.plugin_manager import (
     find_plugin_manager,
 )
 from porringer.core.plugin_schema.project_environment import (
-    ProjectEnvironment,
+    ProjectInstaller,
 )
 from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
@@ -79,7 +79,6 @@ from .resolution import (
     PackageCache,
     ResolutionContext,
     resolve_operation,
-    resolve_uninstall_operation,
     resolved_to_result,
 )
 
@@ -190,8 +189,8 @@ class ExecutionState:
         return group_actions_by_phase(self.actions)
 
     @property
-    def project_environments(self) -> dict[str, ProjectEnvironment] | None:
-        """Project-environment plugins (may be empty dict)."""
+    def project_environments(self) -> dict[str, ProjectInstaller] | None:
+        """Project-install plugins (may be empty dict)."""
         return self.plugins.project_environments or None
 
     @property
@@ -216,7 +215,7 @@ class ExecutionState:
 
     @property
     def skip_project(self) -> bool:
-        """Whether project-sync actions should be skipped."""
+        """Whether project-install actions should be skipped."""
         return self.parameters.project_directory is False
 
     @property
@@ -372,7 +371,7 @@ class ExecutionState:
         return setup_skip_results + results, ok
 
     async def run_project_phase(self, actions: list[SetupAction]) -> list[SetupActionResult]:
-        """Execute or skip project sync actions."""
+        """Execute or skip project-install actions."""
         return await handle_project_phase(actions, self)
 
     async def run_scm_actions(self, actions: list[SetupAction]) -> list[SetupActionResult]:
@@ -574,7 +573,7 @@ def _prepare_action_context(
 ) -> tuple[dict[str, Environment], ResolutionContext]:
     """Apply per-action WSL routing and cache/runtime-context merges.
 
-    Shared by :func:`execute_package` and :func:`execute_uninstall`.
+    Shared by :func:`execute_package` and other execution helpers.
     Merges a caller-provided ``package_cache`` into the resolution
     context.
 
@@ -730,108 +729,13 @@ async def _attempt_package_operation(
     )
 
 
-async def execute_uninstall(
-    action: SetupAction,
-    environments: dict[str, Environment],
-    event_queue: asyncio.Queue[ProgressEvent | None],
-    context: ResolutionContext | None = None,
-    *,
-    package_cache: PackageCache | None = None,
-    teardown_complete: set[str] | None = None,
-) -> SetupActionResult:
-    """Execute a package uninstall after resolving presence.
-
-    Delegates to :func:`resolve_uninstall_operation` to determine
-    whether the package is installed, then dispatches to
-    ``uninstall`` (or ``plugin_uninstall`` for plugin-target
-    actions).
-
-    Args:
-        action: The package action describing what to uninstall.
-        environments: Dict of instantiated environment plugins.
-        event_queue: Queue to emit action progress events into.
-        context: Optional resolution context providing runtime paths,
-            project-environment references, and package cache.
-        package_cache: Optional shared cache for ``packages()`` results.
-        teardown_complete: Optional set tracking which environments have
-            already had their ``teardown`` invoked, used to avoid
-            redundant teardown across multiple uninstall actions.
-
-    Returns:
-        The result of the operation.
-    """
-    if action.installer is None or action.package is None:
-        return SetupActionResult(action=action, success=False, message='Installer or package not specified')
-
-    environments, ctx = _prepare_action_context(action, environments, context, package_cache)
-
-    resolved = await resolve_uninstall_operation(
-        action,
-        environments,
-        ctx,
-    )
-
-    # --- Skip (not installed) ---------------------------------------------
-    if isinstance(resolved.operation, Skip):
-        logger.info("Skipping uninstall of '%s': %s", action.package, resolved.message)
-        return resolved_to_result(resolved)
-
-    # --- Plugin-management actions ----------------------------------------
-    if action.plugin_target is not None:
-        result = await _attempt_plugin_operation(
-            action,
-            operation=Uninstall(),
-            event_queue=event_queue,
-            plugin_manager=resolved.plugin_manager,
-            project_environments=ctx.project_environments,
-        )
-        forward_version_metadata(result, resolved.operation)
-        return result
-
-    # --- Normal package actions -------------------------------------------
-    environment = environments[action.installer]
-    logger.info("Uninstalling '%s' via %s", action.package, action.installer)
-    result = await _attempt_operation(
-        action,
-        spec=OperationSpec(
-            execute=environment.uninstall,
-            verb='uninstall',
-            verb_past='Uninstalled',
-        ),
-        event_queue=event_queue,
-        runtime_context=ctx.runtime_context,
-    )
-    forward_version_metadata(result, resolved.operation)
-    invalidate_runtime_cache_after_mutation(action, environments, result)
-
-    # --- Teardown when the plugin has no remaining packages ----------------
-    if result.success:
-        if teardown_complete is not None and action.installer in teardown_complete:
-            pass  # already torn down this sync
-        else:
-            try:
-                remaining = await environment.packages()
-                if not remaining:
-                    if teardown_complete is not None and action.installer:
-                        teardown_complete.add(action.installer)
-                    await environment.teardown()
-            except Exception:
-                logger.warning(
-                    "teardown() failed for plugin '%s'",
-                    action.installer,
-                    exc_info=True,
-                )
-
-    return result
-
-
 async def _attempt_plugin_operation(
     action: SetupAction,
     *,
     operation: Operation,
     event_queue: asyncio.Queue[ProgressEvent | None],
     plugin_manager: PluginManager | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    project_environments: dict[str, ProjectInstaller] | None = None,
 ) -> SetupActionResult:
     """Install, upgrade, or uninstall an extension package via its native ``PluginManager``.
 
@@ -867,9 +771,6 @@ async def _attempt_plugin_operation(
         case Upgrade():
             execute = plugin_manager.plugin_upgrade
             verb, verb_past, suffix = 'upgrade plugin', 'Upgraded', f' to {action.plugin_target.name} (native)'
-        case Uninstall():
-            execute = plugin_manager.plugin_uninstall
-            verb, verb_past, suffix = 'uninstall plugin', 'Uninstalled', f' from {action.plugin_target.name} (native)'
         case _:
             msg = f'Unexpected operation {operation} for plugin action'
             return SetupActionResult(action=action, success=False, message=msg)
@@ -1192,7 +1093,7 @@ async def _run_parallel_packages(
 def determine_fallback_dir(parameters: SetupParameters, root_directory: Path) -> Path:
     """Determine the fallback working directory for SCM actions.
 
-    Project-sync actions use per-plugin auto-discovery instead of
+    Project-install actions use per-plugin auto-discovery instead of
     this method.  This fallback is used by SCM clone actions.
 
     Args:
@@ -1211,7 +1112,7 @@ async def handle_project_phase(
     project_actions: list[SetupAction],
     state: ExecutionState,
 ) -> list[SetupActionResult]:
-    """Execute or skip project sync actions depending on context.
+    """Execute or skip project-install actions depending on context.
 
     Args:
         project_actions: The project-kind actions to process.
@@ -1222,7 +1123,7 @@ async def handle_project_phase(
     """
     action_ref_map = state._action_ref_map
     if not state.skip_project:
-        return await _execute_project_sync_actions(
+        return await _execute_project_install_actions(
             project_actions,
             state.project_environments,
             state.manifest_directory,
@@ -1583,13 +1484,13 @@ def skip_actions(
 
 
 # ---------------------------------------------------------------------------
-# Project sync execution
+# Project install execution
 # ---------------------------------------------------------------------------
 
 
-async def _execute_project_sync_actions(
-    project_sync_actions: list[SetupAction],
-    project_environments: dict[str, ProjectEnvironment] | None,
+async def _execute_project_install_actions(
+    project_install_actions: list[SetupAction],
+    project_environments: dict[str, ProjectInstaller] | None,
     manifest_directory: Path,
     parameters: SetupParameters,
     event_queue: asyncio.Queue[ProgressEvent | None],
@@ -1597,10 +1498,10 @@ async def _execute_project_sync_actions(
     runtime_context: RuntimeContext | None = None,
     action_ref_map: dict[int, ActionRef] | None = None,
 ) -> list[SetupActionResult]:
-    """Execute PROJECT_SYNC actions sequentially.
+    """Execute project-install actions sequentially.
 
-    Each action invokes the resolved project-environment plugin's
-    `ProjectEnvironment.sync()` method.  When
+    Each action invokes the resolved project plugin's
+    `ProjectInstaller.install_project()` method.  When
     `parameters.project_directory` is an explicit `Path` it is
     used as the working directory for every plugin.  Otherwise each
     plugin auto-discovers its project root by walking ancestor
@@ -1608,8 +1509,8 @@ async def _execute_project_sync_actions(
     marker file (e.g. `package.json`, `pyproject.toml`).
 
     Args:
-        project_sync_actions: The project sync actions.
-        project_environments: Dict of project-environment plugins.
+        project_install_actions: The project-install actions.
+        project_environments: Dict of project plugins.
         manifest_directory: Directory containing the manifest file.
         parameters: Setup parameters.
         event_queue: Queue for progress events.
@@ -1621,12 +1522,12 @@ async def _execute_project_sync_actions(
     """
     results: list[SetupActionResult] = []
 
-    for action in project_sync_actions:
+    for action in project_install_actions:
         ref = _action_ref(action, action_ref_map)
         _emit_started(action, ref, event_queue)
 
-        with use_trace_context(_action_trace_context('execute', action, ref, operation='project_sync')):
-            result = await _execute_project_sync(
+        with use_trace_context(_action_trace_context('execute', action, ref, operation='project_install')):
+            result = await _execute_project_install(
                 action,
                 project_environments,
                 manifest_directory,
@@ -1638,24 +1539,24 @@ async def _execute_project_sync_actions(
         results.append(result)
         _emit_completed(action, result, ref, event_queue)
         if not result.success and parameters.fail_fast:
-            logger.error(f'Project sync failed: {action.description} - {result.message}')
+            logger.error(f'Project install failed: {action.description} - {result.message}')
             break
 
     return results
 
 
-async def _execute_project_sync(
+async def _execute_project_install(
     action: SetupAction,
-    project_environments: dict[str, ProjectEnvironment] | None,
+    project_environments: dict[str, ProjectInstaller] | None,
     manifest_directory: Path,
     parameters: SetupParameters,
     *,
     event_queue: asyncio.Queue[ProgressEvent | None],
     runtime_context: RuntimeContext | None = None,
 ) -> SetupActionResult:
-    """Execute a single PROJECT_SYNC action.
+    """Execute a single project-install action.
 
-    The sync command is always run via ``run_command`` with progress so that
+    The install command is always run via ``run_command`` with progress so that
     stdout/stderr lines are emitted as action progress
     events in real time.
 
@@ -1667,15 +1568,15 @@ async def _execute_project_sync(
     and a warning is logged.
 
     Args:
-        action: The project sync action.
-        project_environments: Dict of project-environment plugins.
+        action: The project-install action.
+        project_environments: Dict of project plugins.
         manifest_directory: Directory containing the manifest file.
         parameters: Setup parameters.
         event_queue: Queue for progress events.
         runtime_context: Resolved runtime paths for this execution run.
 
     Returns:
-        The result of the sync operation.
+        The result of the project-install operation.
     """
     proj_envs = project_environments or {}
 
@@ -1710,14 +1611,14 @@ async def _execute_project_sync(
             marker = type(proj_env).project_marker()
             if marker is not None:
                 logger.warning(
-                    "No '%s' found in ancestors of %s; falling back to manifest directory for %s project sync",
+                    "No '%s' found in ancestors of %s; falling back to manifest directory for %s project install",
                     marker,
                     manifest_directory,
                     proj_env.ecosystem(),
                 )
 
     try:
-        return await _run_project_sync_steps(
+        return await _run_project_install_steps(
             action,
             proj_env,
             effective_dir,
@@ -1728,15 +1629,15 @@ async def _execute_project_sync(
         return SetupActionResult(action=action, success=False, message=str(e))
 
 
-async def _run_project_sync_steps(
+async def _run_project_install_steps(
     action: SetupAction,
-    proj_env: ProjectEnvironment,
+    proj_env: ProjectInstaller,
     effective_dir: Path,
     event_queue: asyncio.Queue[ProgressEvent | None],
     *,
     runtime_context: RuntimeContext | None = None,
 ) -> SetupActionResult:
-    """Run the resolved project-sync steps and return their outcome."""
+    """Run the resolved project-install steps and return their outcome."""
     # Always observe output: build the CLI steps from the plugin and
     # run them via run_command for line-by-line progress.
     plan = type(proj_env).command_plan(effective_dir, runtime_context=runtime_context)
@@ -1746,7 +1647,7 @@ async def _run_project_sync_steps(
     progress = CommandProgress(
         action=action,
         callback=_make_progress_callback(action, event_queue),
-        phase='sync',
+        phase='install',
     )
 
     success = True
@@ -1760,12 +1661,12 @@ async def _run_project_sync_steps(
         return SetupActionResult(
             action=action,
             success=True,
-            message=f'Synced project via {action.installer}',
+            message=f'Installed project via {action.installer}',
         )
     return SetupActionResult(
         action=action,
         success=False,
-        message=f'Project sync failed via {action.installer}',
+        message=f'Project install failed via {action.installer}',
     )
 
 

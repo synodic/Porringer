@@ -61,8 +61,6 @@ def _progress_label(strategy: SyncStrategy) -> str:
     """Get the progress label based on sync strategy."""
     if strategy == SyncStrategy.LATEST:
         return 'Upgrading packages...'
-    if strategy == SyncStrategy.EXACT:
-        return 'Ensuring packages...'
     return 'Syncing packages...'
 
 
@@ -206,9 +204,7 @@ def _display_summary(
     if results.success:
         skip_msg = f', {skipped} skipped' if skipped else ''
         # Use strategy to determine the verb
-        detail = (
-            f'{succeeded} upgraded' if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT} else f'{succeeded} synced'
-        )
+        detail = f'{succeeded} upgraded' if strategy == SyncStrategy.LATEST else f'{succeeded} synced'
         configuration.output.print(
             Panel(
                 f'[success]Complete![/success] {detail}{skip_msg}.',

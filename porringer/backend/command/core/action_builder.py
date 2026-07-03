@@ -13,7 +13,7 @@ from pathlib import Path
 from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.plugin_manager import find_plugin_manager
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.schema import (
     ManifestMetadata,
@@ -43,7 +43,6 @@ PHASE_ORDER: list[PluginKind] = [
 STRATEGY_VERB: dict[SyncStrategy, str] = {
     SyncStrategy.MINIMAL: 'Install',
     SyncStrategy.LATEST: 'Upgrade',
-    SyncStrategy.EXACT: 'Ensure',
 }
 
 
@@ -100,7 +99,7 @@ def action_description(
 def _get_plugin_cli_command(
     action: SetupAction,
     strategy: SyncStrategy,
-    project_environments: dict[str, ProjectEnvironment] | None,
+    project_environments: dict[str, ProjectInstaller] | None,
 ) -> list[str]:
     """Return the native CLI command for a plugin-management action.
 
@@ -114,7 +113,7 @@ def _get_plugin_cli_command(
     manager = find_plugin_manager(action.plugin_target.name, project_environments)
     if manager is None or action.package is None:
         return []
-    if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
+    if strategy == SyncStrategy.LATEST:
         return manager.plugin_upgrade_command(action.package, include_prereleases=action.include_prereleases)
     return manager.plugin_install_command(action.package, include_prereleases=action.include_prereleases)
 
@@ -145,14 +144,14 @@ def get_cli_command(
                 env = environments[action.installer]
                 if action.plugin_target is not None:
                     cmd = _get_plugin_cli_command(action, strategy, project_environments)
-                elif strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
+                elif strategy == SyncStrategy.LATEST:
                     cmd = env.upgrade_command(action.package, include_prereleases=action.include_prereleases)
                 else:
                     cmd = env.install_command(action.package, include_prereleases=action.include_prereleases)
         case PluginKind.PROJECT:
             proj_envs = project_environments or {}
             if action.installer and action.installer in proj_envs:
-                cmd = proj_envs[action.installer].sync_command()
+                cmd = proj_envs[action.installer].project_install_command()
         case PluginKind.SCM:
             scm_envs = scm_environments or {}
             if action.installer and action.package and action.installer in scm_envs:
@@ -161,37 +160,6 @@ def get_cli_command(
         case None:
             pass
     return tuple(cmd)
-
-
-def get_uninstall_cli_command(
-    action: SetupAction,
-    plugins: DiscoveredPlugins,
-) -> list[str]:
-    """Gets the CLI command for an uninstall action.
-
-    Args:
-        action: The action to get the uninstall command for.
-        plugins: Discovered plugin container.
-
-    Returns:
-        The CLI command as a list of strings, or empty list if not applicable.
-    """
-    environments = plugins.environments
-    project_environments = plugins.project_environments
-
-    match action.kind:
-        case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
-            if action.installer and action.package and action.installer in environments:
-                env = environments[action.installer]
-                if action.plugin_target is not None:
-                    manager = find_plugin_manager(action.plugin_target.name, project_environments)
-                    if manager is not None and action.package is not None:
-                        return manager.plugin_uninstall_command(action.package)
-                    return []
-                return env.uninstall_command(action.package)
-        case _:
-            pass
-    return []
 
 
 def _log_unresolved(resolver: BackendResolver, kind: PluginKind, ecosystem: Ecosystem) -> None:

@@ -12,7 +12,7 @@ The boundary is intentional: Porringer coordinates package, runtime, repository,
 
 - Declaring packages, CLI tools, language runtimes, and source repositories.
 - Resolving installers per ecosystem through plugins.
-- Resolving project sync through project plugins and repository evidence.
+- Resolving project install through project plugins and repository evidence.
 - Running setup in a deterministic phase order.
 - Inspecting manifests and reporting structured diagnostics before execution.
 - Supporting local manifests, HTTPS setup profiles, and hash-verified downloads.
@@ -25,8 +25,8 @@ The boundary is intentional: Porringer coordinates package, runtime, repository,
 - **Provisioning WSL distributions.** Porringer does not create or configure WSL distributions.
 - **Managing remote machines.** Porringer targets the current machine or session. It is not remote host orchestration.
 
-## Project Sync Policy
+## Project Install Policy
 
-Project-local dependency sync belongs to project-environment plugins, not arbitrary manifest commands. Plugins identify relevant projects from marker files, lock files, and tool-specific configuration. Porringer then selects one project-sync owner per ecosystem.
+Project-local dependency install belongs to project-install plugins, not arbitrary manifest commands. Plugins identify relevant projects from marker files, lock files, and tool-specific configuration. Porringer then selects one project-install owner per ecosystem.
 
 Custom imperative setup remains outside the core manifest. If a workflow needs arbitrary shell commands, keep those commands in the project tool that owns them and let Porringer invoke the tool through its plugin.

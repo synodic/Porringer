@@ -10,12 +10,12 @@ Verifies the framework-enforced guarantees:
 import asyncio
 from pathlib import Path
 from typing import override
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from packaging.version import Version
 
 from porringer.backend.command.core.discovery import DiscoveredPlugins
-from porringer.backend.command.core.execution import ExecutionState, execute_uninstall
+from porringer.backend.command.core.execution import ExecutionState
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
 from porringer.core.schema import (
     Distribution,
@@ -30,7 +30,6 @@ from porringer.schema import (
     ActionCompletedEvent,
     ActionStartedEvent,
     SetupAction,
-    SetupActionResult,
     SetupParameters,
     SetupResults,
 )
@@ -258,121 +257,6 @@ class TestSetupSoftFail:
         assert events[0].action_ref.action_id == '0:0'
         assert events[1].action_ref == events[0].action_ref
         assert events[1].result is results[0]
-
-
-# ---------------------------------------------------------------------------
-# Teardown lifecycle
-# ---------------------------------------------------------------------------
-
-
-class TestTeardown:
-    """teardown() is called after uninstall empties packages()."""
-
-    @staticmethod
-    async def test_teardown_called_when_no_packages_remain() -> None:
-        """Successful uninstall of last package triggers teardown()."""
-        env = _FakeEnvironment()
-        env._packages = []  # empty after uninstall
-
-        action = _action('fake', 'x')
-        environments: dict[str, Environment] = {'fake': env}
-
-        with (
-            patch(
-                'porringer.backend.command.core.execution.resolve_uninstall_operation',
-                new=AsyncMock(
-                    return_value=MagicMock(
-                        operation=MagicMock(spec=object),
-                        message=None,
-                        plugin_manager=None,
-                    )
-                ),
-            ),
-            patch(
-                'porringer.backend.command.core.execution._attempt_operation',
-                new=AsyncMock(return_value=SetupActionResult(action=action, success=True, message='Uninstalled x')),
-            ),
-            patch(
-                'porringer.backend.command.core.execution.forward_version_metadata',
-            ),
-        ):
-            # Must not be a Skip, so we patch isinstance check to return False
-            await execute_uninstall(action, environments, asyncio.Queue())
-
-        assert env.teardown_calls == 1
-
-    @staticmethod
-    async def test_no_teardown_when_packages_remain() -> None:
-        """teardown() is not called when packages() still has entries."""
-        env = _FakeEnvironment()
-        env._packages = [Package(name='other', version='1.0')]
-
-        action = _action('fake', 'x')
-        environments: dict[str, Environment] = {'fake': env}
-
-        with (
-            patch(
-                'porringer.backend.command.core.execution.resolve_uninstall_operation',
-                new=AsyncMock(
-                    return_value=MagicMock(
-                        operation=MagicMock(spec=object),
-                        message=None,
-                        plugin_manager=None,
-                    )
-                ),
-            ),
-            patch(
-                'porringer.backend.command.core.execution._attempt_operation',
-                new=AsyncMock(return_value=SetupActionResult(action=action, success=True, message='Uninstalled x')),
-            ),
-            patch(
-                'porringer.backend.command.core.execution.forward_version_metadata',
-            ),
-        ):
-            await execute_uninstall(action, environments, asyncio.Queue())
-
-        assert env.teardown_calls == 0
-
-    @staticmethod
-    async def test_teardown_failure_is_swallowed() -> None:
-        """A failing teardown() does not propagate — the uninstall result is still returned."""
-
-        class _FailingTeardown(_FakeEnvironment):
-            @override
-            async def teardown(self) -> None:
-                self.teardown_calls += 1
-                msg = 'teardown boom'
-                raise RuntimeError(msg)
-
-        env = _FailingTeardown()
-        env._packages = []
-
-        action = _action('fake', 'x')
-        environments: dict[str, Environment] = {'fake': env}
-
-        with (
-            patch(
-                'porringer.backend.command.core.execution.resolve_uninstall_operation',
-                new=AsyncMock(
-                    return_value=MagicMock(
-                        operation=MagicMock(spec=object),
-                        message=None,
-                        plugin_manager=None,
-                    )
-                ),
-            ),
-            patch(
-                'porringer.backend.command.core.execution._attempt_operation',
-                new=AsyncMock(return_value=SetupActionResult(action=action, success=True, message='Uninstalled x')),
-            ),
-            patch(
-                'porringer.backend.command.core.execution.forward_version_metadata',
-            ),
-        ):
-            # Must not raise
-            result = await execute_uninstall(action, environments, asyncio.Queue())
-
-        assert result.success
 
 
 # ---------------------------------------------------------------------------

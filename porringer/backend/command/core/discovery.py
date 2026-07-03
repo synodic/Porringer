@@ -2,10 +2,11 @@
 
 Plugin discovery helpers.
 
-Provides `discover_plugins` which wraps entry-point discovery and
-instantiation into a single canonical-name-keyed dict.  Extracted from
-the sync module so that both `manifest` and `execution` can import
-it without circular dependencies.
+Provides `discover_all_plugins` which scans the `porringer.environment`
+and `porringer.scm` entry-point groups and partitions them into a
+`DiscoveredPlugins` container.  Extracted from the sync module so that
+both `manifest` and `execution` can import it without circular
+dependencies.
 
 Plugin *scan* results (the ``PluginInformation`` metadata returned by
 ``Builder.find_plugins()``) are cached so that repeatedly calling
@@ -20,14 +21,16 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import cast
 
 from porringer.backend.builder import Builder, PluginInformation
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.manifest import ManifestContributor
 from porringer.core.plugin_schema.plugin_manager import PluginManager
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Plugin
 from porringer.schema.plugin import PluginCapability
 
@@ -36,7 +39,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class DiscoveredPlugins:
-    """Result of discovering all three plugin groups at once.
+    """Result of discovering every plugin at once.
+
+    Plugins live in two entry-point groups: ``porringer.environment``
+    (partitioned by capability into package :attr:`environments` and
+    project-install :attr:`project_environments`) and
+    ``porringer.scm`` (:attr:`scm_environments`). A plugin that both
+    installs packages and implements the project-install capability
+    (e.g. ``uv``) appears in both :attr:`environments` and
+    :attr:`project_environments`.
 
     Provides :attr:`all_plugins` for a merged view and :meth:`copy`
     for creating an independent set of plugin instances.
@@ -49,13 +60,13 @@ class DiscoveredPlugins:
     """
 
     environments: dict[str, Environment]
-    project_environments: dict[str, ProjectEnvironment]
+    project_environments: dict[str, ProjectInstaller]
     scm_environments: dict[str, ScmEnvironment]
 
     # Optional factory metadata — populated by production discovery,
     # omitted by test helpers that construct instances directly.
     _env_infos: list[PluginInformation[Environment]] | None = field(default=None, repr=False)
-    _proj_infos: list[PluginInformation[ProjectEnvironment]] | None = field(default=None, repr=False)
+    _proj_infos: list[PluginInformation[ProjectInstaller]] | None = field(default=None, repr=False)
     _scm_infos: list[PluginInformation[ScmEnvironment]] | None = field(default=None, repr=False)
 
     load_errors: dict[str, str] = field(default_factory=dict, repr=False)
@@ -97,7 +108,7 @@ class DiscoveredPlugins:
         return self.runtime_context
 
     @property
-    def all_plugins(self) -> dict[str, Environment | ProjectEnvironment | ScmEnvironment]:
+    def all_plugins(self) -> dict[str, Environment | ProjectInstaller | ScmEnvironment]:
         """Merged view of every discovered plugin keyed by canonical name."""
         return {**self.environments, **self.project_environments, **self.scm_environments}
 
@@ -174,23 +185,33 @@ def _build_instances[T: Plugin](infos: list[PluginInformation[T]]) -> dict[str, 
 
 def _build_from_infos(
     env_infos: list[PluginInformation[Environment]],
-    proj_infos: list[PluginInformation[ProjectEnvironment]],
+    proj_infos: list[PluginInformation[ProjectInstaller]],
     scm_infos: list[PluginInformation[ScmEnvironment]],
 ) -> DiscoveredPlugins:
     """Construct a ``DiscoveredPlugins`` with fresh instances from cached scan metadata.
 
     Args:
         env_infos: Environment plugin scan results.
-        proj_infos: Project-environment plugin scan results.
+        proj_infos: Project-install plugin scan results.
         scm_infos: SCM-environment plugin scan results.
 
     Returns:
         A fully populated ``DiscoveredPlugins`` carrying both
         instances and their factory metadata.
     """
+    environments = _build_instances(env_infos)
+    project_environments = _build_instances(proj_infos)
+
+    # Capability augmentation: a package plugin (Environment) that also
+    # implements the project-install capability is exposed in both the
+    # package and project dicts so a single plugin can drive both phases.
+    for name, env in environments.items():
+        if isinstance(env, ProjectInstaller):
+            project_environments.setdefault(name, env)
+
     return DiscoveredPlugins(
-        environments=_build_instances(env_infos),
-        project_environments=_build_instances(proj_infos),
+        environments=environments,
+        project_environments=project_environments,
         scm_environments=_build_instances(scm_infos),
         _env_infos=env_infos,
         _proj_infos=proj_infos,
@@ -215,7 +236,7 @@ class _ScanCache:
     """
 
     env_infos: list[PluginInformation[Environment]] | None = None
-    proj_infos: list[PluginInformation[ProjectEnvironment]] | None = None
+    proj_infos: list[PluginInformation[ProjectInstaller]] | None = None
     scm_infos: list[PluginInformation[ScmEnvironment]] | None = None
     timestamp: float = 0.0
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -293,40 +314,58 @@ def _scan_plugins[T: Plugin](
     return Builder.find_plugins(group, base_class, **kwargs)
 
 
-def discover_plugins[T: Plugin](group: str, base_class: type[T], **kwargs: bool) -> dict[str, T]:
-    """Discover and instantiate plugins, returning a name-keyed dict.
+def scan_environment_group() -> tuple[
+    list[PluginInformation[Environment]],
+    list[PluginInformation[ProjectInstaller]],
+    dict[str, str],
+]:
+    """Scan the single ``environment`` entry-point group and partition it.
 
-    Callers that need freshly-installed distributions to be visible
-    should call :func:`invalidate_plugin_cache` first — it handles
-    ``importlib.invalidate_caches()`` so that concurrent scans are
-    never disrupted by a stale-cache flush.
-
-    Args:
-        group: Entry-point group suffix (e.g. `'environment'`).
-        base_class: Expected base class for the plugins.
-        **kwargs: Forwarded to `Builder.find_plugins()`
-            (e.g. `check_dependencies=True`).
+    There is no separate "project" plugin type — ``Environment`` and
+    project-only ``ProjectInstaller`` plugins are all registered under
+    ``porringer.environment``.  A plugin implementing both capabilities
+    (e.g. ``uv``, ``npm``, ``pnpm``) is classified purely as an
+    environment here; its project-install capability is exposed via the
+    capability-augmentation step in :func:`_build_from_infos`.
+    Project-only plugins (``pdm``, ``poetry``) are classified as
+    project installers.
 
     Returns:
-        Dict mapping canonical plugin name to instantiated plugin.
+        Tuple of ``(env_infos, proj_infos, load_errors)``.
     """
-    infos, _errors = _scan_plugins(group, base_class, **kwargs)
-    result = _build_instances(infos)
-    logger.debug('Discovered %d %s plugin(s): %s', len(result), group, sorted(result))
-    return result
+    all_infos, load_errors = _scan_plugins('environment', ToolBasedPlugin, check_dependencies=True)
+
+    env_infos: list[PluginInformation[Environment]] = []
+    proj_infos: list[PluginInformation[ProjectInstaller]] = []
+    for info in all_infos:
+        if issubclass(info.type, Environment):
+            env_infos.append(cast(PluginInformation[Environment], info))
+        elif issubclass(info.type, ProjectInstaller):
+            proj_infos.append(cast(PluginInformation[ProjectInstaller], info))
+        else:
+            logger.warning(
+                "Incompatible plugin '%s' — expected an 'Environment' or 'ProjectInstaller' subclass", info.name
+            )
+
+    return env_infos, proj_infos, load_errors
 
 
 def discover_environments() -> dict[str, Environment]:
     """Discover and build all environment plugins.
 
-    Convenience wrapper around :func:`discover_plugins` for the
-    ``environment`` group with dependency checking enabled.
+    Convenience wrapper around the ``environment`` group scan. Project-only
+    plugins registered in the same group (e.g. ``pdm``, ``poetry``) are
+    excluded without a warning since that is expected — see
+    :func:`scan_environment_group`.
     """
-    return discover_plugins('environment', Environment, check_dependencies=True)
+    env_infos, _proj_infos, _load_errors = scan_environment_group()
+    result = _build_instances(env_infos)
+    logger.debug('Discovered %d environment plugin(s): %s', len(result), sorted(result))
+    return result
 
 
 def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
-    """Discover all three plugin groups in one call.
+    """Discover all plugin groups in one call.
 
     The expensive entry-point scan is cached for :data:`CACHE_TTL`
     seconds.  Plugin *instances* are always constructed fresh so that
@@ -354,12 +393,11 @@ def discover_all_plugins(*, use_cache: bool = False) -> DiscoveredPlugins:
             logger.debug('Plugin scan cache hit — building fresh instances')
             return _build_from_infos(_cache.env_infos, _cache.proj_infos, _cache.scm_infos)
 
-    env_infos, env_errors = _scan_plugins('environment', Environment, check_dependencies=True)
-    proj_infos, proj_errors = _scan_plugins('project_environment', ProjectEnvironment)
+    env_infos, proj_infos, env_proj_errors = scan_environment_group()
     scm_infos, scm_errors = _scan_plugins('scm', ScmEnvironment)
 
     result = _build_from_infos(env_infos, proj_infos, scm_infos)
-    result.load_errors = {**env_errors, **proj_errors, **scm_errors}
+    result.load_errors = {**env_proj_errors, **scm_errors}
     if result.load_errors:
         logger.warning('Plugin load failures: %s', list(result.load_errors))
     logger.info(

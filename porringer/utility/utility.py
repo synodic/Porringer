@@ -6,7 +6,6 @@ Utility definitions.
 import asyncio
 import contextlib
 import os
-import sys
 from collections import deque
 from collections.abc import Callable, Sequence
 from typing import Literal, NamedTuple, cast
@@ -18,7 +17,6 @@ __all__ = [
     'CommandResult',
     'CommandProgress',
     'DEFAULT_COMMAND_OUTPUT_TAIL_LINES',
-    'is_pipx_installation',
     'run_command',
 ]
 
@@ -293,15 +291,3 @@ async def _run_observed_command(
     )
     trace.finish(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
     return result
-
-
-def is_pipx_installation() -> bool:
-    """Check if Porringer is installed via pipx.
-
-    Determines whether the current Python executable is running inside
-    a pipx-managed virtual environment by checking the path structure.
-
-    Returns:
-        True if running in a pipx venv, False otherwise.
-    """
-    return sys.prefix.split(os.sep)[-3:-1] == ['pipx', 'venvs']

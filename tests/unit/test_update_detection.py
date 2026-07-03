@@ -13,8 +13,6 @@ manifest PluginSpec parsing lives in ``test_update_detection_spec.py``.
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from porringer.backend.command.core.presence import inspect_action
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters
 from porringer.core.schema import Ecosystem, Package, PluginKind
@@ -163,16 +161,15 @@ class TestLatestStrategySkip:
     """Verify that LATEST strategy skips packages already at the latest version."""
 
     @staticmethod
-    @pytest.mark.parametrize('strategy', [SyncStrategy.LATEST, SyncStrategy.EXACT])
-    async def test_skips_when_at_latest(strategy: SyncStrategy) -> None:
-        """LATEST and EXACT both SKIP with ALREADY_LATEST when no newer version exists."""
+    async def test_skips_when_at_latest() -> None:
+        """LATEST strategy SKIPs with ALREADY_LATEST when no newer version exists."""
         action = _make_action()
         env = _make_env(
             installed=[Package(name='ruff', version='0.8.0')],
             updates=[Package(name='ruff', version='0.8.0')],  # same version → no update
         )
         envs = {'pip': env}
-        params = SetupParameters(strategy=strategy)
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
 
         result = await inspect_action(action, envs, parameters=params)
 
@@ -182,16 +179,15 @@ class TestLatestStrategySkip:
         assert result.available_version is None
 
     @staticmethod
-    @pytest.mark.parametrize('strategy', [SyncStrategy.LATEST, SyncStrategy.EXACT])
-    async def test_upgrades_when_newer_available(strategy: SyncStrategy) -> None:
-        """LATEST and EXACT both attempt an UPGRADE when a newer version exists."""
+    async def test_upgrades_when_newer_available() -> None:
+        """LATEST strategy attempts an UPGRADE when a newer version exists."""
         action = _make_action()
         env = _make_env(
             installed=[Package(name='ruff', version='0.8.0')],
             updates=[Package(name='ruff', version='0.9.0')],
         )
         envs = {'pip': env}
-        params = SetupParameters(strategy=strategy)
+        params = SetupParameters(strategy=SyncStrategy.LATEST)
 
         result = await inspect_action(action, envs, parameters=params)
 
@@ -515,24 +511,6 @@ class TestUpgradeVersionFields:
         )
         envs = {'pip': env}
         params = SetupParameters(strategy=SyncStrategy.LATEST)
-
-        result = await inspect_action(action, envs, parameters=params)
-
-        assert result.skipped is False
-        assert result.success is True
-        assert result.installed_version == '0.8.0'
-        assert result.available_version == '0.9.0'
-
-    @staticmethod
-    async def test_exact_upgrade_has_version_fields() -> None:
-        """EXACT + installed + newer version → Upgrade result with version metadata."""
-        action = _make_action()
-        env = _make_env(
-            installed=[Package(name='ruff', version='0.8.0')],
-            updates=[Package(name='ruff', version='0.9.0')],
-        )
-        envs = {'pip': env}
-        params = SetupParameters(strategy=SyncStrategy.EXACT)
 
         result = await inspect_action(action, envs, parameters=params)
 

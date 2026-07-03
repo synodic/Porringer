@@ -10,7 +10,7 @@
 
 # Porringer
 
-A CLI and Python API for synchronizing developer environments from a declarative manifest. Porringer reads the packages, tools, runtimes, repositories, and project sync work you want, then delegates the actual work to installed package managers through plugins.
+A CLI and Python API for synchronizing developer environments from a declarative manifest. Porringer reads the packages, tools, runtimes, repositories, and project install work you want, then delegates the actual work to installed package managers through plugins.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![PyPI version](https://img.shields.io/pypi/v/porringer.svg)](https://pypi.org/project/porringer/)
@@ -18,11 +18,11 @@ A CLI and Python API for synchronizing developer environments from a declarative
 ## Features
 
 - Manifest-driven setup from `porringer.json` or `[tool.porringer]` in `pyproject.toml`.
-- Plugin-based installers for Python, Node, system packages, project sync, runtimes, and source repositories.
+- Plugin-based installers for Python, Node, system packages, project install, runtimes, and source repositories.
 - Read-only previews with stable action IDs, command previews, diagnostics, and JSON output.
-- Sync strategies for minimal installs, latest allowed versions, or exact declared constraints.
+- Sync strategies for minimal installs or latest allowed versions.
 - JSONL progress streams, replay records, and trace artifacts for downstream clients.
-- Python APIs for inspection, execution, cached projects, profiles, tools, progress events, and client snapshots.
+- Python APIs for inspection, execution, profiles, tools, progress events, and client snapshots.
 
 ## Quick Start
 

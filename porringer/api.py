@@ -7,13 +7,11 @@ import asyncio
 import logging
 
 from porringer.backend.builder import Builder
-from porringer.backend.cache import DirectoryCacheManager
 from porringer.backend.command.client import ClientCommands
 from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins
 from porringer.backend.command.package import PackageCommands
 from porringer.backend.command.plugin import PluginCommands
 from porringer.backend.command.profile import ProfileCommands
-from porringer.backend.command.project import ProjectCommands
 from porringer.backend.command.self import check_self_updates
 from porringer.backend.command.sync import SyncCommands
 from porringer.backend.command.tool import ToolCommands
@@ -36,7 +34,7 @@ class API:
     """Programmatic interface for Porringer's core operations.
 
     The class exposes stable sub-APIs for manifest inspection and execution,
-    package management, project registration, cached tool operations, and
+    package management, cached tool operations, and
     profile handling.
 
     Cross-cutting helpers live directly on the ``API`` class:
@@ -58,17 +56,14 @@ class API:
         if global_configuration is None:
             global_configuration = GlobalConfiguration()
 
-        configuration = resolve_configuration(local_configuration, global_configuration)
-
-        self._cache = DirectoryCacheManager(configuration.data_directory)
+        resolve_configuration(local_configuration, global_configuration)
 
         self.extension = PluginCommands()
         self.package = PackageCommands()
-        self.sync = SyncCommands(self._cache)
-        self.project = ProjectCommands(self._cache, self.sync)
-        self.tool = ToolCommands(self.sync, self.package)
+        self.sync = SyncCommands()
+        self.tool = ToolCommands(self.sync)
         self.profile = ProfileCommands(self.sync)
-        self.client = ClientCommands(self.project, self.tool)
+        self.client = ClientCommands(self.tool)
 
     # Discover plugins and resolve runtime information.
 
@@ -83,8 +78,8 @@ class API:
         This is the recommended entry-point for GUI callers.  It
         returns a :class:`DiscoveredPlugins` object that can be
         forwarded to every subsequent operation
-        (``api.sync.inspect``, ``api.sync.run``, ``api.package.list``,
-        ``api.package.upgrade``, etc.) so that plugin discovery and
+        (``api.sync.inspect``, ``api.sync.run``, ``api.package.check_updates``,
+        ``api.tool.upgrade_project``, etc.) so that plugin discovery and
         runtime resolution happen exactly once.
 
         Args:

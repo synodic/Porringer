@@ -129,7 +129,7 @@ class TestProjectDirectorySkip:
                 new_callable=AsyncMock,
                 return_value=CommandResult(returncode=0, stdout='', stderr=''),
             ) as mock_run:
-                result = await execution._execute_project_sync(
+                result = await execution._execute_project_install(
                     action,
                     {'mock-project': plugin},
                     root,

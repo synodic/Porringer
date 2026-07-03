@@ -17,7 +17,7 @@ from porringer.backend.command.core.resolution import (
 )
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
 from porringer.core.plugin_schema.plugin_manager import PluginManager
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.schema import (
     Distribution,
     Ecosystem,
@@ -39,7 +39,7 @@ _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0
 
 def _make_plugins(
     environments: dict[str, Environment] | None = None,
-    project_environments: dict[str, ProjectEnvironment] | None = None,
+    project_environments: dict[str, ProjectInstaller] | None = None,
 ) -> DiscoveredPlugins:
     """Build a ``DiscoveredPlugins`` container for test helpers."""
     return DiscoveredPlugins(
@@ -173,7 +173,7 @@ class TestCliCommandPreview:
     def test_native_command_when_plugin_manager_available(self) -> None:
         """get_cli_command returns native command when PluginManager is on PATH."""
         mock_pm = self._make_mock_pm()
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         ref = PackageRef.model_validate('cppython')
 
         action = setup_action('cppython', target='mock-pm')
@@ -190,7 +190,7 @@ class TestCliCommandPreview:
     def test_empty_command_when_plugin_manager_unavailable() -> None:
         """get_cli_command returns empty tuple when PluginManager tool is not on PATH."""
         pdm_env = PDMEnvironment(_MOCK_PARAMS)
-        project_environments: dict[str, ProjectEnvironment] = {'pdmproject': pdm_env}
+        project_environments: dict[str, ProjectInstaller] = {'pdmproject': pdm_env}
 
         action = setup_action('cppython', target='pdm')
         environments: dict[str, Environment] = {'pipx': make_environment()}
@@ -229,7 +229,7 @@ class TestPluginInstallRouting:
 
         action = setup_action('cppython', target='mock-pm')
 
-        project_environments: dict[str, ProjectEnvironment] = {'mockpmproject': mock_pm}
+        project_environments: dict[str, ProjectInstaller] = {'mockpmproject': mock_pm}
         context = ResolutionContext(project_environments=project_environments)
 
         result = await execute_package(action, {}, SyncStrategy.MINIMAL, asyncio.Queue(), context)
