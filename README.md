@@ -20,7 +20,7 @@ A CLI and Python API for synchronizing developer environments from a declarative
 - Manifest-driven setup from `porringer.json` or `[tool.porringer]` in `pyproject.toml`.
 - Plugin-based installers for Python, Node, system packages, project install, runtimes, and source repositories.
 - Read-only previews with stable action IDs, command previews, diagnostics, and JSON output.
-- Sync strategies for minimal installs, latest allowed versions, or exact declared constraints.
+- Sync strategies for minimal installs or latest allowed versions.
 - JSONL progress streams, replay records, and trace artifacts for downstream clients.
 - Python APIs for inspection, execution, profiles, tools, progress events, and client snapshots.
 

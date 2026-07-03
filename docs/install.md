@@ -103,7 +103,6 @@ The field is handled by plugins that implement `PluginManager`, such as `pdm` an
 | --- | --- | --- |
 | `minimal` | default | Install missing packages and leave satisfied packages alone. |
 | `latest` | `--strategy latest` | Upgrade every package to its latest allowed version. |
-| `exact` | `--strategy exact` | Ensure every package satisfies the declared constraint. |
 
 ## Common Usage
 
@@ -111,7 +110,6 @@ The field is handled by plugins that implement `PluginManager`, such as `pdm` an
 porringer install
 porringer install ./my-project
 porringer install ./my-project --strategy latest
-porringer install ./my-project --strategy exact
 ```
 
 Use `--only-action` to run one or more stable action IDs from a previous preview:

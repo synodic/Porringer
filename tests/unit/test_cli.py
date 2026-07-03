@@ -20,8 +20,6 @@ from porringer.schema import (
     ActionCompletedEvent,
     ActionRef,
     ActionStartedEvent,
-    DownloadParameters,
-    DownloadResult,
     PluginInfo,
     SetupAction,
     SetupActionResult,
@@ -248,84 +246,3 @@ class TestCLILoggingLevels:
 
         logger = logging.getLogger('porringer')
         assert logger.level == logging.DEBUG
-
-
-class TestDownloadCLI:
-    """Tests for the ``porringer download`` command."""
-
-    _CUSTOM_TIMEOUT = 60
-
-    @staticmethod
-    def test_successful_download(test_config, tmp_path) -> None:
-        """Successful download prints completion message and exits 0."""
-        destination = tmp_path / 'file.zip'
-        mock_result = DownloadResult(success=True, path=destination, verified=False, size=1024 * 1024)
-
-        runner = CliRunner()
-        with patch('porringer.api.API.download', new=AsyncMock(return_value=mock_result)):
-            result = runner.invoke(app, ['download', 'https://example.com/file.zip', str(destination)], obj=test_config)
-
-        assert result.exit_code == 0
-        assert 'Download complete' in result.output
-
-    @staticmethod
-    def test_failed_download_exits_nonzero(test_config, tmp_path) -> None:
-        """A failed download prints the error and exits with code 1."""
-        destination = tmp_path / 'file.zip'
-        mock_result = DownloadResult(success=False, message='connection refused')
-
-        runner = CliRunner()
-        with patch('porringer.api.API.download', new=AsyncMock(return_value=mock_result)):
-            result = runner.invoke(app, ['download', 'https://example.com/file.zip', str(destination)], obj=test_config)
-
-        assert result.exit_code == 1
-        assert 'connection refused' in result.output
-
-    @staticmethod
-    def test_hash_flag_is_forwarded(test_config, tmp_path) -> None:
-        """--hash is forwarded to DownloadParameters.expected_hash."""
-        destination = tmp_path / 'file.zip'
-        captured: list[DownloadParameters] = []
-
-        async def _capture(params: DownloadParameters, callback=None) -> DownloadResult:
-            captured.append(params)
-            return DownloadResult(success=True, path=destination, verified=True, size=512)
-
-        runner = CliRunner()
-        with patch('porringer.api.API.download', new=AsyncMock(side_effect=_capture)):
-            result = runner.invoke(
-                app,
-                ['download', '--hash', 'sha256:abc123', 'https://example.com/file.zip', str(destination)],
-                obj=test_config,
-            )
-
-        assert result.exit_code == 0
-        assert len(captured) == 1
-        assert captured[0].expected_hash == 'sha256:abc123'
-
-    @staticmethod
-    def test_timeout_flag_is_forwarded(test_config, tmp_path) -> None:
-        """--timeout is forwarded to DownloadParameters.timeout."""
-        destination = tmp_path / 'file.zip'
-        captured: list[DownloadParameters] = []
-
-        async def _capture(params: DownloadParameters, callback=None) -> DownloadResult:
-            captured.append(params)
-            return DownloadResult(success=True, path=destination, size=0)
-
-        runner = CliRunner()
-        with patch('porringer.api.API.download', new=AsyncMock(side_effect=_capture)):
-            result = runner.invoke(
-                app,
-                [
-                    'download',
-                    '--timeout',
-                    str(TestDownloadCLI._CUSTOM_TIMEOUT),
-                    'https://example.com/file.zip',
-                    str(destination),
-                ],
-                obj=test_config,
-            )
-
-        assert result.exit_code == 0
-        assert captured[0].timeout == TestDownloadCLI._CUSTOM_TIMEOUT

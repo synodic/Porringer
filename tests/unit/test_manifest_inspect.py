@@ -101,17 +101,17 @@ class TestInspectStateAware:
 
 @pytest.mark.mock_packages
 class TestSyncStrategyUpgrade:
-    """Tests for LATEST and EXACT sync strategies."""
+    """Tests for the LATEST sync strategy."""
 
     @staticmethod
-    def test_preview_exact_strategy_produces_package_actions(session_api: API) -> None:
-        """Test that preview with EXACT strategy produces PACKAGE actions."""
+    def test_preview_latest_strategy_produces_package_actions(session_api: API) -> None:
+        """Test that preview with LATEST strategy produces PACKAGE actions."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / 'porringer.json'
             manifest_data = {'version': '1', 'packages': {'python': ['requests']}}
             manifest_path.write_text(json.dumps(manifest_data))
 
-            results = parse_manifest(Path(tmpdir), strategy=SyncStrategy.EXACT)
+            results = parse_manifest(Path(tmpdir), strategy=SyncStrategy.LATEST)
 
             assert len(results.actions) == 1
             assert results.actions[0].kind == PluginKind.PACKAGE

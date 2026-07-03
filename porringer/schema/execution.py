@@ -224,13 +224,10 @@ class SyncStrategy(Enum):
              Already-installed packages are left untouched.
     LATEST:  Upgrade every package to its latest allowed version.
              Falls back to install if a package isn't installed.
-    EXACT:   Ensure each package satisfies the declared constraint.
-             Upgrade if installed, install if not.
     """
 
     MINIMAL = auto()
     LATEST = auto()
-    EXACT = auto()
 
 
 class InspectionMode(StrEnum):
@@ -268,7 +265,7 @@ class SetupParameters(PorringerModel):
         ),
     )
     fail_fast: bool = Field(default=True, description='Stop on first error when processing multiple paths')
-    strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal, latest, or exact')
+    strategy: SyncStrategy = Field(default=SyncStrategy.MINIMAL, description='Sync strategy: minimal or latest')
     inspection_mode: InspectionMode = Field(
         default=InspectionMode.COMPLETE,
         description=(

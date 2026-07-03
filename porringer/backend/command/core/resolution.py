@@ -756,7 +756,7 @@ async def _resolve_latest_installed(
     http_client: aiohttp.ClientSession | None,
     runtime_context: RuntimeContext | None,
 ) -> ResolvedOperation:
-    """Resolve a LATEST/EXACT operation for an already-installed package.
+    """Resolve a LATEST operation for an already-installed package.
 
     Queries for a newer version when possible.  Falls back to an
     unconditional upgrade when no update-check environment is available.
@@ -900,7 +900,7 @@ async def _apply_strategy(
             plugin_manager=plugin_manager,
         )
 
-    # LATEST or EXACT strategy
+    # LATEST strategy
     if presence.is_installed:
         return await _resolve_latest_installed(
             action=action,
@@ -911,7 +911,7 @@ async def _apply_strategy(
             runtime_context=runtime_context,
         )
 
-    # Not installed under LATEST/EXACT → fall back to install
+    # Not installed under LATEST → fall back to install
     return ResolvedOperation(
         action=action,
         operation=Install(

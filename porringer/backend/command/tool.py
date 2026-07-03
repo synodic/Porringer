@@ -75,22 +75,6 @@ class ToolCommands:
         report = await self._sync.run(params, plugins=plugins, on_event=on_event)
         return _report_from_batch('upgrade_project', report.results)
 
-    async def upgrade_plugin(
-        self,
-        plugin_name: str,
-        *,
-        include_packages: set[str] | None = None,
-        plugins: DiscoveredPlugins | None = None,
-        on_event: Callable[[ProgressEvent], object] | None = None,
-    ) -> ManagedToolReport:
-        """Upgrade one plugin through the current project's manifest."""
-        return await self.upgrade_project(
-            plugins=plugins,
-            plugin_names={plugin_name},
-            include_packages=include_packages,
-            on_event=on_event,
-        )
-
 
 def _report_from_inspection(operation: str, report: SyncInspectionReport) -> ManagedToolReport:
     """Build a tool report from an inspection report."""

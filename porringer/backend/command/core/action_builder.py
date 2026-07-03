@@ -43,7 +43,6 @@ PHASE_ORDER: list[PluginKind] = [
 STRATEGY_VERB: dict[SyncStrategy, str] = {
     SyncStrategy.MINIMAL: 'Install',
     SyncStrategy.LATEST: 'Upgrade',
-    SyncStrategy.EXACT: 'Ensure',
 }
 
 
@@ -114,7 +113,7 @@ def _get_plugin_cli_command(
     manager = find_plugin_manager(action.plugin_target.name, project_environments)
     if manager is None or action.package is None:
         return []
-    if strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
+    if strategy == SyncStrategy.LATEST:
         return manager.plugin_upgrade_command(action.package, include_prereleases=action.include_prereleases)
     return manager.plugin_install_command(action.package, include_prereleases=action.include_prereleases)
 
@@ -145,7 +144,7 @@ def get_cli_command(
                 env = environments[action.installer]
                 if action.plugin_target is not None:
                     cmd = _get_plugin_cli_command(action, strategy, project_environments)
-                elif strategy in {SyncStrategy.LATEST, SyncStrategy.EXACT}:
+                elif strategy == SyncStrategy.LATEST:
                     cmd = env.upgrade_command(action.package, include_prereleases=action.include_prereleases)
                 else:
                     cmd = env.install_command(action.package, include_prereleases=action.include_prereleases)

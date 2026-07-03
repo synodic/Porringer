@@ -65,10 +65,10 @@ def parse_strategy(configuration: ConsoleConfiguration, strategy: str) -> SyncSt
 
     Exits with :data:`EXIT_FAILURE` when *strategy* is not recognized.
     """
-    strategy_map = {'minimal': SyncStrategy.MINIMAL, 'latest': SyncStrategy.LATEST, 'exact': SyncStrategy.EXACT}
+    strategy_map = {'minimal': SyncStrategy.MINIMAL, 'latest': SyncStrategy.LATEST}
     sync_strategy = strategy_map.get(strategy.lower())
     if sync_strategy is None:
-        configuration.output.error(f"Invalid strategy '{strategy}'. Use: minimal, latest, or exact")
+        configuration.output.error(f"Invalid strategy '{strategy}'. Use: minimal or latest")
         raise typer.Exit(EXIT_FAILURE)
     return sync_strategy
 
@@ -168,7 +168,7 @@ ProjectDirOption = Annotated[
 ]
 StrategyOption = Annotated[
     str,
-    typer.Option('--strategy', '-s', help='Version strategy: minimal, latest, or exact'),
+    typer.Option('--strategy', '-s', help='Version strategy: minimal or latest'),
 ]
 PluginOption = Annotated[
     list[str] | None,

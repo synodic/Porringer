@@ -268,15 +268,6 @@ class TestResolveOperation:
         resolved = await resolve_operation(action, envs, SyncStrategy.LATEST)
         assert isinstance(resolved.operation, Install)
 
-    async def test_exact_installed_upgrades(self) -> None:
-        """EXACT + installed + no newer version -> SKIP (ALREADY_LATEST)."""
-        action = self._make_action()
-        envs = self._make_envs(installed=[Package(name='cppython', version='1.0.0')])
-
-        resolved = await resolve_operation(action, envs, SyncStrategy.EXACT)
-        assert isinstance(resolved.operation, Skip)
-        assert resolved.operation.reason == SkipReason.ALREADY_LATEST
-
     # --- Plugin-management resolution ---
 
     async def test_plugin_minimal_installed_skips(self) -> None:

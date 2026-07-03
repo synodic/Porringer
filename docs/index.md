@@ -14,7 +14,7 @@ Use Porringer when you want one repeatable entry point for setup while still rel
 - Plugin-based installers for Python, Node, system packages, project install, runtimes, and source repositories.
 - Backend resolution: declare an ecosystem such as `python`, and Porringer selects an available installer such as `uv` or `pip`.
 - Read-only previews with stable action IDs, native command previews, diagnostics, and JSON output.
-- Sync strategies for minimal installs, latest allowed versions, or exact declared constraints.
+- Sync strategies for minimal installs or latest allowed versions.
 - Download and profile flows with HTTPS and hash verification.
 - Python APIs for inspection, execution, profiles, tools, progress events, and client snapshots.
 
@@ -26,7 +26,6 @@ Use Porringer when you want one repeatable entry point for setup while still rel
 | `porringer install` | Execute a manifest, setup profile, or install link after confirmation. |
 | `porringer open` | Open a `porringer://` link as a read-only preview. |
 | `porringer check` | Check available package updates through installed plugins. |
-| `porringer download` | Download files with optional hash and size verification. |
 | `porringer plugin list` | List available installer, project, runtime, and SCM plugins. |
 | `porringer env info` | Print local environment and plugin diagnostics. |
 | `porringer schema` | Export the manifest JSON Schema. |
@@ -39,7 +38,7 @@ Use Porringer when you want one repeatable entry point for setup while still rel
 - [Install command](install.md): run environment sync from manifests, profiles, and links.
 - [Preview command](preview.md): inspect planned actions, diagnostics, and JSON reports.
 - [Check command](check.md): query plugins for package updates.
-- [Download command](download.md): download files with verification.
+- [Download API](download.md): download files with hash and size verification from the Python API.
 - [API surface](api.md): use the public Python imports, schemas, and plugin contracts.
 - [Scope and non-goals](scope.md): understand what Porringer does and deliberately leaves to other tools.
 - [Development](development.md): run tests, diagnostics, traces, and performance probes.

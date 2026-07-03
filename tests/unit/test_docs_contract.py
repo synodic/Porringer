@@ -27,7 +27,6 @@ def test_documented_command_index_matches_cli_surface() -> None:
         'porringer install',
         'porringer open',
         'porringer check',
-        'porringer download',
         'porringer env info',
         'porringer schema',
         'porringer self check',
